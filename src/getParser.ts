@@ -1,4 +1,5 @@
 import * as dcmjs from 'dcmjs'
+import { get as _get } from 'lodash'
 import { protectUid as rawProtectUid } from './deidentifyPS315E'
 import { getCsvMapping, TColumnMappings } from './csvMapping'
 import type { TNaturalData } from 'dcmjs'
@@ -32,7 +33,8 @@ export default function getParser(
       // if in hex like "(0008,0100)", convert to text key
       attrName = dcmjs.data.DicomMetaDictionary.dictionary[attrName].name
     }
-    return naturalData[attrName]
+    // Use lodash _get to resolve nested DICOM attribute paths
+    return _get(naturalData, attrName)
   }
 
   function getFilePathComp(
