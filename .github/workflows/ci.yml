@@ -40,4 +40,3 @@ jobs:
         env:
           # HUSKY: 0 # uncomment this to disable husky in the semantic-release step
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # no risk of publishing without the NPM_TOKEN
