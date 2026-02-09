@@ -39,6 +39,10 @@ export type FileScanMsg =
       }
     }
   | {
+      response: 'error'
+      error: string
+    }
+  | {
       response: 'done'
     }
 
@@ -205,80 +209,88 @@ fixupNodeWorkerEnvironment().then(() => {
 })
 
 async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
-  const s3 = await loadS3Client()
+  try {
+    const s3 = await loadS3Client()
 
-  const client = new s3.S3Client({
-    region: bucketOptions.region,
-    credentials: bucketOptions.credentials,
-    endpoint: bucketOptions.endpoint,
-    forcePathStyle: bucketOptions.forcePathStyle,
-  })
-
-  // Page through the S3 bucket listing using ContinuationToken
-  let continuationToken: string | undefined = undefined
-  let fileIndex = 0
-
-  do {
-    const listCommand = new s3.ListObjectsV2Command({
-      Bucket: bucketOptions.bucketName,
-      Prefix: bucketOptions.prefix,
-      ContinuationToken: continuationToken,
+    const client = new s3.S3Client({
+      region: bucketOptions.region,
+      credentials: bucketOptions.credentials,
+      endpoint: bucketOptions.endpoint,
+      forcePathStyle: bucketOptions.forcePathStyle,
     })
 
-    const data = await client.send(listCommand)
+    // Page through the S3 bucket listing using ContinuationToken
+    let continuationToken: string | undefined = undefined
+    let fileIndex = 0
 
-    if (data.Contents) {
-      for (const item of data.Contents) {
-        const fileAnomalies: string[] = []
+    do {
+      const listCommand = new s3.ListObjectsV2Command({
+        Bucket: bucketOptions.bucketName,
+        Prefix: bucketOptions.prefix,
+        ContinuationToken: continuationToken,
+      })
 
-        if (
-          item.Key &&
-          item.Size !== undefined &&
-          (await shouldProcessFileItem(item, fileAnomalies))
-        ) {
-          const prev = previousIndex ? previousIndex[item.Key] : undefined
+      const data = await client.send(listCommand)
 
-          globalThis.postMessage({
-            response: 'file',
-            fileIndex: fileIndex++,
-            fileInfo: {
-              size: item.Size,
-              name: item.Key,
-              path: item.Key,
-              objectKey: item.Key,
-              bucketOptions,
-              kind: 's3',
-            },
-            previousFileInfo: prev,
-          } satisfies FileScanMsg)
+      if (data.Contents) {
+        for (const item of data.Contents) {
+          const fileAnomalies: string[] = []
 
-          fileIndex += 1
-        } else if (fileAnomalies.length > 0) {
-          const prev = previousIndex ? previousIndex[item.Key!] : undefined
-          globalThis.postMessage({
-            response: 'scanAnomalies',
-            fileIndex: fileIndex++,
-            fileInfo: {
-              size: item.Size!,
-              name: item.Key!,
-              path: item.Key!,
-              objectKey: item.Key!,
-              bucketOptions,
-              kind: 's3',
-            },
-            anomalies: fileAnomalies,
-            previousFileInfo: prev,
-          } satisfies FileScanMsg)
+          if (
+            item.Key &&
+            item.Size !== undefined &&
+            (await shouldProcessFileItem(item, fileAnomalies))
+          ) {
+            const prev = previousIndex ? previousIndex[item.Key] : undefined
+
+            globalThis.postMessage({
+              response: 'file',
+              fileIndex: fileIndex++,
+              fileInfo: {
+                size: item.Size,
+                name: item.Key,
+                path: item.Key,
+                objectKey: item.Key,
+                bucketOptions,
+                kind: 's3',
+              },
+              previousFileInfo: prev,
+            } satisfies FileScanMsg)
+
+            fileIndex += 1
+          } else if (fileAnomalies.length > 0) {
+            const prev = previousIndex ? previousIndex[item.Key!] : undefined
+            globalThis.postMessage({
+              response: 'scanAnomalies',
+              fileIndex: fileIndex++,
+              fileInfo: {
+                size: item.Size!,
+                name: item.Key!,
+                path: item.Key!,
+                objectKey: item.Key!,
+                bucketOptions,
+                kind: 's3',
+              },
+              anomalies: fileAnomalies,
+              previousFileInfo: prev,
+            } satisfies FileScanMsg)
+          }
         }
       }
-    }
 
-    // Prepare for next page
-    continuationToken = data.NextContinuationToken as string | undefined
-  } while (continuationToken)
+      // Prepare for next page
+      continuationToken = data.NextContinuationToken as string | undefined
+    } while (continuationToken)
 
-  globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
-  globalThis.close()
+    globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
+  } catch (error) {
+    globalThis.postMessage({
+      response: 'error',
+      error: `S3 bucket scan failed: ${error instanceof Error ? error.message : String(error)}`,
+    } satisfies FileScanMsg)
+  } finally {
+    globalThis.close()
+  }
 }
 
 async function scanDirectory(dir: FileSystemDirectoryHandle) {
@@ -343,9 +355,17 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
     }
   }
 
-  await traverse(dir, dir.name)
-  globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
-  globalThis.close()
+  try {
+    await traverse(dir, dir.name)
+    globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
+  } catch (error) {
+    globalThis.postMessage({
+      response: 'error',
+      error: `Directory scan failed: ${error instanceof Error ? error.message : String(error)}`,
+    } satisfies FileScanMsg)
+  } finally {
+    globalThis.close()
+  }
 }
 
 // This function is identical to scanDirectory but works with real filesystem
@@ -412,7 +432,15 @@ async function scanDirectoryNode(dirPath: string) {
   }
 
   const dirName = await import('path').then((p) => p.basename(dirPath))
-  await traverse(dirPath, dirName)
-  globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
-  globalThis.close()
+  try {
+    await traverse(dirPath, dirName)
+    globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
+  } catch (error) {
+    globalThis.postMessage({
+      response: 'error',
+      error: `Directory scan failed: ${error instanceof Error ? error.message : String(error)}`,
+    } satisfies FileScanMsg)
+  } finally {
+    globalThis.close()
+  }
 }

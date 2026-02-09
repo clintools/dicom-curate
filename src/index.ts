@@ -95,6 +95,19 @@ async function initializeFileListWorker() {
     { type: 'module' },
   )
 
+  fileListWorker.onerror = (error) => {
+    console.error('Scan worker crashed:', error)
+    // Terminate all mapping workers (both idle and active)
+    while (availableMappingWorkers.length) {
+      availableMappingWorkers.pop()!.terminate()
+    }
+    rejectCallback(
+      new Error(
+        `Scan worker crashed: ${error instanceof ErrorEvent ? error.message : String(error)}`,
+      ),
+    )
+  }
+
   fileListWorker.addEventListener(
     'message',
     (event: MessageEvent<FileScanMsg>) => {
@@ -124,6 +137,16 @@ async function initializeFileListWorker() {
         case 'done': {
           console.log('directoryScanFinished')
           directoryScanFinished = true
+          break
+        }
+        case 'error': {
+          console.error('Scan worker error:', event.data.error)
+          fileListWorker.terminate()
+          // Terminate all mapping workers (both idle and active)
+          while (availableMappingWorkers.length) {
+            availableMappingWorkers.pop()!.terminate()
+          }
+          rejectCallback(new Error(event.data.error))
           break
         }
         default: {
@@ -417,6 +440,7 @@ function queueUrlsForMapping(
 }
 
 let progressCallback: ProgressCallback
+let rejectCallback!: (reason: Error) => void
 
 async function curateMany(
   organizeOptions: OrganizeOptions,
@@ -431,6 +455,8 @@ async function curateMany(
         resolve(msg)
       }
     }
+
+    rejectCallback = reject
 
     try {
       // Reset global state to prevent interference between multiple curateMany() calls
