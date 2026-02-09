@@ -169,6 +169,66 @@ async function shouldProcessFileItem(
   }
 }
 
+/**
+ * Node-specific file validation that reads only the bytes needed
+ * instead of loading the entire file into memory.
+ */
+async function shouldProcessFileNode(
+  filePath: string,
+  fileName: string,
+  fileSize: number,
+  fileAnomalies: string[],
+): Promise<boolean> {
+  const allExcludedFiletypes = [
+    ...DEFAULT_EXCLUDED_FILETYPES,
+    ...excludedFiletypes,
+  ]
+
+  try {
+    // Check if the file is in the list of excluded files
+    if (
+      allExcludedFiletypes.some(
+        (excluded) => fileName.toLowerCase() === excluded.toLowerCase(),
+      )
+    ) {
+      fileAnomalies.push(`Skipped excluded file: ${fileName}`)
+      return false
+    }
+
+    // Check filesize - (valid) DICOM files are at least 132 bytes (128-byte preamble + 4-byte signature)
+    if (fileSize < 132) {
+      fileAnomalies.push(
+        `Skipped very small file: ${fileName} (${fileSize} bytes)`,
+      )
+      return false
+    }
+
+    // Check for DICOM signature "DICM" at offset 128 by reading only 4 bytes
+    const fs = await import('fs/promises')
+    const fh = await fs.open(filePath, 'r')
+    try {
+      const buffer = Buffer.alloc(4)
+      await fh.read(buffer, 0, 4, 128)
+      const dicomSignature = buffer.toString('ascii')
+      if (dicomSignature === 'DICM') {
+        return true
+      }
+    } finally {
+      await fh.close()
+    }
+
+    // Don't parse file without DICOM signature
+    fileAnomalies.push(`Skipped file without DICOM signature: ${fileName}`)
+    return false
+  } catch (error) {
+    fileAnomalies.push(
+      `Unable to determine file validity - processing anyway: ${fileName} - ${error}`,
+    )
+    // If vetting process fails, let the parser decide
+    return true
+  }
+}
+
 fixupNodeWorkerEnvironment().then(() => {
   globalThis.addEventListener('message', (event) => {
     switch (event.data.request) {
@@ -388,13 +448,16 @@ async function scanDirectoryNode(dirPath: string) {
       if (entry.isFile() && keepScanning) {
         const filePath = path.join(currentPath, entry.name)
         const stats = await fs.stat(filePath)
-        const fileBuffer = await fs.readFile(filePath)
-        const file = new File([new Uint8Array(fileBuffer)], entry.name, {
-          type: 'application/dicom',
-        })
         const fileAnomalies: string[] = []
 
-        if (await shouldProcessFile(file, fileAnomalies)) {
+        if (
+          await shouldProcessFileNode(
+            filePath,
+            entry.name,
+            stats.size,
+            fileAnomalies,
+          )
+        ) {
           // Send file to processing pipeline
           globalThis.postMessage({
             response: 'file',
