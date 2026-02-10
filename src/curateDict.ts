@@ -55,7 +55,11 @@ export default function curateDict(
     const tagIdPath = convertKeywordPathToTagIdPath(tagPath)
 
     // If the quarantined element has DICOM structure (vr and Value), restore it directly
-    if (quarantinedElement && typeof quarantinedElement === 'object' && 'Value' in (quarantinedElement as Partial<{Value: unknown}>)) {
+    if (
+      quarantinedElement &&
+      typeof quarantinedElement === 'object' &&
+      'Value' in (quarantinedElement as Partial<{ Value: unknown }>)
+    ) {
       // Handle nested paths like "00080413[0].00510014"
       const pathParts = tagIdPath.split('.')
       if (pathParts.length === 2 && pathParts[0].includes('[')) {
@@ -65,14 +69,16 @@ export default function curateDict(
         if (arrayMatch) {
           const [, sequenceTagId, index] = arrayMatch
           let sequence = mappedDicomData.dict[sequenceTagId]
-          
+
           // If the sequence doesn't exist, we need to create it
           if (!sequence) {
             // Create the sequence with the private tag already included
-            const sequenceItemWithPrivateTag = { [privateTagId]: quarantinedElement }
+            const sequenceItemWithPrivateTag = {
+              [privateTagId]: quarantinedElement,
+            }
             sequence = {
               vr: 'SQ',
-              Value: [sequenceItemWithPrivateTag]
+              Value: [sequenceItemWithPrivateTag],
             }
             mappedDicomData.dict[sequenceTagId] = sequence
           } else {
@@ -80,19 +86,22 @@ export default function curateDict(
             if (!sequence.Value) {
               sequence.Value = []
             }
-            
+
             // Ensure we have enough items in the sequence
             while (sequence.Value.length <= parseInt(index)) {
               sequence.Value.push({})
             }
-            
+
             if (sequence && sequence.Value && sequence.Value[parseInt(index)]) {
               // Ensure the sequence item is properly structured
               const sequenceItem = sequence.Value[parseInt(index)]
-              
+
               if (typeof sequenceItem === 'object' && sequenceItem !== null) {
                 // Create a new object with the private tag included
-                const newSequenceItem = { ...sequenceItem, [privateTagId]: quarantinedElement }
+                const newSequenceItem = {
+                  ...sequenceItem,
+                  [privateTagId]: quarantinedElement,
+                }
                 sequence.Value[parseInt(index)] = newSequenceItem
               }
             }
@@ -107,7 +116,9 @@ export default function curateDict(
       // This is a fallback - ideally all quarantined elements should have proper structure
       _set(mappedDicomData.dict, tagIdPath, {
         vr: 'UN', // Unknown VR for private tags
-        Value: Array.isArray(quarantinedElement) ? quarantinedElement : [quarantinedElement]
+        Value: Array.isArray(quarantinedElement)
+          ? quarantinedElement
+          : [quarantinedElement],
       })
     }
   }

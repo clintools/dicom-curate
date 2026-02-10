@@ -19,8 +19,9 @@ export function isPrivateTag(tagId: string): boolean {
 export function convertKeywordToTagId(keyword: string): string {
   // Use dcmjs built-in conversion for standard DICOM keywords
   // For private tags (which don't have keywords), keep as-is
-  const tagId = isPrivateTag(keyword) ? keyword : 
-    dcmjs.data.DicomMetaDictionary.nameMap[keyword]?.tag || keyword
+  const tagId = isPrivateTag(keyword)
+    ? keyword
+    : dcmjs.data.DicomMetaDictionary.nameMap[keyword]?.tag || keyword
   // Remove parentheses and commas, convert to the format used in dictionary keys
   return tagId.replace(/[(),]/g, '').toLowerCase()
 }
@@ -31,7 +32,7 @@ export function convertKeywordToTagId(keyword: string): string {
 export function convertKeywordPathToTagIdPath(keywordPath: string): string {
   // Handle nested paths like "GeneralMatchingSequence[0].00510014"
   const parts = keywordPath.split('.')
-  const convertedParts = parts.map(part => {
+  const convertedParts = parts.map((part) => {
     const arrayMatch = part.match(/^(.+)\[(\d+)\]$/)
     if (arrayMatch) {
       const [, keyword, index] = arrayMatch
