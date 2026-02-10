@@ -1,3 +1,9 @@
+# [0.17.0](https://github.com/clintools/dicom-curate/compare/v0.16.1...v0.17.0) (2026-02-10)
+
+### Features
+
+- add support for nested path access in getDicom ([0629d2a](https://github.com/clintools/dicom-curate/commit/0629d2ae84504516a642b223fa02da4a1c31fb8f))
+
 ## [0.16.1](https://github.com/bebbi/dicom-curate/compare/v0.16.0...v0.16.1) (2025-12-09)
 
 ### Bug Fixes
