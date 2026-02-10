@@ -1,3 +1,9 @@
+# [0.18.0](https://github.com/clintools/dicom-curate/compare/v0.17.0...v0.18.0) (2026-02-10)
+
+### Features
+
+- lint files and trigger release ([ea0351a](https://github.com/clintools/dicom-curate/commit/ea0351a6443879ec88898baf72d5861f7be4ccb6))
+
 # [0.17.0](https://github.com/clintools/dicom-curate/compare/v0.16.1...v0.17.0) (2026-02-10)
 
 ### Features
