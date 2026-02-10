@@ -1,3 +1,9 @@
+# [0.19.0](https://github.com/clintools/dicom-curate/compare/v0.18.0...v0.19.0) (2026-02-10)
+
+### Features
+
+- trigger semantic-release ([8ed3845](https://github.com/clintools/dicom-curate/commit/8ed3845ac026f4c24a312be4c0c6731c936a4be5))
+
 # [0.18.0](https://github.com/clintools/dicom-curate/compare/v0.17.0...v0.18.0) (2026-02-10)
 
 ### Features

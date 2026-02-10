@@ -1,6 +1,6 @@
 {
   "name": "dicom-curate",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "packageManager": "pnpm@10.15.0",
   "description": "Organize and de-identify DICOM header data ",
   "type": "module",
