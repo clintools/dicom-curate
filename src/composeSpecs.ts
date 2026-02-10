@@ -167,7 +167,9 @@ export function composeSpecs(
     outputFilePathComponents: defaultSpec.outputFilePathComponents,
     errors: defaultSpec.errors,
     hostProps: { ...defaultSpec.hostProps },
-    excludedFiletypes: defaultSpec.excludedFiletypes ? [...defaultSpec.excludedFiletypes] : [],
+    excludedFiletypes: defaultSpec.excludedFiletypes
+      ? [...defaultSpec.excludedFiletypes]
+      : [],
     dicomPS315EOptions: defaultSpec.dicomPS315EOptions,
   }
 

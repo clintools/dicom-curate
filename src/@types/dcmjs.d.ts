@@ -49,7 +49,10 @@ declare module 'dcmjs' {
 
     class DicomMessage {
       constructor(arrayBuffer: ArrayBuffer)
-      static readFile(fileArrayBuffer: ArrayBuffer, options?: ReadFileOptions): DicomDict
+      static readFile(
+        fileArrayBuffer: ArrayBuffer,
+        options?: ReadFileOptions,
+      ): DicomDict
     }
 
     class DicomMetaDictionary {
