@@ -1,6 +1,10 @@
 {
   "name": "dicom-curate",
   "version": "0.19.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clintools/dicom-curate"
+  },
   "packageManager": "pnpm@10.15.0",
   "description": "Organize and de-identify DICOM header data ",
   "type": "module",
