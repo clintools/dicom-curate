@@ -10,6 +10,11 @@ permissions:
   contents: write
   id-token: write
 
+# prevent overlapping releases causing 'branch is behind' failures
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+  
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -35,6 +40,15 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm (required for OIDC)
+        run: npm i -g npm@11
+          
+      - name: Debug npm
+        run: |
+          node -v
+          npm -v
+          npm config get registry
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
