@@ -1,3 +1,9 @@
+# [0.20.0](https://github.com/clintools/dicom-curate/compare/v0.19.0...v0.20.0) (2026-02-10)
+
+### Features
+
+- update repository config in package json for oidc releases ([#208](https://github.com/clintools/dicom-curate/issues/208)) ([46a7af5](https://github.com/clintools/dicom-curate/commit/46a7af5b184abdef432fb7796c7463bff4263257))
+
 # [0.19.0](https://github.com/clintools/dicom-curate/compare/v0.18.0...v0.19.0) (2026-02-10)
 
 ### Features
