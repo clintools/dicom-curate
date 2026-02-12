@@ -316,8 +316,6 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
               },
               previousFileInfo: prev,
             } satisfies FileScanMsg)
-
-            fileIndex += 1
           } else if (fileAnomalies.length > 0) {
             const prev = previousIndex ? previousIndex[item.Key!] : undefined
             globalThis.postMessage({
@@ -354,66 +352,65 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
 }
 
 async function scanDirectory(dir: FileSystemDirectoryHandle) {
-  async function traverse(dir: FileSystemDirectoryHandle, prefix: string) {
-    // First, collect sorted dir entries
-    const entries = []
-
-    for await (const entry of dir.values()) {
-      entries.push(entry)
-    }
-
-    entries.sort((a, b) => a.name.localeCompare(b.name))
-
-    // Assign sorted index to files
+  try {
     let fileIndex = 0
+    async function traverse(dir: FileSystemDirectoryHandle, prefix: string) {
+      // First, collect sorted dir entries
+      const entries = []
 
-    for (const entry of entries) {
-      if (entry.kind === 'file' && keepScanning) {
-        const file = await (entry as FileSystemFileHandle).getFile()
-        const fileAnomalies: string[] = []
+      for await (const entry of dir.values()) {
+        entries.push(entry)
+      }
 
-        if (await shouldProcessFile(file, fileAnomalies)) {
-          // Send file to processing pipeline
-          const key = `${prefix}/${entry.name}`
-          const prev = previousIndex ? previousIndex[key] : undefined
-          globalThis.postMessage({
-            response: 'file',
-            fileIndex: fileIndex++,
-            fileInfo: {
-              path: prefix,
-              name: entry.name,
-              size: file.size,
-              kind: 'handle',
-              fileHandle: entry as FileSystemFileHandle,
-            },
-            previousFileInfo: prev,
-          } satisfies FileScanMsg)
-        } else if (fileAnomalies.length > 0) {
-          // Send scan anomalies as separate messsage so they are not sent to processing (curate)
-          const key = `${prefix}/${entry.name}`
-          const prev = previousIndex ? previousIndex[key] : undefined
-          globalThis.postMessage({
-            response: 'scanAnomalies',
-            fileIndex: fileIndex++,
-            fileInfo: {
-              path: prefix,
-              name: entry.name,
-              size: file.size,
-              kind: 'handle',
-              fileHandle: entry as FileSystemFileHandle,
-            },
-            anomalies: fileAnomalies,
-            previousFileInfo: prev,
-          } satisfies FileScanMsg)
+      entries.sort((a, b) => a.name.localeCompare(b.name))
+
+      for (const entry of entries) {
+        if (entry.kind === 'file' && keepScanning) {
+          const file = await (entry as FileSystemFileHandle).getFile()
+          const fileAnomalies: string[] = []
+
+          if (await shouldProcessFile(file, fileAnomalies)) {
+            // Send file to processing pipeline
+            const key = `${prefix}/${entry.name}`
+            const prev = previousIndex ? previousIndex[key] : undefined
+            globalThis.postMessage({
+              response: 'file',
+              fileIndex: fileIndex++,
+              fileInfo: {
+                path: prefix,
+                name: entry.name,
+                size: file.size,
+                kind: 'handle',
+                fileHandle: entry as FileSystemFileHandle,
+              },
+              previousFileInfo: prev,
+            } satisfies FileScanMsg)
+          } else if (fileAnomalies.length > 0) {
+            // Send scan anomalies as separate messsage so they are not sent to processing (curate)
+            const key = `${prefix}/${entry.name}`
+            const prev = previousIndex ? previousIndex[key] : undefined
+            globalThis.postMessage({
+              response: 'scanAnomalies',
+              fileIndex: fileIndex++,
+              fileInfo: {
+                path: prefix,
+                name: entry.name,
+                size: file.size,
+                kind: 'handle',
+                fileHandle: entry as FileSystemFileHandle,
+              },
+              anomalies: fileAnomalies,
+              previousFileInfo: prev,
+            } satisfies FileScanMsg)
+          }
+        } else if (entry.kind === 'directory' && keepScanning) {
+          await traverse(
+            entry as FileSystemDirectoryHandle,
+            prefix + '/' + entry.name,
+          )
         }
-      } else if (entry.kind === 'directory' && keepScanning) {
-        await traverse(
-          entry as FileSystemDirectoryHandle,
-          prefix + '/' + entry.name,
-        )
       }
     }
-  }
 
   try {
     await traverse(dir, dir.name)
