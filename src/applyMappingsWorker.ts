@@ -49,9 +49,10 @@ fixupNodeWorkerEnvironment().then(() => {
             serializedMappingOptions,
           )
 
+          const fileInfo = event.data.fileInfo
           try {
             curateOne({
-              fileInfo: event.data.fileInfo,
+              fileInfo,
               fileIndex: event.data.fileIndex,
               outputTarget: event.data.outputTarget || {},
               hashMethod: event.data.hashMethod,
@@ -72,10 +73,10 @@ fixupNodeWorkerEnvironment().then(() => {
               })
               .catch((error) => {
                 // also catch promise rejections
-                globalThis.postMessage({ response: 'error', error })
+                globalThis.postMessage({ response: 'error', error, fileInfo })
               })
           } catch (error) {
-            globalThis.postMessage({ response: 'error', error })
+            globalThis.postMessage({ response: 'error', error, fileInfo })
             // no need to throw here, it would terminate the worker
           }
           break

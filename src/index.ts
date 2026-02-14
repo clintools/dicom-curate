@@ -230,8 +230,29 @@ async function initializeMappingWorkers(
         case 'error':
           console.error('Error in mapping worker:', event.data.error)
           availableMappingWorkers.push(mappingWorker)
+
+          const errorMapResults: TMapResults = {
+            sourceInstanceUID: `error_${filesMapped + 1}`,
+            outputFilePath: '',
+            mappings: {},
+            anomalies: [],
+            errors: [event.data.error.toString()],
+            quarantine: {},
+            fileInfo: event.data.fileInfo,
+          }
+
+          mapResultsList?.push(errorMapResults)
           workersActive -= 1
           filesMapped += 1
+
+          progressCallback({
+            response: 'progress',
+            mapResults: errorMapResults,
+            processedFiles: filesMapped,
+            totalFiles: filesToProcess.length + filesMapped + workersActive,
+          })
+          dispatchMappingJobs()
+
           break
         default:
           console.error(`Unknown response from worker ${event.data.response}`)
