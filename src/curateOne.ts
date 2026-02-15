@@ -232,14 +232,21 @@ export async function curateOne({
     return noMapResult()
   }
 
-  // 5) parse DICOM
+  // 5) parse DICOM asynchronously
   dcmjs.log.setLevel(dcmjs.log.levels.ERROR)
   dcmjs.log.getLogger('validation.dcmjs').setLevel(dcmjs.log.levels.SILENT)
   let dicomData
   try {
-    dicomData = dcmjs.data.DicomMessage.readFile(fileArrayBuffer, {
+    const reader = new dcmjs.data.AsyncDicomReader()
+    reader.stream.setData(fileArrayBuffer)
+    await reader.readFile({
       ignoreErrors: true,
     })
+    // Create a DicomMessage-compatible object from the reader results
+    dicomData = {
+      meta: reader.meta,
+      dict: reader.dict,
+    }
   } catch (error) {
     console.warn(
       `[dicom-curate] Could not parse ${fileInfo.name} as DICOM data:`,

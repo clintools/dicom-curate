@@ -39,6 +39,31 @@ declare module 'dcmjs' {
       allowInvalidVRLength?: boolean
     }
 
+    interface AsyncDicomReaderOptions {
+      isLittleEndian?: boolean
+      clearBuffers?: boolean
+      maxFragmentSize?: number
+      listener?: any
+    }
+
+    interface AsyncReadFileOptions {
+      ignoreErrors?: boolean
+      listener?: any
+      maxSizeMeta?: number
+      untilOffset?: number
+    }
+
+    class ReadBufferStream {
+      constructor(
+        data: ArrayBuffer | null,
+        isLittleEndian?: boolean,
+        options?: any,
+      )
+      setData(data: ArrayBuffer): void
+      setEndian(isLittleEndian: boolean): void
+      ensureAvailable(size?: number): Promise<boolean>
+    }
+
     class DicomDict {
       constructor(meta: DicomDataset)
       meta: DicomDataset
@@ -53,6 +78,33 @@ declare module 'dcmjs' {
         fileArrayBuffer: ArrayBuffer,
         options?: ReadFileOptions,
       ): DicomDict
+    }
+
+    class AsyncDicomReader {
+      constructor(options?: AsyncDicomReaderOptions)
+      stream: ReadBufferStream
+      meta: DicomDataset
+      dict: DicomDataset
+      syntax: string
+      readFile(options?: AsyncReadFileOptions): Promise<AsyncDicomReader>
+      readPreamble(): Promise<boolean | symbol>
+      readMeta(options?: AsyncReadFileOptions): Promise<DicomDataset>
+      read(listener: any, options?: AsyncReadFileOptions): Promise<any>
+      readSequence(
+        listener: any,
+        sqTagInfo: any,
+        options?: AsyncReadFileOptions,
+      ): Promise<void>
+      readTagHeader(options?: any): any
+    }
+
+    class DicomMetadataListener {
+      constructor()
+      information?: Record<string, any>
+      addTag(tag: string, tagInfo: any): any
+      value(val: any): void
+      startObject(obj?: any): void
+      pop(): any
     }
 
     class DicomMetaDictionary {

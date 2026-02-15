@@ -20,8 +20,8 @@ importers:
         specifier: ^7.0.1
         version: 7.0.1
       dcmjs:
-        specifier: ^0.38.3
-        version: 0.38.3
+        specifier: ^0.50.0
+        version: 0.50.0
       iso8601-duration:
         specifier: ^2.1.2
         version: 2.1.2
@@ -3572,11 +3572,8 @@ packages:
       }
     engines: { node: '>= 12' }
 
-  dcmjs@0.38.3:
-    resolution:
-      {
-        integrity: sha512-evxUair/D7zI3ilpDI8wTOtVq8OVa1XiMAAVOid99KCPCvXgPIBOLU4VrG4pS3sgqDJRqRcw0pCC8kaMiXNv9A==,
-      }
+  dcmjs@0.50.0:
+    resolution: {integrity: sha512-StzB8L0N0O/Nj37B+YHHnVkXk3kPP7Ru8wBDj+x4FAGg+dE8HNmX7f3qjU4NTxW6TrkfLwFOlkKNzWUglKOAPA==}
 
   debug@4.4.1:
     resolution:
@@ -9674,7 +9671,7 @@ snapshots:
 
   data-uri-to-buffer@4.0.1: {}
 
-  dcmjs@0.38.3:
+  dcmjs@0.50.0:
     dependencies:
       '@babel/runtime-corejs3': 7.28.3
       adm-zip: 0.5.16
