@@ -1,3 +1,9 @@
+## [0.20.2](https://github.com/clintools/dicom-curate/compare/v0.20.1...v0.20.2) (2026-02-18)
+
+### Performance Improvements
+
+- read only 4 bytes for DICOM signature check in Node scanner ([0118264](https://github.com/clintools/dicom-curate/commit/01182640059388b69931645cb4c8acac5e86abcd))
+
 ## [0.20.1](https://github.com/clintools/dicom-curate/compare/v0.20.0...v0.20.1) (2026-02-18)
 
 ### Bug Fixes
