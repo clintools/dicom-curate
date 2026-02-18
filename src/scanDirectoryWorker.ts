@@ -316,8 +316,6 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
               },
               previousFileInfo: prev,
             } satisfies FileScanMsg)
-
-            fileIndex += 1
           } else if (fileAnomalies.length > 0) {
             const prev = previousIndex ? previousIndex[item.Key!] : undefined
             globalThis.postMessage({
@@ -354,6 +352,7 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
 }
 
 async function scanDirectory(dir: FileSystemDirectoryHandle) {
+  let fileIndex = 0
   async function traverse(dir: FileSystemDirectoryHandle, prefix: string) {
     // First, collect sorted dir entries
     const entries = []
@@ -363,9 +362,6 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
     }
 
     entries.sort((a, b) => a.name.localeCompare(b.name))
-
-    // Assign sorted index to files
-    let fileIndex = 0
 
     for (const entry of entries) {
       if (entry.kind === 'file' && keepScanning) {
