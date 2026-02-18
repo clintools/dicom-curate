@@ -1,3 +1,10 @@
+## [0.20.1](https://github.com/clintools/dicom-curate/compare/v0.20.0...v0.20.1) (2026-02-18)
+
+### Bug Fixes
+
+- handle scan worker errors to prevent pipeline deadlock ([229f2ae](https://github.com/clintools/dicom-curate/commit/229f2ae3e9251b62ab11b4c7990d3c0a5d71420f))
+- pass mapping errors back to progress callback ([b9b4087](https://github.com/clintools/dicom-curate/commit/b9b40875d501121375c0a04bd2548ce6904f0e44))
+
 # [0.20.0](https://github.com/clintools/dicom-curate/compare/v0.19.0...v0.20.0) (2026-02-10)
 
 ### Features
