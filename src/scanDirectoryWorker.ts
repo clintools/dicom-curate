@@ -431,71 +431,69 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
 // This function is identical to scanDirectory but works with real filesystem
 // paths instead of FileSystemDirectoryHandles
 async function scanDirectoryNode(dirPath: string) {
-  const fs = await import('fs/promises')
-  const path = await import('path')
-
-  async function traverse(currentPath: string, prefix: string) {
-    // Read directory entries
-    const entries = await fs.readdir(currentPath, { withFileTypes: true })
-
-    // Sort entries by name
-    entries.sort((a, b) => a.name.localeCompare(b.name))
-
-    // Assign sorted index to files
+  try {
+    const fs = await import('fs/promises')
+    const path = await import('path')
     let fileIndex = 0
 
-    for (const entry of entries) {
-      if (entry.isFile() && keepScanning) {
-        const filePath = path.join(currentPath, entry.name)
-        const stats = await fs.stat(filePath)
-        const fileAnomalies: string[] = []
+    async function traverse(currentPath: string, prefix: string) {
+      // Read directory entries
+      const entries = await fs.readdir(currentPath, { withFileTypes: true })
 
-        if (
-          await shouldProcessFileNode(
-            filePath,
-            entry.name,
-            stats.size,
-            fileAnomalies,
+      // Sort entries by name
+      entries.sort((a, b) => a.name.localeCompare(b.name))
+
+      for (const entry of entries) {
+        if (entry.isFile() && keepScanning) {
+          const filePath = path.join(currentPath, entry.name)
+          const stats = await fs.stat(filePath)
+          const fileAnomalies: string[] = []
+
+          if (
+            await shouldProcessFileNode(
+              filePath,
+              entry.name,
+              stats.size,
+              fileAnomalies,
+            )
+          ) {
+            // Send file to processing pipeline
+            globalThis.postMessage({
+              response: 'file',
+              fileIndex: fileIndex++,
+              fileInfo: {
+                path: prefix,
+                name: entry.name,
+                size: stats.size,
+                kind: 'path',
+                fullPath: filePath,
+              },
+            } satisfies FileScanMsg)
+          } else if (fileAnomalies.length > 0) {
+            // Send scan anomalies as separate messsage so they are not sent to processing (curate)
+            globalThis.postMessage({
+              response: 'scanAnomalies',
+              fileIndex: fileIndex++,
+              fileInfo: {
+                path: prefix,
+                name: entry.name,
+                size: stats.size,
+                kind: 'path',
+                fullPath: filePath,
+              },
+              anomalies: fileAnomalies,
+            } satisfies FileScanMsg)
+          }
+        } else if (entry.isDirectory() && keepScanning) {
+          await traverse(
+            path.join(currentPath, entry.name),
+            prefix + '/' + entry.name,
           )
-        ) {
-          // Send file to processing pipeline
-          globalThis.postMessage({
-            response: 'file',
-            fileIndex: fileIndex++,
-            fileInfo: {
-              path: prefix,
-              name: entry.name,
-              size: stats.size,
-              kind: 'path',
-              fullPath: filePath,
-            },
-          } satisfies FileScanMsg)
-        } else if (fileAnomalies.length > 0) {
-          // Send scan anomalies as separate messsage so they are not sent to processing (curate)
-          globalThis.postMessage({
-            response: 'scanAnomalies',
-            fileIndex: fileIndex++,
-            fileInfo: {
-              path: prefix,
-              name: entry.name,
-              size: stats.size,
-              kind: 'path',
-              fullPath: filePath,
-            },
-            anomalies: fileAnomalies,
-          } satisfies FileScanMsg)
         }
-      } else if (entry.isDirectory() && keepScanning) {
-        await traverse(
-          path.join(currentPath, entry.name),
-          prefix + '/' + entry.name,
-        )
       }
     }
-  }
 
-  const dirName = await import('path').then((p) => p.basename(dirPath))
-  try {
+    const dirName = await import('path').then((p) => p.basename(dirPath))
     await traverse(dirPath, dirName)
     globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
   } catch (error) {
