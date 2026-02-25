@@ -34,6 +34,14 @@ export default [
     },
   },
   {
+    files: ['cli/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
     files: ['**/*.test.ts', '**/*.spec.ts'],
     languageOptions: {
       globals: {
