@@ -463,62 +463,68 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
 // This function is identical to scanDirectory but works with real filesystem
 // paths instead of FileSystemDirectoryHandles
 async function scanDirectoryNode(dirPath: string) {
-  const fs = await import('fs/promises')
-  const path = await import('path')
+  try {
+    const fs = await import('fs/promises')
+    const path = await import('path')
 
-  async function traverse(currentPath: string, prefix: string): Promise<void> {
-    const entries = await fs.readdir(currentPath, { withFileTypes: true })
+    async function traverse(currentPath: string, prefix: string): Promise<void> {
+      const entries = await fs.readdir(currentPath, { withFileTypes: true })
+      entries.sort((a, b) => a.name.localeCompare(b.name))
 
-    for (const entry of entries) {
-      if (!keepScanning) return
-      if (entry.isFile()) {
-        const filePath = path.join(currentPath, entry.name)
-        const stats = await fs.stat(filePath)
-        const fileAnomalies: string[] = []
+      for (const entry of entries) {
+        if (!keepScanning) return
+        if (entry.isFile()) {
+          const filePath = path.join(currentPath, entry.name)
+          const stats = await fs.stat(filePath)
+          const fileAnomalies: string[] = []
+          const key = `${prefix}/${entry.name}`
 
-        if (
-          await shouldProcessFileNode(
-            filePath,
-            entry.name,
-            stats.size,
-            fileAnomalies,
-            `${prefix}/${entry.name}`,
+          if (
+            await shouldProcessFileNode(
+              filePath,
+              entry.name,
+              stats.size,
+              fileAnomalies,
+              key,
+            )
+          ) {
+            const prev = previousIndex ? previousIndex[key] : undefined
+            globalThis.postMessage({
+              response: 'file',
+              fileInfo: {
+                path: prefix,
+                name: entry.name,
+                size: stats.size,
+                kind: 'path',
+                fullPath: filePath,
+              },
+              previousFileInfo: prev,
+            } satisfies FileScanMsg)
+          } else if (fileAnomalies.length > 0) {
+            const prev = previousIndex ? previousIndex[key] : undefined
+            globalThis.postMessage({
+              response: 'scanAnomalies',
+              fileInfo: {
+                path: prefix,
+                name: entry.name,
+                size: stats.size,
+                kind: 'path',
+                fullPath: filePath,
+              },
+              anomalies: fileAnomalies,
+              previousFileInfo: prev,
+            } satisfies FileScanMsg)
+          }
+        } else if (entry.isDirectory()) {
+          await traverse(
+            path.join(currentPath, entry.name),
+            prefix + '/' + entry.name,
           )
-        ) {
-          globalThis.postMessage({
-            response: 'file',
-            fileInfo: {
-              path: prefix,
-              name: entry.name,
-              size: stats.size,
-              kind: 'path',
-              fullPath: filePath,
-            },
-          } satisfies FileScanMsg)
-        } else if (fileAnomalies.length > 0) {
-          globalThis.postMessage({
-            response: 'scanAnomalies',
-            fileInfo: {
-              path: prefix,
-              name: entry.name,
-              size: stats.size,
-              kind: 'path',
-              fullPath: filePath,
-            },
-            anomalies: fileAnomalies,
-          } satisfies FileScanMsg)
         }
-      } else if (entry.isDirectory()) {
-        await traverse(
-          path.join(currentPath, entry.name),
-          prefix + '/' + entry.name,
-        )
       }
     }
-  }
 
-  const dirName = await import('path').then((p) => p.basename(dirPath))
-  try {
+    const dirName = await import('path').then((p) => p.basename(dirPath))
     await traverse(dirPath, dirName)
     globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
   } catch (error) {
