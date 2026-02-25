@@ -4,6 +4,8 @@ CLI for curating DICOM files: reads from an input directory, applies a **user-su
 
 ## Usage
 
+> **IMPORTANT:** run `pnpm build` before attempting to use the script
+
 ```bash
 node cli/curate.js <input-directory> <output-directory> --spec <path-to-spec> [options]
 ```
