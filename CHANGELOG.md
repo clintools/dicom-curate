@@ -1,3 +1,9 @@
+# [0.21.0](https://github.com/clintools/dicom-curate/compare/v0.20.2...v0.21.0) (2026-02-27)
+
+### Features
+
+- add generic CLI support ([f384202](https://github.com/clintools/dicom-curate/commit/f3842024faf7bb4165c0002315b14b161df7bfe0))
+
 ## [0.20.2](https://github.com/clintools/dicom-curate/compare/v0.20.1...v0.20.2) (2026-02-18)
 
 ### Performance Improvements
