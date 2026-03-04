@@ -394,7 +394,7 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
     entries.sort((a, b) => a.name.localeCompare(b.name))
 
     for (const entry of entries) {
-      if (entry.kind === 'file' && keepScanning) {
+      if (entry.kind === 'file') {
         const file = await (entry as FileSystemFileHandle).getFile()
         const fileAnomalies: string[] = []
 
@@ -438,7 +438,7 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
             previousFileInfo: prev,
           } satisfies FileScanMsg)
         }
-      } else if (entry.kind === 'directory' && keepScanning) {
+      } else if (entry.kind === 'directory') {
         await traverse(
           entry as FileSystemDirectoryHandle,
           prefix + '/' + entry.name,
@@ -477,7 +477,8 @@ async function scanDirectoryNode(dirPath: string) {
     let fileIndex = 0
 
     for (const entry of entries) {
-      if (entry.isFile() && keepScanning) {
+      if (!keepScanning) return
+      if (entry.isFile()) {
         const filePath = path.join(currentPath, entry.name)
         const stats = await fs.stat(filePath)
         const fileAnomalies: string[] = []
@@ -518,7 +519,7 @@ async function scanDirectoryNode(dirPath: string) {
             anomalies: fileAnomalies,
           } satisfies FileScanMsg)
         }
-      } else if (entry.isDirectory() && keepScanning) {
+      } else if (entry.isDirectory()) {
         await traverse(
           path.join(currentPath, entry.name),
           prefix + '/' + entry.name,
