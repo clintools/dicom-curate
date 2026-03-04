@@ -25,7 +25,13 @@ export default [
       ...typescript.configs.recommended.rules,
       // Relax some strict rules for this project
       '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-unused-vars': 'warn',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+        },
+      ],
       '@typescript-eslint/no-unsafe-function-type': 'warn',
       'no-undef': 'error',
       'no-case-declarations': 'warn',
