@@ -56,7 +56,6 @@ const mappingWorkerCount = navigator.hardwareConcurrency
 // Update the type to include scan anomalies
 let filesToProcess: {
   fileInfo: TFileInfo
-  fileIndex: number
   scanAnomalies: string[]
   previousFileInfo?: { size?: number; mtime?: string; preMappedHash?: string }
 }[] = []
@@ -114,9 +113,8 @@ async function initializeFileListWorker() {
     (event: MessageEvent<FileScanMsg>) => {
       switch (event.data.response) {
         case 'file': {
-          const { fileIndex, fileInfo, previousFileInfo } = event.data
+          const { fileInfo, previousFileInfo } = event.data
           filesToProcess.push({
-            fileIndex,
             fileInfo,
             scanAnomalies: [], // Files sent to processing have no scan anomalies
             previousFileInfo,
@@ -297,7 +295,7 @@ async function getHttpOutputHeaders(
 
 async function dispatchMappingJobs() {
   while (filesToProcess.length > 0 && availableMappingWorkers.length > 0) {
-    const { fileInfo, fileIndex, previousFileInfo } = filesToProcess.pop()!
+    const { fileInfo, previousFileInfo } = filesToProcess.pop()!
     const mappingWorker = availableMappingWorkers.pop()!
     const { outputTarget, hashMethod, ...mappingOptions } =
       // Not partial anymore.
@@ -305,7 +303,6 @@ async function dispatchMappingJobs() {
     mappingWorker.postMessage({
       request: 'apply',
       fileInfo: await getHttpInputHeaders(fileInfo),
-      fileIndex,
       outputTarget: await getHttpOutputHeaders(outputTarget),
       previousFileInfo,
       hashMethod,
@@ -420,7 +417,7 @@ async function collectMappingOptions(
 function queueFilesForMapping(
   organizeOptions: Extract<OrganizeOptions, { inputType: 'files' }>,
 ) {
-  organizeOptions.inputFiles.forEach((inputFile, fileIndex) => {
+  organizeOptions.inputFiles.forEach((inputFile) => {
     const fileInfo: TFileInfo = {
       path: '',
       name: inputFile.name,
@@ -430,7 +427,6 @@ function queueFilesForMapping(
     }
     filesToProcess.push({
       fileInfo,
-      fileIndex,
       scanAnomalies: [],
     })
   })
@@ -441,7 +437,7 @@ function queueFilesForMapping(
 function queueUrlsForMapping(
   organizeOptions: Extract<OrganizeOptions, { inputType: 'http' }>,
 ) {
-  organizeOptions.inputUrls.forEach((inputUrl, fileIndex) => {
+  organizeOptions.inputUrls.forEach((inputUrl) => {
     const fileInfo: TFileInfo = {
       kind: 'http',
       url: inputUrl,
@@ -452,7 +448,6 @@ function queueUrlsForMapping(
     }
     filesToProcess.push({
       fileInfo,
-      fileIndex,
       scanAnomalies: [],
     })
   })

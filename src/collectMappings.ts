@@ -9,7 +9,6 @@ import type { TDicomData, TNaturalData } from 'dcmjs'
 
 export default function collectMappings(
   inputFilePath: string,
-  inputFileIndex: number,
   dicomData: TDicomData,
   mappingOptions: TMappingOptions,
 ): [TNaturalData, TMapResults] {
@@ -33,17 +32,10 @@ export default function collectMappings(
 
   const finalSpec = composeSpecs(mappingOptions.curationSpec())
 
-  // protect filename if we de-identify
-  const finalFilePath =
-    finalSpec.dicomPS315EOptions === 'Off'
-      ? inputFilePath
-      : inputFilePath.slice(0, inputFilePath.lastIndexOf('/') + 1) +
-        `${String(inputFileIndex + 1).padStart(5, '0')}.dcm`
-
   // create a parser object to be used in the eval'ed mappingFunctions
   const parser = getParser(
     finalSpec.inputPathPattern,
-    finalFilePath,
+    inputFilePath,
     naturalData,
     finalSpec.dicomPS315EOptions,
     mappingOptions.columnMappings,
@@ -99,6 +91,13 @@ export default function collectMappings(
       mapResults,
       originalDicomDict: dicomData.dict,
     })
+    // Use mapped Instance UID as output filename when de-identifying (avoid PII in names)
+    const mappedInstanceUID = naturalData.SOPInstanceUID
+    if (mapResults.outputFilePath && mappedInstanceUID) {
+      const parts = mapResults.outputFilePath.split('/')
+      parts[parts.length - 1] = mappedInstanceUID + '.dcm'
+      mapResults.outputFilePath = parts.join('/')
+    }
   }
 
   // Moving this after collectMappingsInData as this should take precedence.
