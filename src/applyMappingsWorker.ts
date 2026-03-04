@@ -14,7 +14,6 @@ export type MappingRequest =
   | {
       request: 'apply'
       fileInfo: TFileInfo
-      fileIndex: number
       outputTarget?: {
         http?: THTTPOptions
         directory?: FileSystemDirectoryHandle | string
@@ -53,7 +52,6 @@ fixupNodeWorkerEnvironment().then(() => {
           try {
             curateOne({
               fileInfo,
-              fileIndex: event.data.fileIndex,
               outputTarget: event.data.outputTarget || {},
               hashMethod: event.data.hashMethod,
               mappingOptions,
