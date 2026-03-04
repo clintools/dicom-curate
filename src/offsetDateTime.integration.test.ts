@@ -83,7 +83,6 @@ describe('Integration tests: Date offsets should only affect instance data, not 
 
     const { dicomData: result } = curateDict(
       'test/file/path.dcm',
-      0,
       testDicomData,
       mappingOptions,
     )
@@ -119,7 +118,6 @@ describe('Integration tests: Date offsets should only affect instance data, not 
 
     const { dicomData: result } = curateDict(
       'test/file/path.dcm',
-      0,
       testDicomData,
       mappingOptions,
     )
@@ -148,7 +146,6 @@ describe('Integration tests: Date offsets should only affect instance data, not 
 
     const { dicomData: result } = curateDict(
       'test/file/path.dcm',
-      0,
       testDicomData,
       mappingOptions,
     )
@@ -183,7 +180,6 @@ describe('Integration tests: Date offsets should only affect instance data, not 
 
     const { dicomData: result } = curateDict(
       'test/file/path.dcm',
-      0,
       testData,
       mappingOptions,
     )
@@ -216,7 +212,6 @@ describe('Integration tests: Date offsets should only affect instance data, not 
 
     const { dicomData: result } = curateDict(
       'test/file/path.dcm',
-      0,
       testData,
       mappingOptions,
     )
@@ -253,7 +248,6 @@ describe('Integration tests: Date offsets should only affect instance data, not 
 
     const { dicomData: result } = curateDict(
       'test/file/path.dcm',
-      0,
       testData,
       mappingOptions,
     )
