@@ -81,7 +81,6 @@ describe('Nested Sequence ID Retention Tests', () => {
 
     const { dicomData: result } = curateDict(
       'test/file/path.dcm',
-      0,
       testData,
       mappingOptions,
     )
@@ -146,7 +145,6 @@ describe('Nested Sequence ID Retention Tests', () => {
 
     const { dicomData: result } = curateDict(
       'test/file/path.dcm',
-      0,
       testData,
       mappingOptions,
     )
@@ -188,7 +186,6 @@ describe('Nested Sequence ID Retention Tests', () => {
 
     const { dicomData: result } = curateDict(
       'test/file/path.dcm',
-      0,
       testData,
       mappingOptions,
     )
@@ -228,7 +225,6 @@ describe('Nested Sequence ID Retention Tests', () => {
 
     const { dicomData: result } = curateDict(
       'test/file/path.dcm',
-      0,
       testData,
       mappingOptions,
     )
