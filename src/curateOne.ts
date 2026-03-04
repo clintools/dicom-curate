@@ -14,7 +14,6 @@ import { loadS3Client } from './s3Client'
 
 export type TCurateOneArgs = {
   fileInfo: TFileInfo
-  fileIndex?: number
   outputTarget: {
     http?: THTTPOptions
     s3?: TS3BucketOptions
@@ -45,7 +44,6 @@ export type TCurateOneArgs = {
 
 export async function curateOne({
   fileInfo,
-  fileIndex = 0,
   outputTarget,
   mappingOptions,
   hashMethod,
@@ -267,12 +265,7 @@ export async function curateOne({
 
   // 6) perform mapping
   const { dicomData: mappedDicomData, mapResults: clonedMapResults } =
-    curateDict(
-      `${fileInfo.path}/${fileInfo.name}`,
-      fileIndex,
-      dicomData,
-      mappingOptions,
-    )
+    curateDict(`${fileInfo.path}/${fileInfo.name}`, dicomData, mappingOptions)
 
   // Indicate that mapping was required (we didn't hit the early-skip branch above)
   // Previously mappingRequired was only set to false when skipping; ensure it's

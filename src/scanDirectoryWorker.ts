@@ -19,7 +19,6 @@ const DEFAULT_EXCLUDED_FILETYPES = [
 export type FileScanMsg =
   | {
       response: 'file'
-      fileIndex: number
       fileInfo: TFileInfo
       previousFileInfo?: {
         size?: number
@@ -29,7 +28,6 @@ export type FileScanMsg =
     }
   | {
       response: 'scanAnomalies'
-      fileIndex: number
       fileInfo: TFileInfo
       anomalies: string[]
       previousFileInfo?: {
@@ -281,7 +279,6 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
 
     // Page through the S3 bucket listing using ContinuationToken
     let continuationToken: string | undefined = undefined
-    let fileIndex = 0
 
     do {
       const listCommand = new s3.ListObjectsV2Command({
@@ -305,7 +302,6 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
 
             globalThis.postMessage({
               response: 'file',
-              fileIndex: fileIndex++,
               fileInfo: {
                 size: item.Size,
                 name: item.Key,
@@ -316,13 +312,10 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
               },
               previousFileInfo: prev,
             } satisfies FileScanMsg)
-
-            fileIndex += 1
           } else if (fileAnomalies.length > 0) {
             const prev = previousIndex ? previousIndex[item.Key!] : undefined
             globalThis.postMessage({
               response: 'scanAnomalies',
-              fileIndex: fileIndex++,
               fileInfo: {
                 size: item.Size!,
                 name: item.Key!,
@@ -354,31 +347,21 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
 }
 
 async function scanDirectory(dir: FileSystemDirectoryHandle) {
-  async function traverse(dir: FileSystemDirectoryHandle, prefix: string) {
-    // First, collect sorted dir entries
-    const entries = []
-
+  async function traverse(
+    dir: FileSystemDirectoryHandle,
+    prefix: string,
+  ): Promise<void> {
     for await (const entry of dir.values()) {
-      entries.push(entry)
-    }
-
-    entries.sort((a, b) => a.name.localeCompare(b.name))
-
-    // Assign sorted index to files
-    let fileIndex = 0
-
-    for (const entry of entries) {
-      if (entry.kind === 'file' && keepScanning) {
+      if (!keepScanning) return
+      if (entry.kind === 'file') {
         const file = await (entry as FileSystemFileHandle).getFile()
         const fileAnomalies: string[] = []
 
         if (await shouldProcessFile(file, fileAnomalies)) {
-          // Send file to processing pipeline
           const key = `${prefix}/${entry.name}`
           const prev = previousIndex ? previousIndex[key] : undefined
           globalThis.postMessage({
             response: 'file',
-            fileIndex: fileIndex++,
             fileInfo: {
               path: prefix,
               name: entry.name,
@@ -389,12 +372,10 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
             previousFileInfo: prev,
           } satisfies FileScanMsg)
         } else if (fileAnomalies.length > 0) {
-          // Send scan anomalies as separate messsage so they are not sent to processing (curate)
           const key = `${prefix}/${entry.name}`
           const prev = previousIndex ? previousIndex[key] : undefined
           globalThis.postMessage({
             response: 'scanAnomalies',
-            fileIndex: fileIndex++,
             fileInfo: {
               path: prefix,
               name: entry.name,
@@ -406,7 +387,7 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
             previousFileInfo: prev,
           } satisfies FileScanMsg)
         }
-      } else if (entry.kind === 'directory' && keepScanning) {
+      } else if (entry.kind === 'directory') {
         await traverse(
           entry as FileSystemDirectoryHandle,
           prefix + '/' + entry.name,
@@ -434,18 +415,12 @@ async function scanDirectoryNode(dirPath: string) {
   const fs = await import('fs/promises')
   const path = await import('path')
 
-  async function traverse(currentPath: string, prefix: string) {
-    // Read directory entries
+  async function traverse(currentPath: string, prefix: string): Promise<void> {
     const entries = await fs.readdir(currentPath, { withFileTypes: true })
 
-    // Sort entries by name
-    entries.sort((a, b) => a.name.localeCompare(b.name))
-
-    // Assign sorted index to files
-    let fileIndex = 0
-
     for (const entry of entries) {
-      if (entry.isFile() && keepScanning) {
+      if (!keepScanning) return
+      if (entry.isFile()) {
         const filePath = path.join(currentPath, entry.name)
         const stats = await fs.stat(filePath)
         const fileAnomalies: string[] = []
@@ -458,10 +433,8 @@ async function scanDirectoryNode(dirPath: string) {
             fileAnomalies,
           )
         ) {
-          // Send file to processing pipeline
           globalThis.postMessage({
             response: 'file',
-            fileIndex: fileIndex++,
             fileInfo: {
               path: prefix,
               name: entry.name,
@@ -471,10 +444,8 @@ async function scanDirectoryNode(dirPath: string) {
             },
           } satisfies FileScanMsg)
         } else if (fileAnomalies.length > 0) {
-          // Send scan anomalies as separate messsage so they are not sent to processing (curate)
           globalThis.postMessage({
             response: 'scanAnomalies',
-            fileIndex: fileIndex++,
             fileInfo: {
               path: prefix,
               name: entry.name,
@@ -485,7 +456,7 @@ async function scanDirectoryNode(dirPath: string) {
             anomalies: fileAnomalies,
           } satisfies FileScanMsg)
         }
-      } else if (entry.isDirectory() && keepScanning) {
+      } else if (entry.isDirectory()) {
         await traverse(
           path.join(currentPath, entry.name),
           prefix + '/' + entry.name,
