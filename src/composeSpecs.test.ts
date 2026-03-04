@@ -61,8 +61,8 @@ function testCurationEquivalence(
     curationSpec: compositeSpec,
   }
 
-  const oldResult = curateDict(filename, 0, sample, defaultTestOptions)
-  const newResult = curateDict(filename, 0, sample, compositeTestOptions)
+  const oldResult = curateDict(filename, sample, defaultTestOptions)
+  const newResult = curateDict(filename, sample, compositeTestOptions)
 
   // Verify both have no errors
   expect(oldResult.mapResults.errors).toHaveLength(0)
@@ -129,15 +129,9 @@ describe('composeSpecs equivalence tests', () => {
       curationSpec: createEquivalentCompositeSpecFrom2Pass(),
     }
 
-    const oldResult = curateDict(
-      passingFilename,
-      0,
-      sample,
-      csv2PassTestOptions,
-    )
+    const oldResult = curateDict(passingFilename, sample, csv2PassTestOptions)
     const newResult = curateDict(
       passingFilename,
-      0,
       sample,
       csv2PassCompositeOptions,
     )

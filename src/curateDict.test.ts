@@ -216,12 +216,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(
-      passingFilename,
-      0,
-      sample,
-      withPrivateTagsRemoved,
-    )
+    const result = curateDict(passingFilename, sample, withPrivateTagsRemoved)
     verifyNoErrors(result)
 
     // Verify private tags are not quarantined
@@ -257,7 +252,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(passingFilename, 0, sample, withRetainedUIDs)
+    const result = curateDict(passingFilename, sample, withRetainedUIDs)
     verifyNoErrors(result)
 
     // Only known UID found in sample data
@@ -292,7 +287,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(passingFilename, 0, sample, optionsWithHashedUIDs)
+    const result = curateDict(passingFilename, sample, optionsWithHashedUIDs)
     verifyNoErrors(result)
 
     // Only known UID found in sample data and its hashed value
@@ -337,7 +332,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(passingFilename, 0, sample, withArbitraryUIDs)
+    const result = curateDict(passingFilename, sample, withArbitraryUIDs)
     verifyNoErrors(result)
 
     // Only known UID found in sample data
@@ -398,7 +393,6 @@ describe('curateDict basic functionality', () => {
 
     const result = curateDict(
       passingFilename,
-      0,
       sample,
       optionsWithAllDescriptorsRemoved,
     )
@@ -477,12 +471,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(
-      passingFilename,
-      0,
-      sample,
-      withoutCleanDescriptors,
-    )
+    const result = curateDict(passingFilename, sample, withoutCleanDescriptors)
     verifyNoErrors(result)
 
     // Find all mappings related to descriptors (ending with Comment, Comments, or Description)
@@ -537,12 +526,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(
-      passingFilename,
-      0,
-      sample,
-      withDescriptorExceptions,
-    )
+    const result = curateDict(passingFilename, sample, withDescriptorExceptions)
     verifyNoErrors(result)
 
     // Verify that excepted descriptors are preserved in the dicomData
@@ -597,7 +581,6 @@ describe('curateDict basic functionality', () => {
 
     const result = curateDict(
       passingFilename,
-      0,
       sample,
       withPatientCharacteristics,
     )
@@ -702,7 +685,6 @@ describe('curateDict basic functionality', () => {
 
     const result = curateDict(
       passingFilename,
-      0,
       sample,
       withRtnInstitutionIdentity,
     )
@@ -742,7 +724,6 @@ describe('curateDict basic functionality', () => {
 
     const result = curateDict(
       passingFilename,
-      0,
       sample,
       withRtnInstitutionIdentity,
     )
@@ -827,7 +808,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(passingFilename, 0, sample, withRtnDeviceIdentity)
+    const result = curateDict(passingFilename, sample, withRtnDeviceIdentity)
     verifyNoErrors(result)
 
     const mappings = result.mapResults.mappings
@@ -874,12 +855,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(
-      passingFilename,
-      0,
-      sample,
-      withoutRtnDeviceIdentity,
-    )
+    const result = curateDict(passingFilename, sample, withoutRtnDeviceIdentity)
     verifyNoErrors(result)
 
     const mappings = result.mapResults.mappings
@@ -924,7 +900,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(passingFilename, 0, sample, withoutTemporalData)
+    const result = curateDict(passingFilename, sample, withoutTemporalData)
     verifyNoErrors(result)
 
     const dict = result.dicomData.dict
@@ -996,7 +972,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(passingFilename, 0, sample, withTemporalData)
+    const result = curateDict(passingFilename, sample, withTemporalData)
     verifyNoErrors(result)
 
     const dict = result.dicomData.dict
@@ -1100,7 +1076,6 @@ describe('curateDict basic functionality', () => {
 
       const result = curateDict(
         passingFilename,
-        0,
         sampleWithSpaces,
         withOffsetTemporalData,
       )
@@ -1138,7 +1113,7 @@ describe('curateDict basic functionality', () => {
       }),
     }
 
-    const result = curateDict(passingFilename, 0, sample, withQuarantineSpec)
+    const result = curateDict(passingFilename, sample, withQuarantineSpec)
     verifyNoErrors(result)
 
     // Verify private tags are quarantined
