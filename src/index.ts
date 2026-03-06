@@ -3,6 +3,7 @@ import { curateOne } from './curateOne'
 import { composeSpecs } from './composeSpecs'
 import { serializeMappingOptions } from './serializeMappingOptions'
 import { iso8601 } from './offsetDateTime'
+import picomatch from 'picomatch'
 
 import type {
   TMappingOptions,
@@ -510,11 +511,18 @@ async function curateMany(
         const curationSpec = composeSpecs(organizeOptions.curationSpec())
         const specExcludedFiletypes = curationSpec.excludedFiletypes
 
+        // Convert glob patterns to regex source strings for the worker.
+        // Globs are matched against the full file path (S3 key or relative filesystem path).
+        const excludedPathRegexes = organizeOptions.excludedPathGlobs?.map(
+          (glob) => picomatch.makeRe(glob).source,
+        )
+
         if (organizeOptions.inputType === 'directory') {
           fileListWorker.postMessage({
             request: 'scan',
             directoryHandle: organizeOptions.inputDirectory,
             excludedFiletypes: specExcludedFiletypes,
+            excludedPathRegexes,
             fileInfoIndex: organizeOptions.fileInfoIndex,
           } satisfies FileScanRequest)
         } else if (organizeOptions.inputType === 's3') {
@@ -522,6 +530,7 @@ async function curateMany(
             request: 'scan',
             bucketOptions: organizeOptions.inputS3Bucket,
             excludedFiletypes: specExcludedFiletypes,
+            excludedPathRegexes,
             fileInfoIndex: organizeOptions.fileInfoIndex,
           } satisfies FileScanRequest)
         } else {
@@ -529,6 +538,7 @@ async function curateMany(
             request: 'scan',
             path: organizeOptions.inputDirectory,
             excludedFiletypes: specExcludedFiletypes,
+            excludedPathRegexes,
             fileInfoIndex: organizeOptions.fileInfoIndex,
           } satisfies FileScanRequest)
         }

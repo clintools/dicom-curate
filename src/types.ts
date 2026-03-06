@@ -48,6 +48,12 @@ export type OrganizeOptions = {
   // optional previous file info map keyed by "path/name"
   // if set, used to determine if mapping can be skipped for files that appear unchanged
   fileInfoIndex?: TFileInfoIndex
+  // Optional glob patterns to exclude files by path during scanning.
+  // Patterns are matched against the full file path (e.g., S3 object key, or
+  // relative path from the input directory root).
+  // Example: ['**/logs/**'] excludes any file under a 'logs' directory.
+  // Uses picomatch glob syntax.
+  excludedPathGlobs?: string[]
 } & (
   | { inputType: 'directory'; inputDirectory: FileSystemDirectoryHandle }
   | { inputType: 'files'; inputFiles: File[] }
