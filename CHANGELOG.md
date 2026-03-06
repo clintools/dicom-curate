@@ -1,3 +1,9 @@
+## [0.22.1](https://github.com/clintools/dicom-curate/compare/v0.22.0...v0.22.1) (2026-03-06)
+
+### Bug Fixes
+
+- correctly concat mapped output path if outputTarget.s3.prefix has no trailing slash ([acffd3a](https://github.com/clintools/dicom-curate/commit/acffd3acd80f97832f98709704c1fb391977f5a6))
+
 # [0.22.0](https://github.com/clintools/dicom-curate/compare/v0.21.0...v0.22.0) (2026-03-06)
 
 ### Features
