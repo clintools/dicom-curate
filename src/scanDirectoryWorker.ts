@@ -51,17 +51,20 @@ export type FileScanRequest =
       request: 'scan'
       directoryHandle: FileSystemDirectoryHandle
       excludedFiletypes?: string[]
+      excludedPathRegexes?: string[]
       fileInfoIndex?: TFileInfoIndex
     }
   | {
       request: 'scan'
       path: string
       excludedFiletypes?: string[]
+      excludedPathRegexes?: string[]
       fileInfoIndex?: TFileInfoIndex
     }
   | {
       request: 'scan'
       excludedFiletypes?: string[]
+      excludedPathRegexes?: string[]
       bucketOptions: TS3BucketOptions
       fileInfoIndex?: TFileInfoIndex
     }
@@ -71,6 +74,8 @@ export type FileScanRequest =
 
 let keepScanning = true
 let excludedFiletypes: string[] = []
+// Compiled regexes from glob patterns, used to exclude files by path
+let excludedPathRegexes: RegExp[] = []
 // optional map of previous file info keyed by "path/name"
 let previousIndex: Record<string, { size?: number; mtime?: string }> | undefined
 
@@ -83,6 +88,7 @@ let previousIndex: Record<string, { size?: number; mtime?: string }> | undefined
 async function shouldProcessFile(
   file: File,
   fileAnomalies: string[],
+  filePath: string,
 ): Promise<boolean> {
   const allExcludedFiletypes = [
     ...DEFAULT_EXCLUDED_FILETYPES,
@@ -90,6 +96,11 @@ async function shouldProcessFile(
   ]
 
   try {
+    // Check if the file path matches any excluded path patterns (silent skip)
+    if (excludedPathRegexes.some((regex) => regex.test(filePath))) {
+      return false
+    }
+
     // Check if the file is in the list of excluded files
     if (
       allExcludedFiletypes.some(
@@ -138,6 +149,11 @@ async function shouldProcessFileItem(
   fileAnomalies: string[],
 ): Promise<boolean> {
   try {
+    // Check if the file path matches any excluded path patterns (silent skip)
+    if (excludedPathRegexes.some((regex) => regex.test(s3Item.Key))) {
+      return false
+    }
+
     // Check if the file is in the list of excluded files
     if (
       excludedFiletypes.some(
@@ -178,6 +194,7 @@ async function shouldProcessFileNode(
   fileName: string,
   fileSize: number,
   fileAnomalies: string[],
+  relativePath: string,
 ): Promise<boolean> {
   const allExcludedFiletypes = [
     ...DEFAULT_EXCLUDED_FILETYPES,
@@ -185,6 +202,11 @@ async function shouldProcessFileNode(
   ]
 
   try {
+    // Check if the file path matches any excluded path patterns (silent skip)
+    if (excludedPathRegexes.some((regex) => regex.test(relativePath))) {
+      return false
+    }
+
     // Check if the file is in the list of excluded files
     if (
       allExcludedFiletypes.some(
@@ -244,6 +266,14 @@ fixupNodeWorkerEnvironment().then(() => {
         // Update excluded filetypes if provided
         if (event.data.excludedFiletypes) {
           excludedFiletypes = event.data.excludedFiletypes
+        }
+        // Compile excluded path regex strings (converted from globs in the main thread)
+        if (event.data.excludedPathRegexes) {
+          excludedPathRegexes = event.data.excludedPathRegexes.map(
+            (pattern: string) => new RegExp(pattern),
+          )
+        } else {
+          excludedPathRegexes = []
         }
         keepScanning = true
 
@@ -372,7 +402,13 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
         const file = await (entry as FileSystemFileHandle).getFile()
         const fileAnomalies: string[] = []
 
-        if (await shouldProcessFile(file, fileAnomalies)) {
+        if (
+          await shouldProcessFile(
+            file,
+            fileAnomalies,
+            `${prefix}/${entry.name}`,
+          )
+        ) {
           // Send file to processing pipeline
           const key = `${prefix}/${entry.name}`
           const prev = previousIndex ? previousIndex[key] : undefined
@@ -456,6 +492,7 @@ async function scanDirectoryNode(dirPath: string) {
             entry.name,
             stats.size,
             fileAnomalies,
+            `${prefix}/${entry.name}`,
           )
         ) {
           // Send file to processing pipeline

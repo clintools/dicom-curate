@@ -41,6 +41,9 @@ importers:
       memize:
         specifier: ^2.1.0
         version: 2.1.1
+      picomatch:
+        specifier: ^4.0.3
+        version: 4.0.3
       uuid:
         specifier: ^11.0.5
         version: 11.1.0
@@ -84,6 +87,9 @@ importers:
       '@types/md5':
         specifier: ^2.3.6
         version: 2.3.6
+      '@types/picomatch':
+        specifier: ^4.0.2
+        version: 4.0.2
       '@types/wicg-file-system-access':
         specifier: ^2023.10.6
         version: 2023.10.6
@@ -1640,6 +1646,9 @@ packages:
 
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
+
+  '@types/picomatch@4.0.2':
+    resolution: {integrity: sha512-qHHxQ+P9PysNEGbALT8f8YOSHW0KJu6l2xU8DYY0fu/EmGxXdVnuTLvFUvBgPJMSqXq29SYHveejeAha+4AYgA==}
 
   '@types/resolve@1.20.2':
     resolution: {integrity: sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q==}
@@ -6236,6 +6245,8 @@ snapshots:
       undici-types: 7.10.0
 
   '@types/normalize-package-data@2.4.4': {}
+
+  '@types/picomatch@4.0.2': {}
 
   '@types/resolve@1.20.2': {}
 
