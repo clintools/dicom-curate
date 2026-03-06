@@ -1,3 +1,9 @@
+# [0.22.0](https://github.com/clintools/dicom-curate/compare/v0.21.0...v0.22.0) (2026-03-06)
+
+### Features
+
+- add excludedPathGlobs option to filter files by path during scanning ([5e064f2](https://github.com/clintools/dicom-curate/commit/5e064f2996599555d1c9090c2584430311b4b603))
+
 # [0.21.0](https://github.com/clintools/dicom-curate/compare/v0.20.2...v0.21.0) (2026-02-27)
 
 ### Features
