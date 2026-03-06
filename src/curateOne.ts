@@ -433,7 +433,12 @@ export async function curateOne({
       })
 
       try {
-        const key = outputTarget.s3.prefix + clonedMapResults.outputFilePath!
+        const prefix = outputTarget.s3.prefix
+          ? outputTarget.s3.prefix.endsWith('/')
+            ? outputTarget.s3.prefix
+            : outputTarget.s3.prefix + '/'
+          : ''
+        const key = prefix + clonedMapResults.outputFilePath!
 
         await client.send(
           new s3.PutObjectCommand({
