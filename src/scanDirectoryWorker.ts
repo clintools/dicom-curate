@@ -44,28 +44,28 @@ export type FileScanMsg =
       response: 'done'
     }
 
+type CommonFileScanRequestFields = {
+  excludedFiletypes?: string[]
+  excludedPathRegexes?: string[]
+  fileInfoIndex?: TFileInfoIndex
+
+  noDefaultExclusions?: boolean
+  noDicomSignatureCheck?: boolean
+}
+
 export type FileScanRequest =
-  | {
+  | ({
       request: 'scan'
       directoryHandle: FileSystemDirectoryHandle
-      excludedFiletypes?: string[]
-      excludedPathRegexes?: string[]
-      fileInfoIndex?: TFileInfoIndex
-    }
-  | {
+    } & CommonFileScanRequestFields)
+  | ({
       request: 'scan'
       path: string
-      excludedFiletypes?: string[]
-      excludedPathRegexes?: string[]
-      fileInfoIndex?: TFileInfoIndex
-    }
-  | {
+    } & CommonFileScanRequestFields)
+  | ({
       request: 'scan'
-      excludedFiletypes?: string[]
-      excludedPathRegexes?: string[]
       bucketOptions: TS3BucketOptions
-      fileInfoIndex?: TFileInfoIndex
-    }
+    } & CommonFileScanRequestFields)
   | {
       request: 'stop'
     }
@@ -74,6 +74,8 @@ let keepScanning = true
 let excludedFiletypes: string[] = []
 // Compiled regexes from glob patterns, used to exclude files by path
 let excludedPathRegexes: RegExp[] = []
+let noDicomSignatureCheck = false
+let noDefaultExclusions = false
 // optional map of previous file info keyed by "path/name"
 let previousIndex: Record<string, { size?: number; mtime?: string }> | undefined
 
@@ -89,7 +91,7 @@ async function shouldProcessFile(
   filePath: string,
 ): Promise<boolean> {
   const allExcludedFiletypes = [
-    ...DEFAULT_EXCLUDED_FILETYPES,
+    ...(noDefaultExclusions ? [] : DEFAULT_EXCLUDED_FILETYPES),
     ...excludedFiletypes,
   ]
 
@@ -108,6 +110,11 @@ async function shouldProcessFile(
       fileAnomalies.push(`Skipped excluded file: ${file.name}`)
       return false
     }
+
+    if (noDicomSignatureCheck) {
+      return true
+    }
+    // Only DICOM checks below this point
 
     // Check filesize - (valid) DICOM files are at least 132 bytes (128-byte preamble + 4-byte signature)
     if (file.size < 132) {
@@ -162,6 +169,11 @@ async function shouldProcessFileItem(
       return false
     }
 
+    if (noDicomSignatureCheck) {
+      return true
+    }
+    // Only DICOM checks below this point
+
     // Check filesize - (valid) DICOM files are at least 132 bytes (128-byte preamble + 4-byte signature)
     if (s3Item.Size < 132) {
       fileAnomalies.push(
@@ -195,7 +207,7 @@ async function shouldProcessFileNode(
   relativePath: string,
 ): Promise<boolean> {
   const allExcludedFiletypes = [
-    ...DEFAULT_EXCLUDED_FILETYPES,
+    ...(noDefaultExclusions ? [] : DEFAULT_EXCLUDED_FILETYPES),
     ...excludedFiletypes,
   ]
 
@@ -214,6 +226,11 @@ async function shouldProcessFileNode(
       fileAnomalies.push(`Skipped excluded file: ${fileName}`)
       return false
     }
+
+    if (noDicomSignatureCheck) {
+      return true
+    }
+    // Only DICOM checks below this point
 
     // Check filesize - (valid) DICOM files are at least 132 bytes (128-byte preamble + 4-byte signature)
     if (fileSize < 132) {
@@ -273,6 +290,8 @@ fixupNodeWorkerEnvironment().then(() => {
         } else {
           excludedPathRegexes = []
         }
+        noDicomSignatureCheck = event.data.noDicomSignatureCheck ?? false
+        noDefaultExclusions = event.data.noDefaultExclusions ?? false
         keepScanning = true
 
         if ('path' in eventData) {

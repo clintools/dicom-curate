@@ -17,6 +17,7 @@ import type {
   TFileInfoIndex,
   THashMethod,
   TS3BucketOptions,
+  TCurationSpecification,
 } from './types'
 
 import type { FileScanMsg, FileScanRequest } from './scanDirectoryWorker'
@@ -375,8 +376,13 @@ async function collectMappingOptions(
   //
   const curationSpec = organizeOptions.curationSpec
 
-  const { dicomPS315EOptions: deIdOpts, additionalData } =
-    composeSpecs(curationSpec())
+  let additionalData: TCurationSpecification['additionalData'] | undefined
+  let deIdOpts: TPs315Options | 'Off' = 'Off'
+
+  if (typeof curationSpec === 'function') {
+    ;({ dicomPS315EOptions: deIdOpts, additionalData } =
+      composeSpecs(curationSpec()))
+  }
 
   // Parse the column mappings if the spec requires them and they exist.
   // The need for mapping can come from additionalData or from the
@@ -503,8 +509,18 @@ async function curateMany(
         organizeOptions.inputType === 's3'
       ) {
         const fileListWorker = await initializeFileListWorker()
-        const curationSpec = composeSpecs(organizeOptions.curationSpec())
-        const specExcludedFiletypes = curationSpec.excludedFiletypes
+        let specExcludedFiletypes: string[] | undefined
+        let noDicomSignatureCheck = false
+        let noDefaultExclusions = false
+
+        if (organizeOptions.curationSpec === 'none') {
+          // "none" spec means no curation at all, we just copy everything
+          noDicomSignatureCheck = true
+          noDefaultExclusions = true
+        } else {
+          const curationSpec = composeSpecs(organizeOptions.curationSpec())
+          specExcludedFiletypes = curationSpec.excludedFiletypes
+        }
 
         // Convert glob patterns to regex source strings for the worker.
         // Globs are matched against the full file path (S3 key or relative filesystem path).
@@ -518,6 +534,8 @@ async function curateMany(
             directoryHandle: organizeOptions.inputDirectory,
             excludedFiletypes: specExcludedFiletypes,
             excludedPathRegexes,
+            noDicomSignatureCheck,
+            noDefaultExclusions,
             fileInfoIndex: organizeOptions.fileInfoIndex,
           } satisfies FileScanRequest)
         } else if (organizeOptions.inputType === 's3') {
@@ -527,6 +545,8 @@ async function curateMany(
             excludedFiletypes: specExcludedFiletypes,
             excludedPathRegexes,
             fileInfoIndex: organizeOptions.fileInfoIndex,
+            noDicomSignatureCheck,
+            noDefaultExclusions,
           } satisfies FileScanRequest)
         } else {
           fileListWorker.postMessage({
@@ -535,6 +555,8 @@ async function curateMany(
             excludedFiletypes: specExcludedFiletypes,
             excludedPathRegexes,
             fileInfoIndex: organizeOptions.fileInfoIndex,
+            noDicomSignatureCheck,
+            noDefaultExclusions,
           } satisfies FileScanRequest)
         }
       } else if (organizeOptions.inputType === 'files') {
