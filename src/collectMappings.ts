@@ -25,6 +25,13 @@ export default function collectMappings(
     quarantine: {},
   }
 
+  if (mappingOptions.curationSpec === 'none') {
+    return [
+      dcmjs.data.DicomMetaDictionary.naturalizeDataset(dicomData.dict),
+      mapResults,
+    ]
+  }
+
   // Make make the naturalized data so parser code operates on with tags not hex
   const naturalData = dcmjs.data.DicomMetaDictionary.naturalizeDataset(
     dicomData.dict,

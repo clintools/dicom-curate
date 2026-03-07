@@ -5,7 +5,9 @@ export function serializeMappingOptions(
   mappingOptions: TMappingOptions,
 ): TSerializedMappingOptions {
   // throw on invalid curation spec
-  assertNoClosure(mappingOptions.curationSpec)
+  if (typeof mappingOptions.curationSpec === 'function') {
+    assertNoClosure(mappingOptions.curationSpec)
+  }
 
   const { curationSpec, ...rest } = mappingOptions
   const curationSpecStr = curationSpec.toString()
@@ -17,6 +19,11 @@ export function deserializeMappingOptions(
   serializedMappingOptions: TSerializedMappingOptions,
 ): TMappingOptions {
   const { curationSpecStr, ...rest } = serializedMappingOptions
+
+  if (curationSpecStr === 'none') {
+    return { ...rest, curationSpec: 'none' }
+  }
+
   const curationSpec = new Function(`return ${curationSpecStr}`)()
 
   return { ...rest, curationSpec }

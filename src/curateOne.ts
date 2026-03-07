@@ -233,52 +233,77 @@ export async function curateOne({
   }
 
   // 5) parse DICOM
-  dcmjs.log.setLevel(dcmjs.log.levels.ERROR)
-  dcmjs.log.getLogger('validation.dcmjs').setLevel(dcmjs.log.levels.SILENT)
-  let dicomData
-  try {
-    dicomData = dcmjs.data.DicomMessage.readFile(fileArrayBuffer, {
-      ignoreErrors: true,
-    })
-  } catch (error) {
-    console.warn(
-      `[dicom-curate] Could not parse ${fileInfo.name} as DICOM data:`,
-      error,
-    )
-    const mapResults = {
-      anomalies: [`Could not parse ${fileInfo.name} as DICOM data`],
-      errors: [
-        `File ${fileInfo.name} is not a valid DICOM file or is corrupted`,
-      ],
-      sourceInstanceUID: `invalid_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+  let mappedDicomData = { write: (...args: any[]) => new ArrayBuffer(0) }
+  let clonedMapResults: TMapResults
+
+  if (mappingOptions.curationSpec !== 'none') {
+    dcmjs.log.setLevel(dcmjs.log.levels.ERROR)
+    dcmjs.log.getLogger('validation.dcmjs').setLevel(dcmjs.log.levels.SILENT)
+    let dicomData
+    try {
+      dicomData = dcmjs.data.DicomMessage.readFile(fileArrayBuffer, {
+        ignoreErrors: true,
+      })
+    } catch (error) {
+      console.warn(
+        `[dicom-curate] Could not parse ${fileInfo.name} as DICOM data:`,
+        error,
+      )
+      const mapResults = {
+        anomalies: [`Could not parse ${fileInfo.name} as DICOM data`],
+        errors: [
+          `File ${fileInfo.name} is not a valid DICOM file or is corrupted`,
+        ],
+        sourceInstanceUID: `invalid_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        fileInfo: {
+          name: fileInfo.name,
+          size: fileInfo.size,
+          path: fileInfo.path,
+          mtime,
+          preMappedHash,
+          parseError: error instanceof Error ? error.message : String(error),
+        },
+        curationTime: performance.now() - startTime,
+      }
+
+      return mapResults
+    }
+
+    // 6) perform mapping
+
+    ;({ dicomData: mappedDicomData, mapResults: clonedMapResults } = curateDict(
+      `${fileInfo.path}/${fileInfo.name}`,
+      fileIndex,
+      dicomData,
+      mappingOptions,
+    ))
+
+    // Indicate that mapping was required (we didn't hit the early-skip branch above)
+    // Previously mappingRequired was only set to false when skipping; ensure it's
+    // explicitly set to true when mapping was performed so consumers can rely on
+    // the flag being present in both cases.
+    clonedMapResults.mappingRequired = true
+  } else {
+    // If curationSpec is 'none', we skip all mapping and just pass through the original data with minimal mapResults
+    mappedDicomData = {
+      write: (...args: any[]) => fileArrayBuffer,
+    }
+    clonedMapResults = {
+      sourceInstanceUID: '',
+      mappings: {},
+      anomalies: [],
+      errors: [],
+      quarantine: {},
       fileInfo: {
         name: fileInfo.name,
         size: fileInfo.size,
         path: fileInfo.path,
         mtime,
         preMappedHash,
-        parseError: error instanceof Error ? error.message : String(error),
       },
-      curationTime: performance.now() - startTime,
+      outputFilePath: `${fileInfo.path}/${fileInfo.name}`,
     }
-
-    return mapResults
   }
-
-  // 6) perform mapping
-  const { dicomData: mappedDicomData, mapResults: clonedMapResults } =
-    curateDict(
-      `${fileInfo.path}/${fileInfo.name}`,
-      fileIndex,
-      dicomData,
-      mappingOptions,
-    )
-
-  // Indicate that mapping was required (we didn't hit the early-skip branch above)
-  // Previously mappingRequired was only set to false when skipping; ensure it's
-  // explicitly set to true when mapping was performed so consumers can rely on
-  // the flag being present in both cases.
-  clonedMapResults.mappingRequired = true
 
   // If we didn't compute preMappedHash yet, do it now
   if (!preMappedHash) {

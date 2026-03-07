@@ -30,7 +30,7 @@ export type TFileInfoIndex = Record<
 export type OrganizeOptions = {
   outputDirectory?: FileSystemDirectoryHandle | string
   outputEndpoint?: THTTPOptions | TS3BucketOptions
-  curationSpec: () => TCurationSpecification | SpecPart[]
+  curationSpec: (() => TCurationSpecification | SpecPart[]) | NoneSpecification
   table?: Row[]
   skipWrite?: boolean
   skipModifications?: boolean
@@ -96,7 +96,7 @@ export type TS3BucketOptions = {
 
 export type TMappingOptions = {
   columnMappings?: TColumnMappings
-  curationSpec: () => TCurationSpecification | SpecPart[]
+  curationSpec: (() => TCurationSpecification | SpecPart[]) | NoneSpecification
   skipWrite?: boolean
   skipModifications?: boolean
   skipValidation?: boolean
@@ -239,6 +239,8 @@ type HPPrimitive = string | number | boolean | null | RegExp
 export type HPValue = HPPrimitive | { [k: string]: HPValue } | HPValue[]
 
 export type HostProps = Record<string, HPValue>
+
+export type NoneSpecification = 'none'
 
 export type TCurationSpecification<THost extends HostProps = HostProps> = {
   version: string
