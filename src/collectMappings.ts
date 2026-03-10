@@ -91,11 +91,25 @@ export default function collectMappings(
       mapResults,
       originalDicomDict: dicomData.dict,
     })
-    // Use mapped Instance UID as output filename when de-identifying (avoid PII in names)
+    // if de-identified, use mapped SOP Instance UID as filename (avoid PII)
     const mappedInstanceUID = naturalData.SOPInstanceUID
     if (mapResults.outputFilePath && mappedInstanceUID) {
       const parts = mapResults.outputFilePath.split('/')
       parts[parts.length - 1] = mappedInstanceUID + '.dcm'
+      mapResults.outputFilePath = parts.join('/')
+    }
+  } else if (mapResults.outputFilePath) {
+    // if NOT de-identified: avoid restructure collision (src1/file1, src2/file1 -> tgt/file1 overwrite)
+    // by using original SOP Instance UID as filename when output path differs from input.
+    // When output path === input path (no-op spec), keep original filename.
+    const normaliseFilename = (p: string) =>
+      p.replace(/\/+/g, '/').replace(/^\/|\/$/g, '')
+    if (
+      normaliseFilename(mapResults.outputFilePath) !==
+      normaliseFilename(inputFilePath)
+    ) {
+      const parts = mapResults.outputFilePath.split('/')
+      parts[parts.length - 1] = mapResults.sourceInstanceUID + '.dcm'
       mapResults.outputFilePath = parts.join('/')
     }
   }
