@@ -83,6 +83,15 @@ export default function collectMappings(
       .join('/')
   }
 
+  const rawModality = naturalData.Modality
+  let modalityStr = ''
+  if (typeof rawModality === 'string') {
+    modalityStr = rawModality
+  } else if (Array.isArray(rawModality) && rawModality.length > 0) {
+    modalityStr = String(rawModality[0])
+  }
+  const modality = modalityStr.trim().replace(/\W/g, '') || 'OT'
+
   if (finalSpec.dicomPS315EOptions !== 'Off') {
     deidentifyPS315E({
       naturalData,
@@ -95,7 +104,7 @@ export default function collectMappings(
     const mappedInstanceUID = naturalData.SOPInstanceUID
     if (mapResults.outputFilePath && mappedInstanceUID) {
       const parts = mapResults.outputFilePath.split('/')
-      parts[parts.length - 1] = mappedInstanceUID + '.dcm'
+      parts[parts.length - 1] = `${modality}_${mappedInstanceUID}.dcm`
       mapResults.outputFilePath = parts.join('/')
     }
   } else if (mapResults.outputFilePath) {
@@ -109,7 +118,8 @@ export default function collectMappings(
       normaliseFilename(inputFilePath)
     ) {
       const parts = mapResults.outputFilePath.split('/')
-      parts[parts.length - 1] = mapResults.sourceInstanceUID + '.dcm'
+      parts[parts.length - 1] =
+        `${modality}_${mapResults.sourceInstanceUID}.dcm`
       mapResults.outputFilePath = parts.join('/')
     }
   }
