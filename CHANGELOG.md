@@ -1,3 +1,16 @@
+# [0.23.0](https://github.com/clintools/dicom-curate/compare/v0.22.1...v0.23.0) (2026-03-12)
+
+### Bug Fixes
+
+- **s3:** manage file index iteration ([37f61da](https://github.com/clintools/dicom-curate/commit/37f61da8bbae5a6b4360909706ef5ed7c5efd140))
+- trailing try artefact from rebase ([24efdc3](https://github.com/clintools/dicom-curate/commit/24efdc3dcec7c1640e1854b3ff827275cc1ac7e4))
+
+### Features
+
+- add modality prefix to filenames ([6b841a4](https://github.com/clintools/dicom-curate/commit/6b841a4b05823ea53dc237c4a92ce46ce63ab84f))
+- defend against output file naming collisions ([40462ca](https://github.com/clintools/dicom-curate/commit/40462caa4a0b6d99044da8d717ed6308a3b43233))
+- remove use of fileIndex for output names in favour of instance uiid ([1093d69](https://github.com/clintools/dicom-curate/commit/1093d69de5895210be43d95cea69b1ed304a96c7))
+
 ## [0.22.1](https://github.com/clintools/dicom-curate/compare/v0.22.0...v0.22.1) (2026-03-06)
 
 ### Bug Fixes
