@@ -81,6 +81,10 @@ export default function collectMappings(
     mapResults.outputFilePath = finalSpec
       .outputFilePathComponents(parser)
       .join('/')
+  } else {
+    // When skipping modifications, preserve the input path structure so the
+    // file is written to the output directory with its original relative path.
+    mapResults.outputFilePath = inputFilePath
   }
 
   const rawModality = naturalData.Modality
@@ -92,7 +96,10 @@ export default function collectMappings(
   }
   const modality = modalityStr.trim().replace(/\W/g, '') || 'OT'
 
-  if (finalSpec.dicomPS315EOptions !== 'Off') {
+  if (
+    !mappingOptions.skipModifications &&
+    finalSpec.dicomPS315EOptions !== 'Off'
+  ) {
     deidentifyPS315E({
       naturalData,
       dicomPS315EOptions: finalSpec.dicomPS315EOptions,

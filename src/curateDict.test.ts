@@ -1,3 +1,4 @@
+import * as dcmjs from 'dcmjs'
 import curateDict from './curateDict'
 import { sample } from '../testdata/sample'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
@@ -1146,5 +1147,32 @@ describe('curateDict basic functionality', () => {
     const mappings = result.mapResults.mappings
     expect('00051100' in mappings).toBe(false)
     expect('GeneralMatchingSequence[0].00510014' in mappings).toBe(false)
+  })
+
+  it('should preserve input path and skip de-identification when skipModifications is true', () => {
+    const inputPath = passingFilename
+    const options: TMappingOptions = {
+      ...defaultTestOptions,
+      skipModifications: true,
+    }
+
+    const sampleData = structuredClone(sample)
+    const result = curateDict(inputPath, sampleData, options)
+
+    // outputFilePath should equal the input path (not empty string)
+    expect(result.mapResults.outputFilePath).toBe(inputPath)
+
+    // No de-identification or spec-driven mappings should be present
+    expect(Object.keys(result.mapResults.mappings)).toHaveLength(0)
+
+    // PatientName should be unchanged (proves de-id didn't run —
+    // defaultTestOptions has dicomPS315EOptions configured, so without
+    // the fix de-id would have mutated the data in-place)
+    const originalPatientName =
+      dcmjs.data.DicomMetaDictionary.naturalizeDataset(sample.dict).PatientName
+    const mappedPatientName = dcmjs.data.DicomMetaDictionary.naturalizeDataset(
+      result.dicomData.dict,
+    ).PatientName
+    expect(mappedPatientName).toEqual(originalPatientName)
   })
 })
