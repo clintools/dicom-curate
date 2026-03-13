@@ -1,3 +1,9 @@
+## [0.23.1](https://github.com/clintools/dicom-curate/compare/v0.23.0...v0.23.1) (2026-03-13)
+
+### Bug Fixes
+
+- make skipModifications work consistently when skipWrite is false ([#225](https://github.com/clintools/dicom-curate/issues/225)) ([13d0ff1](https://github.com/clintools/dicom-curate/commit/13d0ff1357cd3739dad07d78c8802b5e62e8e93c))
+
 # [0.23.0](https://github.com/clintools/dicom-curate/compare/v0.22.1...v0.23.0) (2026-03-12)
 
 ### Bug Fixes
