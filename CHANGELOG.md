@@ -1,3 +1,13 @@
+# [0.24.0](https://github.com/clintools/dicom-curate/compare/v0.23.1...v0.24.0) (2026-03-14)
+
+### Bug Fixes
+
+- handle unexpected files during scanning ([c6c4a3b](https://github.com/clintools/dicom-curate/commit/c6c4a3b9e5d783c61c0c1d9a236b55a908e93dd2))
+
+### Features
+
+- support 'none' specification ([#188](https://github.com/clintools/dicom-curate/issues/188)) ([7d28c41](https://github.com/clintools/dicom-curate/commit/7d28c4116e670695082093d07e2e5b3409cd3fe3))
+
 ## [0.23.1](https://github.com/clintools/dicom-curate/compare/v0.23.0...v0.23.1) (2026-03-13)
 
 ### Bug Fixes
