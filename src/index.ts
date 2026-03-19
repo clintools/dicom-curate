@@ -51,6 +51,7 @@ export { csvTextToRows } from './csvMapping'
 export type { Row } from './csvMapping'
 export { composeSpecs } from './composeSpecs'
 export type { SpecPart } from './composeSpecs'
+export { hash } from './hash'
 
 const mappingWorkerCount = navigator.hardwareConcurrency
 
