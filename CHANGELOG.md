@@ -1,3 +1,9 @@
+# [0.25.0](https://github.com/clintools/dicom-curate/compare/v0.24.0...v0.25.0) (2026-03-19)
+
+### Features
+
+- expose hash() function from package, extend HPValue type ([0db9abd](https://github.com/clintools/dicom-curate/commit/0db9abd032b252ba6358d8ac56c4da92c2f813eb))
+
 # [0.24.0](https://github.com/clintools/dicom-curate/compare/v0.23.1...v0.24.0) (2026-03-14)
 
 ### Bug Fixes
