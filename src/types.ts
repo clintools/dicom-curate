@@ -241,7 +241,13 @@ type TMappingInputTwoPass = {
   }
 }
 
-type HPPrimitive = string | number | boolean | null | RegExp
+type HPPrimitive =
+  | string
+  | number
+  | boolean
+  | null
+  | RegExp
+  | ((...args: any[]) => any)
 export type HPValue = HPPrimitive | { [k: string]: HPValue } | HPValue[]
 
 export type HostProps = Record<string, HPValue>
