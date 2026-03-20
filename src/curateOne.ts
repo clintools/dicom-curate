@@ -275,6 +275,14 @@ export async function curateOne({
       mappingOptions,
     ))
 
+    // If the spec produced no DICOM header changes, short-circuit to
+    // preserve the original file bytes (the dcmjs round-trip is not byte-preserving).
+    if (Object.keys(clonedMapResults.mappings).length === 0) {
+      mappedDicomData = {
+        write: () => fileArrayBuffer,
+      }
+    }
+
     // Indicate that mapping was required (we didn't hit the early-skip branch above)
     // Previously mappingRequired was only set to false when skipping; ensure it's
     // explicitly set to true when mapping was performed so consumers can rely on
