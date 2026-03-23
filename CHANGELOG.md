@@ -1,3 +1,9 @@
+# [0.26.0](https://github.com/clintools/dicom-curate/compare/v0.25.0...v0.26.0) (2026-03-23)
+
+### Features
+
+- preserve original DICOM bytes when spec produces no header changes ([f99dbe5](https://github.com/clintools/dicom-curate/commit/f99dbe57aad335faf3b538912c10e8c8bbdf6933))
+
 # [0.25.0](https://github.com/clintools/dicom-curate/compare/v0.24.0...v0.25.0) (2026-03-19)
 
 ### Features
