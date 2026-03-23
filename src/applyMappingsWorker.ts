@@ -92,7 +92,7 @@ fixupNodeWorkerEnvironment()
             try {
               curateOne({
                 fileInfo,
-                outputTarget: event.data.outputTarget || {},
+                outputTarget: event.data.outputTarget ?? {},
                 hashMethod: event.data.hashMethod,
                 mappingOptions,
                 previousSourceFileInfo: event.data.previousFileInfo,
