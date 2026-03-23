@@ -1,3 +1,10 @@
+## [0.26.1](https://github.com/clintools/dicom-curate/compare/v0.26.0...v0.26.1) (2026-03-23)
+
+### Bug Fixes
+
+- apply cleanup from code review ([0be66c1](https://github.com/clintools/dicom-curate/commit/0be66c17535413bedfa44dd4633ebafc7d18236b))
+- handle mapping worker crashes to prevent curateMany hanging ([ea623f1](https://github.com/clintools/dicom-curate/commit/ea623f184c6ef8b45efaf1e5b9112377cb064aa9))
+
 # [0.26.0](https://github.com/clintools/dicom-curate/compare/v0.25.0...v0.26.0) (2026-03-23)
 
 ### Features
