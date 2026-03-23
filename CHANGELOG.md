@@ -1,3 +1,9 @@
+## [0.26.2](https://github.com/clintools/dicom-curate/compare/v0.26.1...v0.26.2) (2026-03-23)
+
+### Bug Fixes
+
+- add retry with exponential backoff for HTTP uploads ([2535713](https://github.com/clintools/dicom-curate/commit/25357131811c93eac8181dd1740e314d36d3db10)), closes [#233](https://github.com/clintools/dicom-curate/issues/233)
+
 ## [0.26.1](https://github.com/clintools/dicom-curate/compare/v0.26.0...v0.26.1) (2026-03-23)
 
 ### Bug Fixes
