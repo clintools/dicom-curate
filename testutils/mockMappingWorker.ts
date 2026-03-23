@@ -92,11 +92,9 @@ export class MockWorker {
       case 'crash-onerror': {
         setTimeout(() => {
           if (!this.terminated && this.onerror) {
-            this.onerror(
-              new ErrorEvent('error', {
-                message: 'Simulated worker crash (onerror)',
-              }),
-            )
+            this.onerror({
+              message: 'Simulated worker crash (onerror)',
+            } as unknown as Event)
           }
         }, 0)
         break
@@ -115,11 +113,9 @@ export class MockWorker {
         setTimeout(() => {
           if (!this.terminated) {
             if (this.onerror) {
-              this.onerror(
-                new ErrorEvent('error', {
-                  message: 'Simulated worker crash (double)',
-                }),
-              )
+              this.onerror({
+                message: 'Simulated worker crash (double)',
+              } as unknown as Event)
             }
             for (const listener of this.exitListeners) {
               listener(1)

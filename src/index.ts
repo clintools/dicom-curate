@@ -87,7 +87,7 @@ async function initializeFileListWorker(
     }
     rejectCallback(
       new Error(
-        `Scan worker crashed: ${error instanceof ErrorEvent ? error.message : String(error)}`,
+        `Scan worker crashed: ${'message' in error ? (error as { message: string }).message : String(error)}`,
       ),
     )
   }
@@ -278,11 +278,12 @@ async function curateMany(
           // Import recoverCrashedWorker indirectly via the worker's onerror.
           // The onerror handler calls recoverCrashedWorker internally.
           if (worker.onerror) {
-            worker.onerror(
-              new ErrorEvent('error', {
-                message: 'Worker stalled (no response for 10 minutes)',
-              }),
-            )
+            // Synthetic error event -- avoid ErrorEvent constructor which is
+            // unavailable in Node.js < 23. The onerror handler only reads
+            // event.message via duck-typing so a plain object suffices.
+            worker.onerror({
+              message: 'Worker stalled (no response for 10 minutes)',
+            } as unknown as ErrorEvent)
           }
         }
       }
@@ -309,7 +310,6 @@ async function curateMany(
         organizeOptions.skipCollectingMappings,
         organizeOptions.fileInfoIndex,
         progressCallback,
-        rejectCallback,
       )
 
       // Set global mappingWorkerOptions

@@ -15,10 +15,9 @@ import type {
   TMapResults,
   TFileInfo,
   TProgressMessage,
-  THTTPOptions,
+  TOutputTarget,
   TFileInfoIndex,
   THashMethod,
-  TS3BucketOptions,
 } from './types'
 
 // -------------------------------------------------------------------------
@@ -26,15 +25,16 @@ import type {
 // -------------------------------------------------------------------------
 
 export type TMappingWorkerOptions = TMappingOptions & {
-  outputTarget?: {
-    http?: THTTPOptions
-    directory?: FileSystemDirectoryHandle | string
-    s3?: TS3BucketOptions
-  }
+  outputTarget?: TOutputTarget
   hashMethod?: THashMethod
 }
 
 export type ProgressCallback = (message: TProgressMessage) => void
+
+/** Subset of Node.js worker_threads.Worker used for the 'exit' event. */
+type NodeWorkerLike = {
+  on(event: string, cb: (code: number) => void): void
+}
 
 // -------------------------------------------------------------------------
 // Module-level state
@@ -98,7 +98,6 @@ export async function initializeMappingWorkers(
   skipCollectingMappings?: boolean,
   fileInfoIndex?: TFileInfoIndex,
   progressCb?: ProgressCallback,
-  _rejectCb?: (reason: Error) => void,
 ): Promise<void> {
   mappingWorkerOptions = {}
   workersActive = 0
@@ -282,8 +281,8 @@ async function createMappingWorker(
   // the worker slot, causing curateMany to hang.
   mappingWorker.onerror = (event) => {
     const errorMessage =
-      event instanceof ErrorEvent
-        ? event.message
+      'message' in event
+        ? (event as { message: string }).message
         : `Worker error: ${String(event)}`
     recoverCrashedWorker(mappingWorker, errorMessage)
   }
@@ -291,7 +290,7 @@ async function createMappingWorker(
   // Handle unexpected worker exit (OOM, segfault, unhandled rejection that
   // kills the thread). Only available in Node.js worker_threads.
   if ('on' in mappingWorker) {
-    ;(mappingWorker as any).on('exit', (code: number) => {
+    ;(mappingWorker as unknown as NodeWorkerLike).on('exit', (code: number) => {
       // Normal exit (code 0) after terminate() is expected -- ignore it.
       // Non-zero exit means the worker crashed.
       if (code !== 0 && workerCurrentFile.has(mappingWorker)) {

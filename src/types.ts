@@ -100,6 +100,13 @@ export type TS3BucketOptions = {
   forcePathStyle?: boolean
 }
 
+/** Output target for curation -- at most one of http, directory, or s3. */
+export type TOutputTarget = {
+  http?: THTTPOptions
+  directory?: FileSystemDirectoryHandle | string
+  s3?: TS3BucketOptions
+}
+
 export type TMappingOptions = {
   columnMappings?: TColumnMappings
   curationSpec: (() => TCurationSpecification | SpecPart[]) | NoneSpecification

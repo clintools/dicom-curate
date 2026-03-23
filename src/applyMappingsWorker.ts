@@ -5,7 +5,7 @@ import {
   type TFileInfo,
   type TFileInfoIndex,
   type THashMethod,
-  type THTTPOptions,
+  type TOutputTarget,
   type TSerializedMappingOptions,
 } from './types'
 import { fixupNodeWorkerEnvironment } from './worker'
@@ -14,10 +14,7 @@ export type MappingRequest =
   | {
       request: 'apply'
       fileInfo: TFileInfo
-      outputTarget?: {
-        http?: THTTPOptions
-        directory?: FileSystemDirectoryHandle | string
-      }
+      outputTarget?: TOutputTarget
       previousFileInfo?: {
         size?: number
         mtime?: string
@@ -123,7 +120,9 @@ fixupNodeWorkerEnvironment()
             break
           }
           default:
-            console.error(`Unknown request ${(event.data as any).request}`)
+            console.error(
+              `Unknown request ${(event.data as { request: string }).request}`,
+            )
         }
       },
     )

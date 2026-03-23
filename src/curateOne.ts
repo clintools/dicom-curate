@@ -4,21 +4,16 @@ import curateDict from './curateDict'
 import type {
   TFileInfo,
   THashMethod,
-  THTTPOptions,
+  TOutputTarget,
   TMappingOptions,
   TMapResults,
-  TS3BucketOptions,
 } from './types'
 import { hash } from './hash'
 import { loadS3Client } from './s3Client'
 
 export type TCurateOneArgs = {
   fileInfo: TFileInfo
-  outputTarget: {
-    http?: THTTPOptions
-    s3?: TS3BucketOptions
-    directory?: FileSystemDirectoryHandle | string
-  }
+  outputTarget: TOutputTarget
   mappingOptions: TMappingOptions
   // hash algorithm to use when previousSourceFileInfo is provided. Defaults to 'crc64'.
   // Supported values: 'crc64' (NVMe-style / js-crc 64-bit), 'crc32', or 'sha256'.
