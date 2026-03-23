@@ -1,6 +1,7 @@
 import * as dcmjs from 'dcmjs'
 import createNestedDirectories from './createNestedDirectories'
 import curateDict from './curateDict'
+import { fetchWithRetry } from './fetchWithRetry'
 import type {
   TFileInfo,
   THashMethod,
@@ -419,7 +420,7 @@ export async function curateOne({
         if (postMappedHashHeader && postMappedHash)
           headers[postMappedHashHeader] = postMappedHash
 
-        const resp = await fetch(uploadUrl, {
+        const resp = await fetchWithRetry(uploadUrl, {
           method: 'PUT',
           headers,
           body: clonedMapResults.mappedBlob,
