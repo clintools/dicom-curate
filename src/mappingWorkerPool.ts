@@ -114,10 +114,10 @@ export async function initializeMappingWorkers(
   if (progressCb) progressCallback = progressCb
 
   const workerCount = navigator.hardwareConcurrency
-  for (let workerIndex = 0; workerIndex < workerCount; workerIndex++) {
-    const mappingWorker = await createMappingWorker(fileInfoIndex)
-    availableMappingWorkers.push(mappingWorker)
-  }
+const workers = await Promise.all(
+  Array.from({ length: workerCount }, () => createMappingWorker(fileInfoIndex)),
+)
+availableMappingWorkers.push(...workers)
 }
 
 /**
