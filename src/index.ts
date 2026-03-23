@@ -1,40 +1,36 @@
 import { extractColumnMappings, TColumnMappings } from './csvMapping'
 import { curateOne } from './curateOne'
 import { composeSpecs } from './composeSpecs'
-import { serializeMappingOptions } from './serializeMappingOptions'
 import { iso8601 } from './offsetDateTime'
 import picomatch from 'picomatch'
 
 import type {
-  TMappingOptions,
-  TMapResults,
   TFileInfo,
   OrganizeOptions,
-  TProgressMessage,
   TProgressMessageDone,
   TPs315Options,
-  THTTPOptions,
-  TFileInfoIndex,
-  THashMethod,
-  TS3BucketOptions,
   TCurationSpecification,
 } from './types'
 
 import type { FileScanMsg, FileScanRequest } from './scanDirectoryWorker'
-import type { MappingRequest } from './applyMappingsWorker'
 import { createWorker } from './worker'
-import { loadS3Client } from './s3Client'
 
-type TMappingWorkerOptions = TMappingOptions & {
-  outputTarget?: {
-    http?: THTTPOptions
-    directory?: FileSystemDirectoryHandle | string
-    s3?: TS3BucketOptions
-  }
-  hashMethod?: THashMethod
-}
+import {
+  type TMappingWorkerOptions,
+  type ProgressCallback,
+  availableMappingWorkers,
+  filesToProcess,
+  scanAnomalies,
+  setDirectoryScanFinished,
+  setMappingWorkerOptions,
+  initializeMappingWorkers,
+  dispatchMappingJobs,
+  getWorkerCurrentFile,
+  getWorkersActive,
+  getLastWorkerProgressTime,
+} from './mappingWorkerPool'
 
-export type ProgressCallback = (message: TProgressMessage) => void
+export type { ProgressCallback } from './mappingWorkerPool'
 
 export type {
   TPs315Options,
@@ -52,19 +48,6 @@ export type { Row } from './csvMapping'
 export { composeSpecs } from './composeSpecs'
 export type { SpecPart } from './composeSpecs'
 export { hash } from './hash'
-
-const mappingWorkerCount = navigator.hardwareConcurrency
-
-// Update the type to include scan anomalies
-let filesToProcess: {
-  fileInfo: TFileInfo
-  scanAnomalies: string[]
-  previousFileInfo?: { size?: number; mtime?: string; preMappedHash?: string }
-}[] = []
-let directoryScanFinished = false
-
-// Track scan anomalies separately since they don't go through the processing pipeline
-let scanAnomalies: { fileInfo: TFileInfo; anomalies: string[] }[] = []
 
 function requiresDateOffset(
   deIdOpts: TPs315Options | 'Off',
@@ -88,10 +71,9 @@ function requiresDateOffset(
  *   response: 'done'
  */
 // TODO: implement a buffering stream to request fileHandles in batches
-async function initializeFileListWorker() {
-  filesToProcess = []
-  directoryScanFinished = false
-
+async function initializeFileListWorker(
+  rejectCallback: (reason: Error) => void,
+) {
   const fileListWorker = await createWorker(
     new URL('./scanDirectoryWorker.js', import.meta.url),
     { type: 'module' },
@@ -137,7 +119,7 @@ async function initializeFileListWorker() {
         }
         case 'done': {
           console.log('directoryScanFinished')
-          directoryScanFinished = true
+          setDirectoryScanFinished(true)
           break
         }
         case 'error': {
@@ -160,335 +142,6 @@ async function initializeFileListWorker() {
   )
 
   return fileListWorker
-}
-
-//
-// Apply mappings web worker management
-//
-// worker accepts these messages:
-//   request: 'apply', fileInfo, outDirectoryHandle, mappingOptions
-// worker sends these messages:
-//   response: 'finished', mapResults
-//
-let mappingWorkerOptions: Partial<TMappingWorkerOptions> = {} // TODO: only send to worker once
-const availableMappingWorkers: Worker[] = []
-let workersActive = 0
-let mapResultsList: TMapResults[] | undefined
-let filesMapped = 0
-
-// Track which file each worker is currently processing. When a worker crashes
-// (via onerror, on('exit'), or the stall watchdog), this map lets us identify
-// the failing file and include it in the error report. See #229.
-const workerCurrentFile = new Map<Worker, TFileInfo>()
-
-// Track the last time any worker reported progress, used by the stall watchdog.
-let lastWorkerProgressTime = 0
-
-// Number of replacement workers currently being created asynchronously.
-// The termination condition in dispatchMappingJobs() waits for this to reach 0
-// before finishing, to avoid orphaning in-flight replacements. See #229.
-let pendingReplacements = 0
-
-// Stored fileInfoIndex from initializeMappingWorkers, needed when spawning
-// replacement workers after a crash.
-let currentFileInfoIndex: TFileInfoIndex | undefined
-
-/**
- * Recover from a mapping worker crash. Returns the worker slot, counts the
- * in-flight file as a mapping error, and re-dispatches. Called from onerror,
- * on('exit'), and the stall watchdog.
- */
-function recoverCrashedWorker(
-  mappingWorker: Worker,
-  errorMessage: string,
-): void {
-  // Guard against double-recovery (e.g., both onerror and on('exit') firing
-  // for the same crash). Without this, workersActive could go negative.
-  if (!workerCurrentFile.has(mappingWorker)) {
-    return
-  }
-
-  const fileInfo = workerCurrentFile.get(mappingWorker)
-  workerCurrentFile.delete(mappingWorker)
-
-  console.error(
-    `Mapping worker crashed: ${errorMessage}`,
-    fileInfo ? `File: ${fileInfo.path}/${fileInfo.name}` : '(unknown file)',
-  )
-
-  // Terminate the crashed worker and create error results
-  try {
-    mappingWorker.terminate()
-  } catch {
-    // Worker may already be terminated
-  }
-
-  const errorMapResults: TMapResults = {
-    sourceInstanceUID: `worker_crash_${filesMapped + 1}`,
-    outputFilePath: '',
-    mappings: {},
-    anomalies: [],
-    errors: [errorMessage],
-    quarantine: {},
-    fileInfo,
-  }
-
-  mapResultsList?.push(errorMapResults)
-  workersActive -= 1
-  filesMapped += 1
-
-  progressCallback({
-    response: 'progress',
-    mapResults: errorMapResults,
-    processedFiles: filesMapped,
-    totalFiles: filesToProcess.length + filesMapped + workersActive,
-  })
-
-  dispatchMappingJobs()
-
-  // Spawn a replacement worker so the pool doesn't shrink permanently.
-  // A directory with many problematic files could otherwise kill all workers.
-  pendingReplacements += 1
-  void createMappingWorker(currentFileInfoIndex)
-    .then((worker) => {
-      pendingReplacements -= 1
-      availableMappingWorkers.push(worker)
-      dispatchMappingJobs()
-    })
-    .catch((error) => {
-      console.error('Failed to create replacement worker:', error)
-      pendingReplacements -= 1
-      dispatchMappingJobs()
-    })
-}
-
-/**
- * Create a single mapping worker with all error/exit/message handlers attached.
- * Used by both initializeMappingWorkers (initial pool) and recoverCrashedWorker
- * (replacement after crash). See #229.
- */
-async function createMappingWorker(
-  fileInfoIndex?: TFileInfoIndex,
-): Promise<Worker> {
-  const mappingWorker = await createWorker(
-    new URL('./applyMappingsWorker.js', import.meta.url),
-    { type: 'module' },
-  )
-
-  // Handle worker-level errors (uncaught exceptions, DataCloneError, etc.).
-  // The previous `onerror = console.error` only logged and did not recover
-  // the worker slot, causing curateMany to hang. See #229.
-  mappingWorker.onerror = (event) => {
-    const errorMessage =
-      event instanceof ErrorEvent
-        ? event.message
-        : `Worker error: ${String(event)}`
-    recoverCrashedWorker(mappingWorker, errorMessage)
-  }
-
-  // Handle unexpected worker exit (OOM, segfault, unhandled rejection that
-  // kills the thread). Only available in Node.js worker_threads.
-  if ('on' in mappingWorker) {
-    ;(mappingWorker as any).on('exit', (code: number) => {
-      // Normal exit (code 0) after terminate() is expected -- ignore it.
-      // Non-zero exit means the worker crashed.
-      if (code !== 0 && workerCurrentFile.has(mappingWorker)) {
-        recoverCrashedWorker(
-          mappingWorker,
-          `Worker exited unexpectedly with code ${code}`,
-        )
-      }
-    })
-  }
-
-  if (fileInfoIndex !== undefined) {
-    const postMappedOnly = Object.fromEntries(
-      Object.entries(fileInfoIndex).filter(
-        ([key, value]) => !!value.postMappedHash,
-      ),
-    )
-
-    mappingWorker.postMessage({
-      request: 'fileInfoIndex',
-      fileInfoIndex: postMappedOnly,
-    })
-  }
-
-  mappingWorker.addEventListener('message', (event) => {
-    // Any message from a worker means progress is being made.
-    lastWorkerProgressTime = Date.now()
-    workerCurrentFile.delete(mappingWorker)
-
-    switch (event.data.response) {
-      case 'finished':
-        availableMappingWorkers.push(mappingWorker)
-
-        // Insert null if skipping mapping collection
-        mapResultsList?.push(event.data.mapResults)
-        filesMapped += 1
-        workersActive -= 1
-
-        // Report progress
-        progressCallback({
-          response: 'progress',
-          mapResults: event.data.mapResults,
-          processedFiles: filesMapped,
-          totalFiles: filesToProcess.length + filesMapped + workersActive,
-        })
-
-        dispatchMappingJobs()
-        if (filesMapped % 100 === 0) {
-          console.log(`Finished mapping ${filesMapped} files`)
-        }
-        break
-      case 'error':
-        console.error('Error in mapping worker:', event.data.error)
-        availableMappingWorkers.push(mappingWorker)
-
-        const errorMapResults: TMapResults = {
-          sourceInstanceUID: `error_${filesMapped + 1}`,
-          outputFilePath: '',
-          mappings: {},
-          anomalies: [],
-          errors: [event.data.error.toString()],
-          quarantine: {},
-          fileInfo: event.data.fileInfo,
-        }
-
-        mapResultsList?.push(errorMapResults)
-        workersActive -= 1
-        filesMapped += 1
-
-        progressCallback({
-          response: 'progress',
-          mapResults: errorMapResults,
-          processedFiles: filesMapped,
-          totalFiles: filesToProcess.length + filesMapped + workersActive,
-        })
-        dispatchMappingJobs()
-
-        break
-      default:
-        console.error(`Unknown response from worker ${event.data.response}`)
-    }
-  })
-
-  return mappingWorker
-}
-
-async function initializeMappingWorkers(
-  skipCollectingMappings?: boolean,
-  fileInfoIndex?: TFileInfoIndex,
-) {
-  mappingWorkerOptions = {}
-  workersActive = 0
-  mapResultsList = skipCollectingMappings ? undefined : []
-  filesMapped = 0
-  pendingReplacements = 0
-  workerCurrentFile.clear()
-  lastWorkerProgressTime = Date.now()
-  currentFileInfoIndex = fileInfoIndex
-
-  for (let workerIndex = 0; workerIndex < mappingWorkerCount; workerIndex++) {
-    const mappingWorker = await createMappingWorker(fileInfoIndex)
-    availableMappingWorkers.push(mappingWorker)
-  }
-}
-
-// If the TFileInfo represents an HTTP resource with dynamic headers,
-// resolve the headers by calling the provider function.
-async function getHttpInputHeaders(fileInfo: TFileInfo): Promise<TFileInfo> {
-  if (fileInfo.kind === 'http' && typeof fileInfo.headers === 'function') {
-    const clonedFileInfo: TFileInfo = { ...fileInfo }
-    clonedFileInfo.headers = await fileInfo.headers()
-    return clonedFileInfo
-  }
-
-  return fileInfo
-}
-
-// If the outputTarget includes HTTP with dynamic headers,
-// resolve the headers by calling the provider function.
-async function getHttpOutputHeaders(
-  outputTarget: TMappingWorkerOptions['outputTarget'],
-): Promise<TMappingWorkerOptions['outputTarget']> {
-  if (outputTarget?.http && typeof outputTarget.http.headers === 'function') {
-    const clonedOutputTarget: TMappingWorkerOptions['outputTarget'] = {
-      ...outputTarget,
-    }
-    clonedOutputTarget.http = {
-      ...outputTarget.http,
-      headers: await outputTarget.http.headers(),
-    }
-    return clonedOutputTarget
-  }
-
-  return outputTarget
-}
-
-async function dispatchMappingJobs() {
-  while (filesToProcess.length > 0 && availableMappingWorkers.length > 0) {
-    const { fileInfo, previousFileInfo } = filesToProcess.pop()!
-    const mappingWorker = availableMappingWorkers.pop()!
-
-    // Track which file this worker is processing so we can identify it
-    // if the worker crashes. See #229.
-    workerCurrentFile.set(mappingWorker, fileInfo)
-
-    const { outputTarget, hashMethod, ...mappingOptions } =
-      // Not partial anymore.
-      mappingWorkerOptions as TMappingWorkerOptions
-    mappingWorker.postMessage({
-      request: 'apply',
-      fileInfo: await getHttpInputHeaders(fileInfo),
-      outputTarget: await getHttpOutputHeaders(outputTarget),
-      previousFileInfo,
-      hashMethod,
-      serializedMappingOptions: serializeMappingOptions(mappingOptions),
-    } satisfies MappingRequest)
-    workersActive += 1
-  }
-  if (
-    workersActive === 0 &&
-    pendingReplacements === 0 &&
-    directoryScanFinished &&
-    filesToProcess.length === 0
-  ) {
-    // End and remove all workers
-    while (availableMappingWorkers.length) {
-      availableMappingWorkers.pop()!.terminate()
-    }
-
-    console.log(`Finished mapping ${filesMapped} files`)
-    console.log('job is finished')
-
-    if (!mapResultsList) mapResultsList = []
-
-    // Create individual mapResults entries for each scan anomaly
-    // Only do this during actual processing (not first pass)
-    if (!mappingWorkerOptions.skipWrite) {
-      scanAnomalies.forEach(({ fileInfo, anomalies }) => {
-        const scanAnomalyResult: TMapResults = {
-          sourceInstanceUID: `scan_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
-          outputFilePath: `${fileInfo.path}/${fileInfo.name}`, // Use the actual file path
-          mappings: {},
-          anomalies: anomalies, // Keep the original anomalies array
-          errors: [],
-          quarantine: {},
-        }
-
-        // Add each scan anomaly result to the final results
-        mapResultsList!.push(scanAnomalyResult)
-      })
-    }
-
-    progressCallback({
-      response: 'done',
-      mapResultsList: mapResultsList,
-      processedFiles: filesMapped,
-      totalFiles: filesMapped,
-    })
-  }
 }
 
 async function collectMappingOptions(
@@ -597,43 +250,46 @@ function queueUrlsForMapping(
   })
 
   dispatchMappingJobs()
-  directoryScanFinished = true
+  setDirectoryScanFinished(true)
 }
-
-let progressCallback: ProgressCallback
-let rejectCallback!: (reason: Error) => void
 
 async function curateMany(
   organizeOptions: OrganizeOptions,
   onProgress?: ProgressCallback,
 ): Promise<TProgressMessageDone> {
   return new Promise<TProgressMessageDone>(async (resolve, reject) => {
-    // Stall watchdog: if no mapping worker reports back for 10 minutes,
-    // terminate all stuck workers and count their in-flight files as errors.
-    // This guards against undetectable worker crashes (e.g., OOM kills that
-    // don't trigger onerror or on('exit')). See #229.
+    // Stall watchdog: if no mapping worker at all has reported back for 10
+    // minutes (i.e., all active workers are stuck), terminate them and count
+    // their in-flight files as mapping errors. This guards against undetectable
+    // worker crashes (e.g., OOM kills that don't trigger onerror or on('exit')).
     const STALL_TIMEOUT_MS = 10 * 60 * 1000
     const stallWatchdog = setInterval(() => {
       if (
-        workersActive > 0 &&
-        Date.now() - lastWorkerProgressTime > STALL_TIMEOUT_MS
+        getWorkersActive() > 0 &&
+        Date.now() - getLastWorkerProgressTime() > STALL_TIMEOUT_MS
       ) {
         console.error(
-          `Stall detected: ${workersActive} mapping worker(s) have not responded for 10 minutes.`,
+          `Stall detected: ${getWorkersActive()} mapping worker(s) have not responded for 10 minutes.`,
         )
+        const workerCurrentFile = getWorkerCurrentFile()
         // Recover all stuck workers. Iterate over a copy since
         // recoverCrashedWorker modifies workerCurrentFile.
         for (const [worker] of [...workerCurrentFile]) {
-          recoverCrashedWorker(
-            worker,
-            'Worker stalled (no response for 10 minutes)',
-          )
+          // Import recoverCrashedWorker indirectly via the worker's onerror.
+          // The onerror handler calls recoverCrashedWorker internally.
+          if (worker.onerror) {
+            worker.onerror(
+              new ErrorEvent('error', {
+                message: 'Worker stalled (no response for 10 minutes)',
+              }),
+            )
+          }
         }
       }
     }, 60_000)
 
-    // Resolve promise if progressCallback gets called with 'done'
-    progressCallback = (msg) => {
+    // Progress callback wraps the user's callback and handles lifecycle
+    const progressCallback: ProgressCallback = (msg) => {
       onProgress?.(msg)
 
       if (msg.response === 'done') {
@@ -642,26 +298,24 @@ async function curateMany(
       }
     }
 
-    rejectCallback = (reason: Error) => {
+    const rejectCallback = (reason: Error) => {
       clearInterval(stallWatchdog)
       reject(reason)
     }
 
     try {
-      // Reset global state to prevent interference between multiple curateMany() calls
-      // This is critical for two-pass curation where curateMany() is called twice
-      scanAnomalies = []
-
       // create the mapping workers
       await initializeMappingWorkers(
         organizeOptions.skipCollectingMappings,
         organizeOptions.fileInfoIndex,
+        progressCallback,
+        rejectCallback,
       )
 
       // Set global mappingWorkerOptions
-      mappingWorkerOptions = (await collectMappingOptions(
-        organizeOptions,
-      )) as TMappingWorkerOptions
+      setMappingWorkerOptions(
+        (await collectMappingOptions(organizeOptions)) as TMappingWorkerOptions,
+      )
 
       //
       // If the request provides a directory, then use the worker
@@ -674,7 +328,7 @@ async function curateMany(
         organizeOptions.inputType === 'path' ||
         organizeOptions.inputType === 's3'
       ) {
-        const fileListWorker = await initializeFileListWorker()
+        const fileListWorker = await initializeFileListWorker(rejectCallback)
         let specExcludedFiletypes: string[] | undefined
         let noDicomSignatureCheck = false
         let noDefaultExclusions = false
