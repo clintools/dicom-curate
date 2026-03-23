@@ -5,13 +5,7 @@
  * index.ts and mappingWorkerPool.ts.
  */
 
-import type { TFileInfo, THTTPOptions, TS3BucketOptions } from './types'
-
-type OutputTarget = {
-  http?: THTTPOptions
-  directory?: FileSystemDirectoryHandle | string
-  s3?: TS3BucketOptions
-}
+import type { TFileInfo, TOutputTarget } from './types'
 
 // If the TFileInfo represents an HTTP resource with dynamic headers,
 // resolve the headers by calling the provider function.
@@ -30,10 +24,10 @@ export async function getHttpInputHeaders(
 // If the outputTarget includes HTTP with dynamic headers,
 // resolve the headers by calling the provider function.
 export async function getHttpOutputHeaders(
-  outputTarget: OutputTarget | undefined,
-): Promise<OutputTarget | undefined> {
+  outputTarget: TOutputTarget | undefined,
+): Promise<TOutputTarget | undefined> {
   if (outputTarget?.http && typeof outputTarget.http.headers === 'function') {
-    const clonedOutputTarget: OutputTarget = {
+    const clonedOutputTarget: TOutputTarget = {
       ...outputTarget,
     }
     clonedOutputTarget.http = {
