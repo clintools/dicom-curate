@@ -28,6 +28,8 @@ import {
   getWorkerCurrentFile,
   getWorkersActive,
   getLastWorkerProgressTime,
+  setScanResumeCallback,
+  markScanPaused,
 } from './mappingWorkerPool'
 
 export type { ProgressCallback } from './mappingWorkerPool'
@@ -104,10 +106,14 @@ async function initializeFileListWorker(
             previousFileInfo,
           })
 
-          // Could do some throttling:
-          // if (filesToProcess.length > 10) {
-          //   fileListWorker.postMessage({ request: 'stop' })
-          // }
+          // Backpressure: when the queue grows too large, pause the scan
+          // worker so file handles don't accumulate unboundedly in memory.
+          // The scan worker supports 'stop' and 'resume' commands.
+          const HIGH_WATER_MARK = 100
+          if (filesToProcess.length > HIGH_WATER_MARK) {
+            fileListWorker.postMessage({ request: 'stop' })
+            markScanPaused()
+          }
           dispatchMappingJobs()
           break
         }
@@ -329,6 +335,12 @@ async function curateMany(
         organizeOptions.inputType === 's3'
       ) {
         const fileListWorker = await initializeFileListWorker(rejectCallback)
+
+        // Wire up backpressure resume: when the dispatch loop drains the
+        // queue below the low-water mark, it calls this to resume scanning.
+        setScanResumeCallback(() => {
+          fileListWorker.postMessage({ request: 'resume' })
+        })
         let specExcludedFiletypes: string[] | undefined
         let noDicomSignatureCheck = false
         let noDefaultExclusions = false
