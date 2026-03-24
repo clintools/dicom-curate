@@ -377,16 +377,16 @@ export async function curateOne({
 
       const fullFilePath = path.join(fullDirPath, fileName)
       await fs.writeFile(fullFilePath, new DataView(modifiedArrayBuffer))
-    } else {
+    } else if (!outputTarget?.http && !outputTarget?.s3) {
+      // Only create mappedBlob when there is no output target at all (no
+      // directory, no HTTP endpoint, no S3 bucket). When an upload target is
+      // present the blob has already been consumed and keeping it around
+      // retains the full file content in memory for every processed file,
+      // causing OOM crashes at scale.
       clonedMapResults.mappedBlob = new Blob([modifiedArrayBuffer], {
         type: 'application/octet-stream',
       })
     }
-
-    // If no directory or even if directory present, expose mappedBlob for consumers
-    clonedMapResults.mappedBlob = new Blob([modifiedArrayBuffer], {
-      type: 'application/octet-stream',
-    })
 
     // If upload URL (bucket) is provided, perform an HTTP PUT upload to the server
     if (outputTarget?.http) {
@@ -402,11 +402,9 @@ export async function curateOne({
 
         // Create headers per helper described by the user
         const headers: Record<string, string> = {
-          'Content-Type':
-            clonedMapResults.mappedBlob.type || 'application/octet-stream',
+          'Content-Type': 'application/octet-stream',
           'X-File-Name': fileName,
-          'X-File-Type':
-            clonedMapResults.mappedBlob.type || 'application/octet-stream',
+          'X-File-Type': 'application/octet-stream',
           'X-File-Size': String(modifiedArrayBuffer.byteLength),
           'X-Source-File-Size': String(clonedMapResults.fileInfo?.size || ''),
           'X-Source-File-Modified-Time': mtime || '',
@@ -420,10 +418,14 @@ export async function curateOne({
         if (postMappedHashHeader && postMappedHash)
           headers[postMappedHashHeader] = postMappedHash
 
+        // Send the ArrayBuffer directly instead of wrapping in a Blob first —
+        // avoids an extra copy in memory.
         const resp = await fetchWithRetry(uploadUrl, {
           method: 'PUT',
           headers,
-          body: clonedMapResults.mappedBlob,
+          body: new Blob([modifiedArrayBuffer], {
+            type: 'application/octet-stream',
+          }),
         })
 
         if (!resp.ok) {
@@ -471,9 +473,10 @@ export async function curateOne({
           new s3.PutObjectCommand({
             Bucket: outputTarget.s3.bucketName,
             Key: key,
-            Body: await clonedMapResults.mappedBlob.arrayBuffer(),
-            ContentType:
-              clonedMapResults.mappedBlob.type || 'application/octet-stream',
+            // Use the ArrayBuffer directly — going through Blob.arrayBuffer()
+            // would create yet another copy of the data in memory.
+            Body: new Uint8Array(modifiedArrayBuffer),
+            ContentType: 'application/octet-stream',
             Metadata: {
               'source-file-size': String(clonedMapResults.fileInfo?.size || ''),
               'source-file-modified-time': mtime || '',
