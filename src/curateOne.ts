@@ -166,7 +166,9 @@ export async function curateOne({
   }
 
   // 3) read bytes (needed for deep hash)
-  const fileArrayBuffer = await file.arrayBuffer()
+  // Use let so we can null the reference after the last use, allowing GC to
+  // reclaim the buffer while the rest of the function (upload, hashing) runs.
+  let fileArrayBuffer: ArrayBuffer | null = await file.arrayBuffer()
 
   let preMappedHash: string | undefined
   let postMappedHash: string | undefined
@@ -178,7 +180,7 @@ export async function curateOne({
   if (previousSourceFileInfo?.preMappedHash !== undefined) {
     try {
       // choose hashing algorithm: default to crc64 (nvme-style) for compatibility
-      preMappedHash = await hash(fileArrayBuffer, hashMethod || 'crc64')
+      preMappedHash = await hash(fileArrayBuffer!, hashMethod || 'crc64')
     } catch (e) {
       console.warn(`Failed to compute preMappedHash for ${fileInfo.name}`, e)
     }
@@ -235,7 +237,7 @@ export async function curateOne({
     dcmjs.log.getLogger('validation.dcmjs').setLevel(dcmjs.log.levels.SILENT)
     let dicomData
     try {
-      dicomData = dcmjs.data.DicomMessage.readFile(fileArrayBuffer, {
+      dicomData = dcmjs.data.DicomMessage.readFile(fileArrayBuffer!, {
         ignoreErrors: true,
       })
     } catch (error) {
@@ -275,7 +277,7 @@ export async function curateOne({
     // preserve the original file bytes (the dcmjs round-trip is not byte-preserving).
     if (Object.keys(clonedMapResults.mappings).length === 0) {
       mappedDicomData = {
-        write: () => fileArrayBuffer,
+        write: () => fileArrayBuffer!,
       }
     }
 
@@ -287,7 +289,7 @@ export async function curateOne({
   } else {
     // If curationSpec is 'none', we skip all mapping and just pass through the original data with minimal mapResults
     mappedDicomData = {
-      write: (...args: any[]) => fileArrayBuffer,
+      write: (...args: any[]) => fileArrayBuffer!,
     }
     clonedMapResults = {
       sourceInstanceUID: `passthrough_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
@@ -311,7 +313,7 @@ export async function curateOne({
   if (!preMappedHash) {
     try {
       // choose hashing algorithm: default to crc64 (nvme-style) for compatibility
-      preMappedHash = await hash(fileArrayBuffer, hashMethod || 'crc64')
+      preMappedHash = await hash(fileArrayBuffer!, hashMethod || 'crc64')
     } catch (e) {
       console.warn(`Failed to compute preMappedHash for ${fileInfo.name}`, e)
     }
@@ -331,6 +333,13 @@ export async function curateOne({
 
     // Always calculate post-mapped hash even if deep compare is not requested
     postMappedHash = await hash(modifiedArrayBuffer, hashMethod || 'crc64')
+
+    // Release the original file buffer — the modifiedArrayBuffer is all we
+    // need from this point. In the passthrough case (no header changes),
+    // modifiedArrayBuffer === fileArrayBuffer so the data stays alive through
+    // that reference; in the modified case, fileArrayBuffer is a separate
+    // allocation that can now be GC'd.
+    fileArrayBuffer = null
 
     const previousPostMappedHash = previousMappedFileInfo
       ? previousMappedFileInfo(clonedMapResults.outputFilePath!)?.postMappedHash
