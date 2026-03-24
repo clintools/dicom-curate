@@ -54,6 +54,10 @@ export type OrganizeOptions = {
   // Example: ['**/logs/**'] excludes any file under a 'logs' directory.
   // Uses picomatch glob syntax.
   excludedPathGlobs?: string[]
+  // Maximum number of concurrent mapping workers.
+  // Defaults to navigator.hardwareConcurrency. Reducing this limits peak
+  // memory usage at the cost of slower throughput.
+  workerCount?: number
 } & (
   | { inputType: 'directory'; inputDirectory: FileSystemDirectoryHandle }
   | { inputType: 'files'; inputFiles: File[] }

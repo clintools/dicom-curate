@@ -126,6 +126,7 @@ export async function initializeMappingWorkers(
   skipCollectingMappings?: boolean,
   fileInfoIndex?: TFileInfoIndex,
   progressCb?: ProgressCallback,
+  workerCount?: number,
 ): Promise<void> {
   mappingWorkerOptions = {}
   workersActive = 0
@@ -141,9 +142,10 @@ export async function initializeMappingWorkers(
 
   if (progressCb) progressCallback = progressCb
 
-  const workerCount = navigator.hardwareConcurrency
+  const effectiveWorkerCount =
+    workerCount ?? Math.min(navigator.hardwareConcurrency, 8)
   const workers = await Promise.all(
-    Array.from({ length: workerCount }, () =>
+    Array.from({ length: effectiveWorkerCount }, () =>
       createMappingWorker(fileInfoIndex),
     ),
   )

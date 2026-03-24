@@ -316,6 +316,7 @@ async function curateMany(
         organizeOptions.skipCollectingMappings,
         organizeOptions.fileInfoIndex,
         progressCallback,
+        organizeOptions.workerCount,
       )
 
       // Set global mappingWorkerOptions
