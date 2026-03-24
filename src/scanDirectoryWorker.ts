@@ -69,8 +69,41 @@ export type FileScanRequest =
   | {
       request: 'stop'
     }
+  | {
+      request: 'resume'
+    }
 
 let keepScanning = true
+
+// Backpressure gate: when the main thread signals 'stop', the scan worker
+// awaits this promise before emitting the next file. 'resume' resolves it.
+let pauseResolve: (() => void) | null = null
+let pausePromise: Promise<void> | null = null
+
+function pauseScanning(): void {
+  if (!pausePromise) {
+    pausePromise = new Promise<void>((resolve) => {
+      pauseResolve = resolve
+    })
+  }
+}
+
+function resumeScanning(): void {
+  if (pauseResolve) {
+    pauseResolve()
+    pauseResolve = null
+    pausePromise = null
+  }
+}
+
+/** If paused, wait until resumed. Returns false if scanning was aborted. */
+async function waitIfPaused(): Promise<boolean> {
+  if (pausePromise) {
+    await pausePromise
+  }
+  return keepScanning
+}
+
 let excludedFiletypes: string[] = []
 // Compiled regexes from glob patterns, used to exclude files by path
 let excludedPathRegexes: RegExp[] = []
@@ -306,7 +339,13 @@ fixupNodeWorkerEnvironment().then(() => {
         break
       }
       case 'stop': {
-        keepScanning = false
+        // Pause scanning — the scan loop will await waitIfPaused()
+        pauseScanning()
+        break
+      }
+      case 'resume': {
+        // Resume scanning after a pause
+        resumeScanning()
         break
       }
       default:
@@ -402,12 +441,18 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
   ): Promise<void> {
     for await (const entry of dir.values()) {
       if (!keepScanning) return
+      // Backpressure: if the main thread paused us, wait here until resumed
+      if (!(await waitIfPaused())) return
       if (entry.kind === 'file') {
         const file = await (entry as FileSystemFileHandle).getFile()
         const fileAnomalies: string[] = []
 
         if (
-          await shouldProcessFile(file, fileAnomalies, `${prefix}/${entry.name}`)
+          await shouldProcessFile(
+            file,
+            fileAnomalies,
+            `${prefix}/${entry.name}`,
+          )
         ) {
           const key = `${prefix}/${entry.name}`
           const prev = previousIndex ? previousIndex[key] : undefined
@@ -467,12 +512,17 @@ async function scanDirectoryNode(dirPath: string) {
     const fs = await import('fs/promises')
     const path = await import('path')
 
-    async function traverse(currentPath: string, prefix: string): Promise<void> {
+    async function traverse(
+      currentPath: string,
+      prefix: string,
+    ): Promise<void> {
       const entries = await fs.readdir(currentPath, { withFileTypes: true })
       entries.sort((a, b) => a.name.localeCompare(b.name))
 
       for (const entry of entries) {
         if (!keepScanning) return
+        // Backpressure: if the main thread paused us, wait here until resumed
+        if (!(await waitIfPaused())) return
         if (entry.isFile()) {
           const filePath = path.join(currentPath, entry.name)
           const stats = await fs.stat(filePath)

@@ -83,12 +83,40 @@ export let scanAnomalies: { fileInfo: TFileInfo; anomalies: string[] }[] = []
 // Callbacks set by curateMany, stored here for use by the dispatch loop.
 let progressCallback: ProgressCallback = () => {}
 
+// Callback to resume the scan worker when the processing queue drains below
+// the low-water mark. Set by curateMany via setScanResumeCallback().
+let scanResumeCallback: (() => void) | null = null
+let scanPaused = false
+
+/**
+ * Low-water mark for the file processing queue. When the queue size drops
+ * below this threshold after a dispatch, the scan worker is resumed.
+ */
+const LOW_WATER_MARK = 50
+
 // -------------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------------
 
 export function setMappingWorkerOptions(opts: TMappingWorkerOptions): void {
   mappingWorkerOptions = opts
+}
+
+/**
+ * Register a callback that resumes the scan worker. Called by curateMany
+ * after the scan worker is created.
+ */
+export function setScanResumeCallback(cb: (() => void) | null): void {
+  scanResumeCallback = cb
+  scanPaused = false
+}
+
+/**
+ * Mark the scan as paused. Called from the scan worker message handler in
+ * index.ts when the queue exceeds the high-water mark.
+ */
+export function markScanPaused(): void {
+  scanPaused = true
 }
 
 /**
@@ -114,10 +142,12 @@ export async function initializeMappingWorkers(
   if (progressCb) progressCallback = progressCb
 
   const workerCount = navigator.hardwareConcurrency
-const workers = await Promise.all(
-  Array.from({ length: workerCount }, () => createMappingWorker(fileInfoIndex)),
-)
-availableMappingWorkers.push(...workers)
+  const workers = await Promise.all(
+    Array.from({ length: workerCount }, () =>
+      createMappingWorker(fileInfoIndex),
+    ),
+  )
+  availableMappingWorkers.push(...workers)
 }
 
 /**
@@ -147,6 +177,19 @@ export async function dispatchMappingJobs(): Promise<void> {
     } satisfies MappingRequest)
     workersActive += 1
   }
+
+  // Backpressure: resume the scan worker when the queue drains below the
+  // low-water mark. This prevents the queue from staying empty while the
+  // scan worker is paused.
+  if (
+    scanPaused &&
+    filesToProcess.length < LOW_WATER_MARK &&
+    scanResumeCallback
+  ) {
+    scanPaused = false
+    scanResumeCallback()
+  }
+
   if (
     workersActive === 0 &&
     pendingReplacements === 0 &&
