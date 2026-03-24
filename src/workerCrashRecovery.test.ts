@@ -49,7 +49,7 @@ jest.unstable_mockModule('./worker', () => ({
 
 const { curateMany } = await import('./index')
 
-const WORKER_COUNT = navigator.hardwareConcurrency
+const WORKER_COUNT = Math.min(navigator.hardwareConcurrency, 8)
 
 /** Create a behaviors array with normal workers first, crash workers last (LIFO). */
 function makeBehaviors(
