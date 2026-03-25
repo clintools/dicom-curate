@@ -143,7 +143,7 @@ export async function initializeMappingWorkers(
   if (progressCb) progressCallback = progressCb
 
   const effectiveWorkerCount =
-    workerCount ?? Math.min(navigator.hardwareConcurrency, 8)
+    workerCount ?? Math.min(await getHardwareConcurrency(), 8)
   const workers = await Promise.all(
     Array.from({ length: effectiveWorkerCount }, () =>
       createMappingWorker(fileInfoIndex),
@@ -238,6 +238,19 @@ export async function dispatchMappingJobs(): Promise<void> {
 // -------------------------------------------------------------------------
 // Internal helpers
 // -------------------------------------------------------------------------
+
+/**
+ * Return the number of logical CPUs available, working in both browser and
+ * Node.js environments. Falls back to `os.cpus().length` when the global
+ * `navigator` object is not available (Node.js < 21).
+ */
+async function getHardwareConcurrency(): Promise<number> {
+  if (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) {
+    return navigator.hardwareConcurrency
+  }
+  const { cpus } = await import('node:os')
+  return cpus().length
+}
 
 /**
  * Recover from a mapping worker crash. Returns the worker slot, counts the
