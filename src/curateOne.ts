@@ -33,11 +33,12 @@ export type TCurateOneArgs = {
   // once it is known.
   // If this callback is provided and it returns a postMappedHash that matches
   // what curateOne generated, then the output file is not written again.
-  previousMappedFileInfo?: (mappedFileName: string) =>
+  previousMappedFileInfo?: (mappedFileName: string) => Promise<
     | {
         postMappedHash?: string
       }
     | undefined
+  >
 }
 
 export async function curateOne({
@@ -357,7 +358,8 @@ export async function curateOne({
     fileArrayBuffer = null
 
     const previousPostMappedHash = previousMappedFileInfo
-      ? previousMappedFileInfo(clonedMapResults.outputFilePath!)?.postMappedHash
+      ? (await previousMappedFileInfo(clonedMapResults.outputFilePath!))
+          ?.postMappedHash
       : undefined
 
     if (

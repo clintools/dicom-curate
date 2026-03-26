@@ -19,6 +19,7 @@ import type {
   TFileInfoIndex,
   THashMethod,
 } from './types'
+import { OUTPUT_FILE_PREFIX } from './types'
 
 // -------------------------------------------------------------------------
 // Types
@@ -60,8 +61,8 @@ let lastWorkerProgressTime = 0
 // before finishing, to avoid orphaning in-flight replacements.
 let pendingReplacements = 0
 
-// Stored fileInfoIndex from initializeMappingWorkers, needed when spawning
-// replacement workers after a crash.
+// Stored fileInfoIndex from initializeMappingWorkers, used for lookup
+// responses when workers query for previousMappedFileInfo.
 let currentFileInfoIndex: TFileInfoIndex | undefined
 
 // Shared state accessed by both scan worker (in index.ts) and dispatch (here).
@@ -146,9 +147,7 @@ export async function initializeMappingWorkers(
   const effectiveWorkerCount =
     workerCount ?? Math.min(await getHardwareConcurrency(), 8)
   const workers = await Promise.all(
-    Array.from({ length: effectiveWorkerCount }, () =>
-      createMappingWorker(fileInfoIndex),
-    ),
+    Array.from({ length: effectiveWorkerCount }, () => createMappingWorker()),
   )
   availableMappingWorkers.push(...workers)
 }
@@ -310,7 +309,7 @@ function recoverCrashedWorker(
   // Spawn a replacement worker so the pool doesn't shrink permanently.
   // A directory with many problematic files could otherwise kill all workers.
   pendingReplacements += 1
-  void createMappingWorker(currentFileInfoIndex)
+  void createMappingWorker()
     .then((worker) => {
       pendingReplacements -= 1
       availableMappingWorkers.push(worker)
@@ -328,9 +327,7 @@ function recoverCrashedWorker(
  * Used by both initializeMappingWorkers (initial pool) and recoverCrashedWorker
  * (replacement after crash).
  */
-async function createMappingWorker(
-  fileInfoIndex?: TFileInfoIndex,
-): Promise<Worker> {
+async function createMappingWorker(): Promise<Worker> {
   const mappingWorker = await createWorker(
     new URL('./applyMappingsWorker.js', import.meta.url),
     { type: 'module' },
@@ -362,20 +359,21 @@ async function createMappingWorker(
     })
   }
 
-  if (fileInfoIndex !== undefined) {
-    const postMappedOnly = Object.fromEntries(
-      Object.entries(fileInfoIndex).filter(
-        ([_key, value]) => !!value.postMappedHash,
-      ),
-    )
-
-    mappingWorker.postMessage({
-      request: 'fileInfoIndex',
-      fileInfoIndex: postMappedOnly,
-    })
-  }
-
   mappingWorker.addEventListener('message', (event) => {
+    // Handle lookup requests from the worker. The worker sends these when
+    // curateOne needs to check if a mapped file was already uploaded
+    // (previousMappedFileInfo). The index is kept on the main thread to
+    // avoid copying 200k+ entries to every worker.
+    if (event.data.response === 'lookup') {
+      const outputPath: string = event.data.outputPath
+      const entry = currentFileInfoIndex?.[OUTPUT_FILE_PREFIX + outputPath]
+      mappingWorker.postMessage({
+        response: 'lookupResult',
+        postMappedHash: entry?.postMappedHash,
+      })
+      return
+    }
+
     // Any message from a worker means progress is being made.
     lastWorkerProgressTime = Date.now()
     workerCurrentFile.delete(mappingWorker)
