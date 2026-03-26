@@ -1,3 +1,9 @@
+## [0.28.1](https://github.com/clintools/dicom-curate/compare/v0.28.0...v0.28.1) (2026-03-26)
+
+### Performance Improvements
+
+- keep fileInfoIndex on main thread, eliminate per-worker copies ([4658cce](https://github.com/clintools/dicom-curate/commit/4658cce5d58fb89ccb4407a1c0a862ab1f207ca1))
+
 # [0.28.0](https://github.com/clintools/dicom-curate/compare/v0.27.0...v0.28.0) (2026-03-26)
 
 ### Features
