@@ -1,3 +1,9 @@
+# [0.28.0](https://github.com/clintools/dicom-curate/compare/v0.27.0...v0.28.0) (2026-03-26)
+
+### Features
+
+- add aws-s3-etag-2025 hash method for S3 multipart ETag compatibility ([99b48f2](https://github.com/clintools/dicom-curate/commit/99b48f23a47ff1b4d229f2f19767bb04f5cfb685))
+
 # [0.27.0](https://github.com/clintools/dicom-curate/compare/v0.26.2...v0.27.0) (2026-03-26)
 
 ### Bug Fixes
