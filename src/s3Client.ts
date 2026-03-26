@@ -12,7 +12,7 @@ export async function loadS3Client(): Promise<any> {
     const { createRequire } = await import('module')
     const req = createRequire(import.meta.url)
     const mod = req('@aws-sdk/client-s3')
-    cachedS3Client = mod?.default || mod
+    cachedS3Client = mod?.default ?? mod
   } else {
     // browser-friendly dynamic import -> code-split chunk
     cachedS3Client = await import('@aws-sdk/client-s3')

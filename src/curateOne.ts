@@ -81,7 +81,7 @@ export async function curateOne({
     }
     file = await resp.blob()
 
-    const lastModifiedHeader = resp.headers.get('last-modified') || undefined
+    const lastModifiedHeader = resp.headers.get('last-modified')
     if (lastModifiedHeader) {
       mtime = new Date(lastModifiedHeader).toISOString()
     }
@@ -180,7 +180,7 @@ export async function curateOne({
   if (previousSourceFileInfo?.preMappedHash !== undefined) {
     try {
       // choose hashing algorithm: default to crc64 (nvme-style) for compatibility
-      preMappedHash = await hash(fileArrayBuffer!, hashMethod || 'crc64')
+      preMappedHash = await hash(fileArrayBuffer!, hashMethod ?? 'crc64')
     } catch (e) {
       console.warn(`Failed to compute preMappedHash for ${fileInfo.name}`, e)
     }
@@ -313,7 +313,7 @@ export async function curateOne({
   if (!preMappedHash) {
     try {
       // choose hashing algorithm: default to crc64 (nvme-style) for compatibility
-      preMappedHash = await hash(fileArrayBuffer!, hashMethod || 'crc64')
+      preMappedHash = await hash(fileArrayBuffer!, hashMethod ?? 'crc64')
     } catch (e) {
       console.warn(`Failed to compute preMappedHash for ${fileInfo.name}`, e)
     }
@@ -332,7 +332,7 @@ export async function curateOne({
     })
 
     // Always calculate post-mapped hash even if deep compare is not requested
-    postMappedHash = await hash(modifiedArrayBuffer, hashMethod || 'crc64')
+    postMappedHash = await hash(modifiedArrayBuffer, hashMethod ?? 'crc64')
 
     // Release the original file buffer — the modifiedArrayBuffer is all we
     // need from this point. In the passthrough case (no header changes),
@@ -415,9 +415,9 @@ export async function curateOne({
           'X-File-Name': fileName,
           'X-File-Type': 'application/octet-stream',
           'X-File-Size': String(modifiedArrayBuffer.byteLength),
-          'X-Source-File-Size': String(clonedMapResults.fileInfo?.size || ''),
-          'X-Source-File-Modified-Time': mtime || '',
-          'X-Source-File-Hash': preMappedHash || '',
+          'X-Source-File-Size': String(clonedMapResults.fileInfo?.size ?? ''),
+          'X-Source-File-Modified-Time': mtime ?? '',
+          'X-Source-File-Hash': preMappedHash ?? '',
         }
 
         if (outputTarget.http.headers) {
@@ -441,20 +441,20 @@ export async function curateOne({
           console.error(
             `Upload failed for ${uploadUrl}: ${resp.status} ${resp.statusText}`,
           )
-          clonedMapResults.errors = clonedMapResults.errors || []
+          clonedMapResults.errors = clonedMapResults.errors ?? []
           clonedMapResults.errors.push(
             `Upload failed: ${resp.status} ${resp.statusText}`,
           )
         } else {
           // attach upload info if available
-          clonedMapResults.outputUpload = clonedMapResults.outputUpload || {
+          clonedMapResults.outputUpload = clonedMapResults.outputUpload ?? {
             url: uploadUrl,
             status: resp.status,
           }
         }
       } catch (e) {
         console.error('Upload error', e)
-        clonedMapResults.errors = clonedMapResults.errors || []
+        clonedMapResults.errors = clonedMapResults.errors ?? []
         clonedMapResults.errors.push(
           `Upload error: ${e instanceof Error ? e.message : String(e)}`,
         )
@@ -487,9 +487,9 @@ export async function curateOne({
             Body: new Uint8Array(modifiedArrayBuffer),
             ContentType: 'application/octet-stream',
             Metadata: {
-              'source-file-size': String(clonedMapResults.fileInfo?.size || ''),
-              'source-file-modified-time': mtime || '',
-              'source-file-hash': preMappedHash || '',
+              'source-file-size': String(clonedMapResults.fileInfo?.size ?? ''),
+              'source-file-modified-time': mtime ?? '',
+              'source-file-hash': preMappedHash ?? '',
               ...(postMappedHash
                 ? { 'source-file-post-mapped-hash': postMappedHash }
                 : {}),
@@ -505,7 +505,7 @@ export async function curateOne({
         }
       } catch (e) {
         console.error('S3 Upload error', e)
-        clonedMapResults.errors = clonedMapResults.errors || []
+        clonedMapResults.errors = clonedMapResults.errors ?? []
         clonedMapResults.errors.push(
           `S3 Upload error: ${e instanceof Error ? e.message : String(e)}`,
         )

@@ -23,7 +23,7 @@ const nameMap = dcmjs.data.DicomMetaDictionary.nameMap
 // Deal with dcmjs quirk of labeling retired tags with a
 // "RETIRED_" prefix
 function getVr(keyword: string) {
-  const element = nameMap[keyword] || nameMap[`RETIRED_${keyword}`]
+  const element = nameMap[keyword] ?? nameMap[`RETIRED_${keyword}`]
   return element?.vr
 }
 
@@ -118,7 +118,7 @@ export default function deidentifyPS315E({
       }
     }
 
-    return current[tagName] || null
+    return current[tagName] ?? null
   }
 
   const {

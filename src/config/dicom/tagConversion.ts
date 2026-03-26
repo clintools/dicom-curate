@@ -21,7 +21,7 @@ export function convertKeywordToTagId(keyword: string): string {
   // For private tags (which don't have keywords), keep as-is
   const tagId = isPrivateTag(keyword)
     ? keyword
-    : dcmjs.data.DicomMetaDictionary.nameMap[keyword]?.tag || keyword
+    : (dcmjs.data.DicomMetaDictionary.nameMap[keyword]?.tag ?? keyword)
   // Remove parentheses and commas, convert to the format used in dictionary keys
   return tagId.replace(/[(),]/g, '').toLowerCase()
 }
