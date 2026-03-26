@@ -1,3 +1,17 @@
+# [0.27.0](https://github.com/clintools/dicom-curate/compare/v0.26.2...v0.27.0) (2026-03-26)
+
+### Bug Fixes
+
+- add backpressure on scan-to-process pipeline ([b34fbcd](https://github.com/clintools/dicom-curate/commit/b34fbcd7171e53f1e79c01c75bb7e06e788e63e8)), closes [hi#water](https://github.com/hi/issues/water)
+- change default hashMethod from crc64 to md5 for S3 ETag compatibility ([b300d35](https://github.com/clintools/dicom-curate/commit/b300d351927bd9a9e5bfc4dedf21ac30cf1d0d3b))
+- make default worker count cross-platform (browser + Node.js) ([938be8d](https://github.com/clintools/dicom-curate/commit/938be8d6d29dc848b4e0b3d33cddbdebccc35a52))
+- release fileArrayBuffer earlier to allow GC during upload ([e0e1d06](https://github.com/clintools/dicom-curate/commit/e0e1d06f7d81169e1df8f30ebb1ba3d5e466c190))
+- remove unconditional mappedBlob creation, use modifiedArrayBuffer for uploads ([9b6c85a](https://github.com/clintools/dicom-curate/commit/9b6c85a54594f2c937a1db785e1258d46ae1bf94)), closes [#235](https://github.com/clintools/dicom-curate/issues/235)
+
+### Features
+
+- add configurable workerCount option with capped default ([9f1b998](https://github.com/clintools/dicom-curate/commit/9f1b99826c4cfd556a7c32208457d29211eac99d)), closes [hi#core-count](https://github.com/hi/issues/core-count)
+
 ## [0.26.2](https://github.com/clintools/dicom-curate/compare/v0.26.1...v0.26.2) (2026-03-23)
 
 ### Bug Fixes
