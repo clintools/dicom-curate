@@ -21,6 +21,7 @@ export type MappingRequest =
         preMappedHash?: string
       }
       hashMethod?: THashMethod
+      hashPartSize?: number
       serializedMappingOptions: TSerializedMappingOptions
     }
   | {
@@ -94,6 +95,7 @@ fixupNodeWorkerEnvironment()
                 fileInfo,
                 outputTarget: event.data.outputTarget ?? {},
                 hashMethod: event.data.hashMethod,
+                hashPartSize: event.data.hashPartSize,
                 mappingOptions,
                 previousSourceFileInfo: event.data.previousFileInfo,
                 previousMappedFileInfo: (targetName) => {

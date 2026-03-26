@@ -45,6 +45,12 @@ export type OrganizeOptions = {
   // Used in conjunction with fileInfoIndex.
   // Defaults to 'md5'.
   hashMethod?: THashMethod
+  // Part size (in bytes) used by the upstream S3 multipart upload.
+  // Only relevant when hashMethod is 'aws-s3-etag-2025': files larger than
+  // this threshold produce a composite ETag-style hash; smaller files produce
+  // a plain MD5. Defaults to 5 * 1024 * 1024 (5 MB), matching the
+  // @aws-sdk/lib-storage Upload class default.
+  hashPartSize?: number
   // optional previous file info map keyed by "path/name"
   // if set, used to determine if mapping can be skipped for files that appear unchanged
   fileInfoIndex?: TFileInfoIndex
@@ -70,7 +76,17 @@ export type OrganizeOptions = {
   | { inputType: 's3'; inputS3Bucket: TS3BucketOptions }
 )
 
-export type THashMethod = 'crc64' | 'crc32' | 'sha256' | 'md5'
+export type THashMethod =
+  | 'crc64'
+  | 'crc32'
+  | 'sha256'
+  | 'md5'
+  // Matches S3 ETag format: plain MD5 for single-part uploads, composite
+  // md5(concat(md5(part1)...md5(partN)))-N for multipart uploads.
+  // Uses hashPartSize to determine the part boundary (defaults to 5 MB).
+  // The multipart ETag algorithm is undocumented by AWS but empirically
+  // stable since ~2006 for SSE-S3 (AES256) encrypted objects.
+  | 'aws-s3-etag-2025'
 
 // Function that provides HTTP headers
 // Useful when headers contain authorization tokens that may expire

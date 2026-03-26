@@ -17,8 +17,10 @@ export type TCurateOneArgs = {
   outputTarget: TOutputTarget
   mappingOptions: TMappingOptions
   // hash algorithm to use when previousSourceFileInfo is provided. Defaults to 'md5'.
-  // Supported values: 'md5', 'crc64' (NVMe-style / js-crc 64-bit), 'crc32', or 'sha256'.
+  // Supported values: 'md5', 'aws-s3-etag-2025', 'crc64' (NVMe-style), 'crc32', or 'sha256'.
   hashMethod?: THashMethod
+  // Part size (in bytes) for 'aws-s3-etag-2025' hash method. Defaults to 5 MB.
+  hashPartSize?: number
   // If provided, curateOne() will skip processing the file if the passed values
   // match the current properties of the input file.
   previousSourceFileInfo?: {
@@ -43,6 +45,7 @@ export async function curateOne({
   outputTarget,
   mappingOptions,
   hashMethod,
+  hashPartSize,
   previousSourceFileInfo,
   previousMappedFileInfo,
 }: TCurateOneArgs): Promise<
@@ -180,7 +183,11 @@ export async function curateOne({
   if (previousSourceFileInfo?.preMappedHash !== undefined) {
     try {
       // choose hashing algorithm: default to md5 for S3 ETag compatibility
-      preMappedHash = await hash(fileArrayBuffer!, hashMethod ?? 'md5')
+      preMappedHash = await hash(
+        fileArrayBuffer!,
+        hashMethod ?? 'md5',
+        hashPartSize,
+      )
     } catch (e) {
       console.warn(`Failed to compute preMappedHash for ${fileInfo.name}`, e)
     }
@@ -313,7 +320,11 @@ export async function curateOne({
   if (!preMappedHash) {
     try {
       // choose hashing algorithm: default to md5 for S3 ETag compatibility
-      preMappedHash = await hash(fileArrayBuffer!, hashMethod ?? 'md5')
+      preMappedHash = await hash(
+        fileArrayBuffer!,
+        hashMethod ?? 'md5',
+        hashPartSize,
+      )
     } catch (e) {
       console.warn(`Failed to compute preMappedHash for ${fileInfo.name}`, e)
     }
@@ -332,7 +343,11 @@ export async function curateOne({
     })
 
     // Always calculate post-mapped hash even if deep compare is not requested
-    postMappedHash = await hash(modifiedArrayBuffer, hashMethod ?? 'md5')
+    postMappedHash = await hash(
+      modifiedArrayBuffer,
+      hashMethod ?? 'md5',
+      hashPartSize,
+    )
 
     // Release the original file buffer — the modifiedArrayBuffer is all we
     // need from this point. In the passthrough case (no header changes),
