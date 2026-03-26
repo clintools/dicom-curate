@@ -43,7 +43,7 @@ export type OrganizeOptions = {
   skipCollectingMappings?: boolean
   // Hash algorithm to use when calculating & comparing original and mapped file hashes.
   // Used in conjunction with fileInfoIndex.
-  // Defaults to 'crc64'.
+  // Defaults to 'md5'.
   hashMethod?: THashMethod
   // optional previous file info map keyed by "path/name"
   // if set, used to determine if mapping can be skipped for files that appear unchanged

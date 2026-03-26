@@ -12,9 +12,9 @@ export async function hash(
     case 'crc32':
       return crc32Hex(buffer)
     case 'md5':
+    default:
       return md5Hex(buffer)
     case 'crc64':
-    default:
       return crc64Hex(buffer)
   }
 }
