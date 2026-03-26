@@ -135,8 +135,9 @@ export function composedSpec(): SpecPart<THostProps, Ctx>[] {
               ctxIn.hostProps!.activityProviderName,
               ctxIn.centerSubjectId!(parser),
               ctxIn.timepointName!(parser),
-              ctxIn.scanName!(parser) + '=' + parser.getDicom('SeriesNumber') ||
-                'UNKNOWN',
+              ctxIn.scanName!(parser) +
+                '=' +
+                (parser.getDicom('SeriesNumber') ?? 'UNKNOWN'),
               parser.getFilePathComp(parser.FILEBASENAME) + '.dcm',
             ]
           },

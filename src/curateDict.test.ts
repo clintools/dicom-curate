@@ -167,7 +167,7 @@ describe('curateDict basic functionality', () => {
       section: 'meta' | 'dict',
       data: Record<string, any>,
     ) => {
-      Object.entries(data || {}).forEach(([tagId, field]) => {
+      Object.entries(data ?? {}).forEach(([tagId, field]) => {
         if ((field as any).vr === 'UI' && (field as any).Value?.includes(uid)) {
           const keyword = getKeywordForTagId(tagId)
           // Only track if it should be deleted (not kept according to our rules)
@@ -188,7 +188,7 @@ describe('curateDict basic functionality', () => {
       )
       problematicUIDs.forEach(({ tagId, keyword, section }) => {
         console.log(
-          ` - [${section}] Tag ID: ${tagId}, Keyword: ${keyword || 'unknown'}`,
+          ` - [${section}] Tag ID: ${tagId}, Keyword: ${keyword ?? 'unknown'}`,
         )
       })
     }
@@ -1104,7 +1104,7 @@ describe('curateDict basic functionality', () => {
       curationSpec: () => ({
         ...batchSpec,
         dicomPS315EOptions: {
-          ...((batchSpec.dicomPS315EOptions as any) || {}),
+          ...((batchSpec.dicomPS315EOptions as any) ?? {}),
           retainSafePrivateOption: 'Quarantine' as const,
         },
         // Disable DICOM header modifications for cleaner testing
