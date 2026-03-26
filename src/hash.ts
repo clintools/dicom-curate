@@ -2,20 +2,25 @@ import { THashMethod } from './types'
 import md5 from 'md5'
 import { createModel } from 'js-crc'
 
+const DEFAULT_HASH_PART_SIZE = 5 * 1024 * 1024 // 5 MB — matches @aws-sdk/lib-storage default
+
 export async function hash(
   buffer: ArrayBuffer,
   hashMethod: THashMethod,
+  hashPartSize?: number,
 ): Promise<string> {
   switch (hashMethod) {
     case 'sha256':
       return await sha256Hex(buffer)
     case 'crc32':
       return crc32Hex(buffer)
+    case 'crc64':
+      return crc64Hex(buffer)
+    case 'aws-s3-etag-2025':
+      return awsS3Etag(buffer, hashPartSize ?? DEFAULT_HASH_PART_SIZE)
     case 'md5':
     default:
       return md5Hex(buffer)
-    case 'crc64':
-      return crc64Hex(buffer)
   }
 }
 
@@ -28,6 +33,53 @@ async function sha256Hex(buffer: ArrayBuffer) {
 
 function md5Hex(buffer: ArrayBuffer) {
   return md5(new Uint8Array(buffer))
+}
+
+/**
+ * Compute a hash that matches the S3 ETag for the given buffer.
+ *
+ * - Single-part (buffer.byteLength <= partSize): plain MD5 hex string.
+ *   This matches the documented S3 ETag behaviour for objects created via
+ *   PUT Object with SSE-S3 (AES256) encryption.
+ *
+ * - Multi-part (buffer.byteLength > partSize): the undocumented but stable
+ *   composite format  md5(concat(md5_raw(part1) … md5_raw(partN)))-N
+ *   that S3 returns for objects created via the Multipart Upload API.
+ */
+function awsS3Etag(buffer: ArrayBuffer, partSize: number): string {
+  if (buffer.byteLength <= partSize) {
+    return md5Hex(buffer)
+  }
+  return multipartMd5(buffer, partSize)
+}
+
+/**
+ * Reproduce the S3 multipart ETag for a buffer given a known part size.
+ *
+ * Algorithm (empirically stable since ~2006, undocumented by AWS):
+ *   1. Split buffer into ceil(size / partSize) chunks
+ *   2. Compute raw MD5 (16 bytes) of each chunk
+ *   3. Concatenate all raw digests
+ *   4. Compute MD5 of the concatenation → hex
+ *   5. Append "-" + number of parts
+ */
+function multipartMd5(buffer: ArrayBuffer, partSize: number): string {
+  const totalSize = buffer.byteLength
+  const partCount = Math.ceil(totalSize / partSize)
+  const rawDigests = new Uint8Array(partCount * 16)
+
+  for (let i = 0; i < partCount; i++) {
+    const start = i * partSize
+    const end = Math.min(start + partSize, totalSize)
+    const partBuffer = buffer.slice(start, end)
+    // md5() returns a 32-char hex string; convert to 16 raw bytes
+    const hex = md5(new Uint8Array(partBuffer))
+    for (let j = 0; j < 16; j++) {
+      rawDigests[i * 16 + j] = parseInt(hex.slice(j * 2, j * 2 + 2), 16)
+    }
+  }
+
+  return `${md5(rawDigests)}-${partCount}`
 }
 
 // helper: compute crc32 hex (use js-crc). Accepts ArrayBuffer and returns

@@ -27,6 +27,7 @@ import type {
 export type TMappingWorkerOptions = TMappingOptions & {
   outputTarget?: TOutputTarget
   hashMethod?: THashMethod
+  hashPartSize?: number
 }
 
 export type ProgressCallback = (message: TProgressMessage) => void
@@ -166,7 +167,7 @@ export async function dispatchMappingJobs(): Promise<void> {
     // if the worker crashes.
     workerCurrentFile.set(mappingWorker, fileInfo)
 
-    const { outputTarget, hashMethod, ...mappingOptions } =
+    const { outputTarget, hashMethod, hashPartSize, ...mappingOptions } =
       // Not partial anymore.
       mappingWorkerOptions as TMappingWorkerOptions
     mappingWorker.postMessage({
@@ -175,6 +176,7 @@ export async function dispatchMappingJobs(): Promise<void> {
       outputTarget: await getHttpOutputHeaders(outputTarget),
       previousFileInfo,
       hashMethod,
+      hashPartSize,
       serializedMappingOptions: serializeMappingOptions(mappingOptions),
     } satisfies MappingRequest)
     workersActive += 1

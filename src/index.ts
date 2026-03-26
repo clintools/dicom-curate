@@ -196,6 +196,7 @@ async function collectMappingOptions(
   const skipModifications = organizeOptions.skipModifications ?? false
   const skipValidation = organizeOptions.skipValidation ?? false
   const hashMethod = organizeOptions.hashMethod
+  const hashPartSize = organizeOptions.hashPartSize
 
   const dateOffset = organizeOptions.dateOffset
 
@@ -214,6 +215,7 @@ async function collectMappingOptions(
     skipValidation,
     dateOffset,
     hashMethod,
+    hashPartSize,
   }
 }
 
