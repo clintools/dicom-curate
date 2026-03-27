@@ -31,6 +31,7 @@ import {
   setScanResumeCallback,
   markScanPaused,
   terminateAllWorkers,
+  setTotalDiscoveredFiles,
 } from './mappingWorkerPool'
 
 export type { ProgressCallback } from './mappingWorkerPool'
@@ -124,6 +125,12 @@ async function initializeFileListWorker(
           scanAnomalies.push({ fileInfo: anomalyFileInfo, anomalies })
           break
         }
+        case 'count': {
+          // Scanner is counting files ahead of processing (backpressure active).
+          // Update the discovered total so progress reporting uses the real count.
+          setTotalDiscoveredFiles(event.data.totalDiscovered)
+          break
+        }
         case 'done': {
           console.log('directoryScanFinished')
           setDirectoryScanFinished(true)
@@ -140,8 +147,11 @@ async function initializeFileListWorker(
           break
         }
         default: {
-          // @ts-expect-error: response is string here, not never
-          console.error(`Unknown response from worker ${event.data.response}`)
+          console.error(
+            // @ts-expect-error: event.data is never here (all cases handled),
+            // but we log anyway as a defensive guard against future message types.
+            `Unknown response from worker ${event.data.response}`,
+          )
         }
       }
       dispatchMappingJobs()

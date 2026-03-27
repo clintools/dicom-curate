@@ -41,6 +41,10 @@ export type FileScanMsg =
       error: string
     }
   | {
+      response: 'count'
+      totalDiscovered: number
+    }
+  | {
       response: 'done'
     }
 
@@ -80,8 +84,48 @@ let keepScanning = true
 let pauseResolve: (() => void) | null = null
 let pausePromise: Promise<void> | null = null
 
+// --------------------------------------------------------------------------
+// Count-while-paused state
+// --------------------------------------------------------------------------
+
+/** Running count of files that passed filters (cheap or full). */
+let totalDiscovered = 0
+
+/**
+ * When true the scanner continues traversing and counting but does NOT emit
+ * 'file' messages. Instead it buffers lightweight file references and emits
+ * 'count' messages so the main thread can show accurate progress.
+ */
+let countingMode = false
+
+// Buffer types — store references, NOT file content.
+type BufferedHandleFile = {
+  kind: 'handle'
+  entry: FileSystemFileHandle
+  file: File
+  prefix: string
+  name: string
+  size: number
+  prev: { size?: number; mtime?: string; preMappedHash?: string } | undefined
+}
+
+type BufferedPathFile = {
+  kind: 'path'
+  filePath: string
+  name: string
+  size: number
+  prefix: string
+  prev: { size?: number; mtime?: string; preMappedHash?: string } | undefined
+}
+
+type BufferedFile = BufferedHandleFile | BufferedPathFile
+const fileBuffer: BufferedFile[] = []
+
+// --------------------------------------------------------------------------
+
 function pauseScanning(): void {
   if (!pausePromise) {
+    countingMode = true
     pausePromise = new Promise<void>((resolve) => {
       pauseResolve = resolve
     })
@@ -90,6 +134,7 @@ function pauseScanning(): void {
 
 function resumeScanning(): void {
   if (pauseResolve) {
+    countingMode = false
     pauseResolve()
     pauseResolve = null
     pausePromise = null
@@ -299,6 +344,158 @@ async function shouldProcessFileNode(
   }
 }
 
+// --------------------------------------------------------------------------
+// Cheap filters — used during counting mode. These skip the DICOM signature
+// check (which requires opening/reading the file) and only apply metadata-
+// based filters: path regex, filename exclusion, and size.
+// --------------------------------------------------------------------------
+
+/**
+ * Cheap filter for browser Handle path. Requires a File object (from
+ * entry.getFile()) for the size, but does NOT open/read file contents.
+ * Returns true if the file should be counted.
+ */
+function cheapFilter(
+  fileName: string,
+  fileSize: number,
+  filePath: string,
+): boolean {
+  const allExcludedFiletypes = [
+    ...(noDefaultExclusions ? [] : DEFAULT_EXCLUDED_FILETYPES),
+    ...excludedFiletypes,
+  ]
+
+  // Check if the file path matches any excluded path patterns (silent skip)
+  if (excludedPathRegexes.some((regex) => regex.test(filePath))) {
+    return false
+  }
+
+  // Check if the file is in the list of excluded files
+  if (
+    allExcludedFiletypes.some(
+      (excluded) => fileName.toLowerCase() === excluded.toLowerCase(),
+    )
+  ) {
+    return false
+  }
+
+  // If DICOM signature check is disabled, this is the only check we'd do
+  // anyway, so the count is exact.
+  if (noDicomSignatureCheck) {
+    return true
+  }
+
+  // Check filesize — files below 132 bytes can't be valid DICOM
+  if (fileSize < 132) {
+    return false
+  }
+
+  // Can't check DICOM signature without reading — assume it passes for now.
+  // The count self-corrects during buffer drain when the full filter runs.
+  return true
+}
+
+// --------------------------------------------------------------------------
+// Buffer drain — emit 'file' for each buffered entry, running the FULL
+// filter (including DICOM signature check). If a file fails, decrement
+// totalDiscovered and emit a corrected 'count'. Backpressure may re-engage
+// mid-drain, in which case we stop draining and return to counting mode.
+// --------------------------------------------------------------------------
+
+async function drainBuffer(): Promise<void> {
+  while (fileBuffer.length > 0 && keepScanning) {
+    const item = fileBuffer.shift()!
+    const fileAnomalies: string[] = []
+
+    if (item.kind === 'handle') {
+      const filePath = `${item.prefix}/${item.name}`
+      if (await shouldProcessFile(item.file, fileAnomalies, filePath)) {
+        globalThis.postMessage({
+          response: 'file',
+          fileInfo: {
+            path: item.prefix,
+            name: item.name,
+            size: item.size,
+            kind: 'handle',
+            fileHandle: item.entry,
+          },
+          previousFileInfo: item.prev,
+        } satisfies FileScanMsg)
+      } else {
+        // File failed full filter — correct the count
+        totalDiscovered--
+        globalThis.postMessage({
+          response: 'count',
+          totalDiscovered,
+        } satisfies FileScanMsg)
+        if (fileAnomalies.length > 0) {
+          globalThis.postMessage({
+            response: 'scanAnomalies',
+            fileInfo: {
+              path: item.prefix,
+              name: item.name,
+              size: item.size,
+              kind: 'handle',
+              fileHandle: item.entry,
+            },
+            anomalies: fileAnomalies,
+            previousFileInfo: item.prev,
+          } satisfies FileScanMsg)
+        }
+      }
+    } else {
+      // kind === 'path'
+      if (
+        await shouldProcessFileNode(
+          item.filePath,
+          item.name,
+          item.size,
+          fileAnomalies,
+          `${item.prefix}/${item.name}`,
+        )
+      ) {
+        globalThis.postMessage({
+          response: 'file',
+          fileInfo: {
+            path: item.prefix,
+            name: item.name,
+            size: item.size,
+            kind: 'path',
+            fullPath: item.filePath,
+          },
+          previousFileInfo: item.prev,
+        } satisfies FileScanMsg)
+      } else {
+        // File failed full filter — correct the count
+        totalDiscovered--
+        globalThis.postMessage({
+          response: 'count',
+          totalDiscovered,
+        } satisfies FileScanMsg)
+        if (fileAnomalies.length > 0) {
+          globalThis.postMessage({
+            response: 'scanAnomalies',
+            fileInfo: {
+              path: item.prefix,
+              name: item.name,
+              size: item.size,
+              kind: 'path',
+              fullPath: item.filePath,
+            },
+            anomalies: fileAnomalies,
+            previousFileInfo: item.prev,
+          } satisfies FileScanMsg)
+        }
+      }
+    }
+
+    // Backpressure may re-engage during drain
+    if (!(await waitIfPaused())) return
+    // If re-paused during drain, stop draining and return to counting mode
+    if (countingMode) return
+  }
+}
+
 fixupNodeWorkerEnvironment().then(() => {
   globalThis.addEventListener('message', (event) => {
     switch (event.data.request) {
@@ -326,6 +523,11 @@ fixupNodeWorkerEnvironment().then(() => {
         noDicomSignatureCheck = event.data.noDicomSignatureCheck ?? false
         noDefaultExclusions = event.data.noDefaultExclusions ?? false
         keepScanning = true
+
+        // Reset counting state for new scan
+        totalDiscovered = 0
+        countingMode = false
+        fileBuffer.length = 0
 
         if ('path' in eventData) {
           scanDirectoryNode(eventData.path)
@@ -386,6 +588,7 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
             item.Size !== undefined &&
             (await shouldProcessFileItem(item, fileAnomalies))
           ) {
+            totalDiscovered++
             const prev = previousIndex ? previousIndex[item.Key] : undefined
 
             globalThis.postMessage({
@@ -441,21 +644,67 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
   ): Promise<void> {
     for await (const entry of dir.values()) {
       if (!keepScanning) return
-      // Backpressure: if the main thread paused us, wait here until resumed
-      if (!(await waitIfPaused())) return
+
       if (entry.kind === 'file') {
         const file = await (entry as FileSystemFileHandle).getFile()
-        const fileAnomalies: string[] = []
+        const key = `${prefix}/${entry.name}`
+        const prev = previousIndex ? previousIndex[key] : undefined
 
-        if (
-          await shouldProcessFile(
-            file,
-            fileAnomalies,
-            `${prefix}/${entry.name}`,
-          )
-        ) {
-          const key = `${prefix}/${entry.name}`
-          const prev = previousIndex ? previousIndex[key] : undefined
+        if (countingMode) {
+          // Counting mode: cheap filter only, buffer the reference
+          if (cheapFilter(entry.name, file.size, key)) {
+            totalDiscovered++
+            fileBuffer.push({
+              kind: 'handle',
+              entry: entry as FileSystemFileHandle,
+              file,
+              prefix,
+              name: entry.name,
+              size: file.size,
+              prev,
+            })
+            globalThis.postMessage({
+              response: 'count',
+              totalDiscovered,
+            } satisfies FileScanMsg)
+          }
+          // In counting mode we don't emit scanAnomalies for cheap-filter
+          // rejects — they'll be handled during drain if they were buffered,
+          // or are genuinely excluded (no anomaly to report).
+          continue
+        }
+
+        // Feeding mode: drain any buffered files first
+        if (fileBuffer.length > 0) {
+          await drainBuffer()
+          // Drain may have re-engaged counting mode
+          if (countingMode) {
+            // Re-process this entry in counting mode on next iteration
+            // We can't easily "unget" a for-await entry, so handle it here
+            if (cheapFilter(entry.name, file.size, key)) {
+              totalDiscovered++
+              fileBuffer.push({
+                kind: 'handle',
+                entry: entry as FileSystemFileHandle,
+                file,
+                prefix,
+                name: entry.name,
+                size: file.size,
+                prev,
+              })
+              globalThis.postMessage({
+                response: 'count',
+                totalDiscovered,
+              } satisfies FileScanMsg)
+            }
+            continue
+          }
+        }
+
+        // Normal feeding path: full filter, emit 'file'
+        const fileAnomalies: string[] = []
+        if (await shouldProcessFile(file, fileAnomalies, key)) {
+          totalDiscovered++
           globalThis.postMessage({
             response: 'file',
             fileInfo: {
@@ -468,8 +717,6 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
             previousFileInfo: prev,
           } satisfies FileScanMsg)
         } else if (fileAnomalies.length > 0) {
-          const key = `${prefix}/${entry.name}`
-          const prev = previousIndex ? previousIndex[key] : undefined
           globalThis.postMessage({
             response: 'scanAnomalies',
             fileInfo: {
@@ -483,6 +730,9 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
             previousFileInfo: prev,
           } satisfies FileScanMsg)
         }
+
+        // Backpressure: may flip to counting mode for next iteration
+        if (!(await waitIfPaused())) return
       } else if (entry.kind === 'directory') {
         await traverse(
           entry as FileSystemDirectoryHandle,
@@ -494,6 +744,11 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
 
   try {
     await traverse(dir, dir.name)
+    // Drain any remaining buffered files before signalling done
+    if (fileBuffer.length > 0) {
+      countingMode = false
+      await drainBuffer()
+    }
     globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
   } catch (error) {
     globalThis.postMessage({
@@ -521,14 +776,59 @@ async function scanDirectoryNode(dirPath: string) {
 
       for (const entry of entries) {
         if (!keepScanning) return
-        // Backpressure: if the main thread paused us, wait here until resumed
-        if (!(await waitIfPaused())) return
+
         if (entry.isFile()) {
           const filePath = path.join(currentPath, entry.name)
           const stats = await fs.stat(filePath)
-          const fileAnomalies: string[] = []
           const key = `${prefix}/${entry.name}`
+          const prev = previousIndex ? previousIndex[key] : undefined
 
+          if (countingMode) {
+            // Counting mode: cheap filter only, buffer the reference
+            if (cheapFilter(entry.name, stats.size, key)) {
+              totalDiscovered++
+              fileBuffer.push({
+                kind: 'path',
+                filePath,
+                name: entry.name,
+                size: stats.size,
+                prefix,
+                prev,
+              })
+              globalThis.postMessage({
+                response: 'count',
+                totalDiscovered,
+              } satisfies FileScanMsg)
+            }
+            continue
+          }
+
+          // Feeding mode: drain any buffered files first
+          if (fileBuffer.length > 0) {
+            await drainBuffer()
+            // Drain may have re-engaged counting mode
+            if (countingMode) {
+              if (cheapFilter(entry.name, stats.size, key)) {
+                totalDiscovered++
+                fileBuffer.push({
+                  kind: 'path',
+                  filePath,
+                  name: entry.name,
+                  size: stats.size,
+                  prefix,
+                  prev,
+                })
+                globalThis.postMessage({
+                  response: 'count',
+                  totalDiscovered,
+                } satisfies FileScanMsg)
+              }
+              continue
+            }
+          }
+
+          // Normal feeding path: full filter, emit 'file'
+          const fileAnomalies: string[] = []
           if (
             await shouldProcessFileNode(
               filePath,
@@ -538,7 +838,7 @@ async function scanDirectoryNode(dirPath: string) {
               key,
             )
           ) {
-            const prev = previousIndex ? previousIndex[key] : undefined
+            totalDiscovered++
             globalThis.postMessage({
               response: 'file',
               fileInfo: {
@@ -551,7 +851,6 @@ async function scanDirectoryNode(dirPath: string) {
               previousFileInfo: prev,
             } satisfies FileScanMsg)
           } else if (fileAnomalies.length > 0) {
-            const prev = previousIndex ? previousIndex[key] : undefined
             globalThis.postMessage({
               response: 'scanAnomalies',
               fileInfo: {
@@ -565,6 +864,9 @@ async function scanDirectoryNode(dirPath: string) {
               previousFileInfo: prev,
             } satisfies FileScanMsg)
           }
+
+          // Backpressure: may flip to counting mode for next iteration
+          if (!(await waitIfPaused())) return
         } else if (entry.isDirectory()) {
           await traverse(
             path.join(currentPath, entry.name),
@@ -576,6 +878,11 @@ async function scanDirectoryNode(dirPath: string) {
 
     const dirName = await import('path').then((p) => p.basename(dirPath))
     await traverse(dirPath, dirName)
+    // Drain any remaining buffered files before signalling done
+    if (fileBuffer.length > 0) {
+      countingMode = false
+      await drainBuffer()
+    }
     globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
   } catch (error) {
     globalThis.postMessage({
