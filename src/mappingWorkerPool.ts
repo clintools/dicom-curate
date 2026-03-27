@@ -95,6 +95,11 @@ let progressCallback: ProgressCallback = () => {}
 let scanResumeCallback: (() => void) | null = null
 let scanPaused = false
 
+// Total files discovered by the scanner (including those still buffered in the
+// worker). Set via 'count' messages from the scan worker. When available, used
+// in place of the queue-based heuristic for progress reporting.
+let totalDiscoveredFiles: number | undefined = undefined
+
 /**
  * Low-water mark for the file processing queue. When the queue size drops
  * below this threshold after a dispatch, the scan worker is resumed.
@@ -116,6 +121,14 @@ export function setMappingWorkerOptions(opts: TMappingWorkerOptions): void {
 export function setScanResumeCallback(cb: (() => void) | null): void {
   scanResumeCallback = cb
   scanPaused = false
+}
+
+/**
+ * Update the total discovered file count from the scan worker's 'count'
+ * messages. Pass undefined to reset (e.g. at the start of a new run).
+ */
+export function setTotalDiscoveredFiles(n: number | undefined): void {
+  totalDiscoveredFiles = n
 }
 
 /**
@@ -188,6 +201,7 @@ export async function initializeMappingWorkers(
   filesToProcess = []
   directoryScanFinished = false
   scanAnomalies = []
+  totalDiscoveredFiles = undefined
 
   if (progressCb) progressCallback = progressCb
 
@@ -353,7 +367,9 @@ function recoverCrashedWorker(
     response: 'progress',
     mapResults: errorMapResults,
     processedFiles: filesMapped,
-    totalFiles: filesToProcess.length + filesMapped + workersActive,
+    totalFiles:
+      totalDiscoveredFiles ??
+      filesToProcess.length + filesMapped + workersActive,
   })
 
   dispatchMappingJobs()
@@ -453,7 +469,9 @@ async function createMappingWorker(): Promise<Worker> {
           response: 'progress',
           mapResults: event.data.mapResults,
           processedFiles: filesMapped,
-          totalFiles: filesToProcess.length + filesMapped + workersActive,
+          totalFiles:
+            totalDiscoveredFiles ??
+            filesToProcess.length + filesMapped + workersActive,
         })
 
         dispatchMappingJobs()
@@ -483,7 +501,9 @@ async function createMappingWorker(): Promise<Worker> {
           response: 'progress',
           mapResults: errorMapResults,
           processedFiles: filesMapped,
-          totalFiles: filesToProcess.length + filesMapped + workersActive,
+          totalFiles:
+            totalDiscoveredFiles ??
+            filesToProcess.length + filesMapped + workersActive,
         })
         dispatchMappingJobs()
 
