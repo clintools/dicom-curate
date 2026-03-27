@@ -64,6 +64,11 @@ export type OrganizeOptions = {
   // Defaults to the platform's hardware concurrency (capped at 8).
   // Reducing this limits peak memory usage at the cost of slower throughput.
   workerCount?: number
+  // Optional AbortSignal to cancel processing. When aborted, all workers are
+  // hard-terminated and curateMany rejects with a DOMException (name: 'AbortError').
+  // Equivalent to reloading the page — partially written files are detected and
+  // re-processed on the next run via the hash-based fileInfoIndex check.
+  signal?: AbortSignal
 } & (
   | { inputType: 'directory'; inputDirectory: FileSystemDirectoryHandle }
   | { inputType: 'files'; inputFiles: File[] }

@@ -30,6 +30,7 @@ import {
   getLastWorkerProgressTime,
   setScanResumeCallback,
   markScanPaused,
+  terminateAllWorkers,
 } from './mappingWorkerPool'
 
 export type { ProgressCallback } from './mappingWorkerPool'
@@ -265,7 +266,19 @@ async function curateMany(
   organizeOptions: OrganizeOptions,
   onProgress?: ProgressCallback,
 ): Promise<TProgressMessageDone> {
+  // Early rejection for pre-aborted signal — don't create any workers.
+  if (organizeOptions.signal?.aborted) {
+    return Promise.reject(
+      new DOMException('The operation was aborted.', 'AbortError'),
+    )
+  }
+
   return new Promise<TProgressMessageDone>(async (resolve, reject) => {
+    // Prevents double-settle when abort races with natural completion.
+    let settled = false
+
+    const signal = organizeOptions.signal
+
     // Stall watchdog: if no mapping worker at all has reported back for 10
     // minutes (i.e., all active workers are stuck), terminate them and count
     // their in-flight files as mapping errors. This guards against undetectable
@@ -301,15 +314,53 @@ async function curateMany(
     const progressCallback: ProgressCallback = (msg) => {
       onProgress?.(msg)
 
-      if (msg.response === 'done') {
+      if (msg.response === 'done' && !settled) {
+        settled = true
         clearInterval(stallWatchdog)
+        signal?.removeEventListener('abort', onAbort)
         resolve(msg)
       }
     }
 
     const rejectCallback = (reason: Error) => {
+      if (settled) return
+      settled = true
       clearInterval(stallWatchdog)
+      signal?.removeEventListener('abort', onAbort)
       reject(reason)
+    }
+
+    // Reference to the scan worker, hoisted so the abort handler can
+    // terminate it. Assigned later when a directory/path/s3 input is used.
+    let fileListWorker: Worker | undefined
+
+    const onAbort = () => {
+      // Terminate the scan worker if it exists
+      try {
+        fileListWorker?.terminate()
+      } catch {
+        /* already terminated */
+      }
+
+      // Hard-terminate all mapping workers and reset pool state
+      terminateAllWorkers()
+
+      // Reject with standard AbortError
+      rejectCallback(
+        new DOMException('The operation was aborted.', 'AbortError'),
+      )
+    }
+
+    if (signal) {
+      // Re-check in case abort happened between the early check and here
+      if (signal.aborted) {
+        clearInterval(stallWatchdog)
+        rejectCallback(
+          new DOMException('The operation was aborted.', 'AbortError'),
+        )
+        return
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
     }
 
     try {
@@ -337,12 +388,12 @@ async function curateMany(
         organizeOptions.inputType === 'path' ||
         organizeOptions.inputType === 's3'
       ) {
-        const fileListWorker = await initializeFileListWorker(rejectCallback)
+        fileListWorker = await initializeFileListWorker(rejectCallback)
 
         // Wire up backpressure resume: when the dispatch loop drains the
         // queue below the low-water mark, it calls this to resume scanning.
         setScanResumeCallback(() => {
-          fileListWorker.postMessage({ request: 'resume' })
+          fileListWorker!.postMessage({ request: 'resume' })
         })
         let specExcludedFiletypes: string[] | undefined
         let noDicomSignatureCheck = false
@@ -404,7 +455,7 @@ async function curateMany(
 
       dispatchMappingJobs()
     } catch (error) {
-      reject(error)
+      rejectCallback(error as Error)
     }
   })
 }
