@@ -1,3 +1,9 @@
+# [0.29.0](https://github.com/clintools/dicom-curate/compare/v0.28.1...v0.29.0) (2026-03-27)
+
+### Features
+
+- include postMappedHash in noMapResult and capture upload ETag ([e54aec2](https://github.com/clintools/dicom-curate/commit/e54aec298e42ef44a81dd10c7fd89646211710ff))
+
 ## [0.28.1](https://github.com/clintools/dicom-curate/compare/v0.28.0...v0.28.1) (2026-03-26)
 
 ### Performance Improvements
