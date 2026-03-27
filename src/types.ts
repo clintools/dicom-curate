@@ -201,7 +201,7 @@ export type TMapResults = {
   }
   mappedBlob?: Blob
   // Optional info when the mapped output was uploaded to a remote target
-  outputUpload?: { url: string; status: number }
+  outputUpload?: { url: string; status: number; etag?: string }
   // If true, mapping was skipped because the file appears unchanged from previous run
   // New semantics: mappingRequired indicates that mapping must be applied.
   // This replaces the old `noMappingRequired` flag (inverted semantics).
