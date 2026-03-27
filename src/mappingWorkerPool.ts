@@ -61,6 +61,11 @@ let lastWorkerProgressTime = 0
 // before finishing, to avoid orphaning in-flight replacements.
 let pendingReplacements = 0
 
+// Set to true when curateMany is aborted via AbortSignal. Guards dispatch,
+// crash recovery, and worker message handlers against acting on stale state
+// after teardown.
+let aborted = false
+
 // Stored fileInfoIndex from initializeMappingWorkers, used for lookup
 // responses when workers query for previousMappedFileInfo.
 let currentFileInfoIndex: TFileInfoIndex | undefined
@@ -122,6 +127,47 @@ export function markScanPaused(): void {
 }
 
 /**
+ * Hard-terminate all workers (idle and active) and reset pool state.
+ * Called when curateMany is aborted via AbortSignal. Equivalent to a
+ * tab reload — partially written files are handled by hash checks on
+ * the next run.
+ */
+export function terminateAllWorkers(): void {
+  aborted = true
+
+  // Terminate idle workers
+  while (availableMappingWorkers.length) {
+    availableMappingWorkers.pop()!.terminate()
+  }
+
+  // Terminate active workers (those with an in-flight file)
+  for (const [worker] of workerCurrentFile) {
+    try {
+      worker.terminate()
+    } catch {
+      /* already terminated */
+    }
+  }
+  workerCurrentFile.clear()
+
+  // Clear the queue and reset counters
+  filesToProcess.length = 0
+  workersActive = 0
+  pendingReplacements = 0
+  directoryScanFinished = false
+  scanPaused = false
+  scanResumeCallback = null
+}
+
+/**
+ * Whether the current run has been aborted. Used by worker message handlers
+ * to bail out on messages arriving after teardown.
+ */
+export function isAborted(): boolean {
+  return aborted
+}
+
+/**
  * Initialize the mapping worker pool. Call once per curateMany invocation.
  */
 export async function initializeMappingWorkers(
@@ -135,6 +181,7 @@ export async function initializeMappingWorkers(
   mapResultsList = skipCollectingMappings ? undefined : []
   filesMapped = 0
   pendingReplacements = 0
+  aborted = false
   workerCurrentFile.clear()
   lastWorkerProgressTime = Date.now()
   currentFileInfoIndex = fileInfoIndex
@@ -158,6 +205,8 @@ export async function initializeMappingWorkers(
  * replacements, scan finished) and emits the 'done' progress message.
  */
 export async function dispatchMappingJobs(): Promise<void> {
+  if (aborted) return
+
   while (filesToProcess.length > 0 && availableMappingWorkers.length > 0) {
     const { fileInfo, previousFileInfo } = filesToProcess.pop()!
     const mappingWorker = availableMappingWorkers.pop()!
@@ -262,6 +311,9 @@ function recoverCrashedWorker(
   mappingWorker: Worker,
   errorMessage: string,
 ): void {
+  // Bail out if processing has been aborted — no recovery needed.
+  if (aborted) return
+
   // Guard against double-recovery (e.g., both onerror and on('exit') firing
   // for the same crash). Without this, workersActive could go negative.
   if (!workerCurrentFile.has(mappingWorker)) {
@@ -312,6 +364,12 @@ function recoverCrashedWorker(
   void createMappingWorker()
     .then((worker) => {
       pendingReplacements -= 1
+      // If processing was aborted while the replacement was being created,
+      // terminate it immediately instead of adding it to the pool.
+      if (aborted) {
+        worker.terminate()
+        return
+      }
       availableMappingWorkers.push(worker)
       dispatchMappingJobs()
     })
@@ -360,6 +418,9 @@ async function createMappingWorker(): Promise<Worker> {
   }
 
   mappingWorker.addEventListener('message', (event) => {
+    // Ignore messages from workers after abort — the pool is torn down.
+    if (aborted) return
+
     // Handle lookup requests from the worker. The worker sends these when
     // curateOne needs to check if a mapped file was already uploaded
     // (previousMappedFileInfo). The index is kept on the main thread to
