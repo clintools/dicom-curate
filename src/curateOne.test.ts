@@ -6,6 +6,7 @@ import type {
   TMappingOptions,
   TCurationSpecification,
 } from './types'
+import { hash } from './hash'
 
 describe('curateOne with none specification', () => {
   it('returns passthrough mapping results and skips DICOM parsing', async () => {
@@ -131,5 +132,240 @@ describe('curateOne byte-identical output when no header changes', () => {
     // Mapping was still evaluated (not skipped like canSkip or 'none')
     expect(result.mappingRequired).toBe(true)
     expect(Object.keys(result.mappings!)).toHaveLength(0)
+  })
+})
+
+describe('curateOne skip paths', () => {
+  const noOpSpec: () => TCurationSpecification = () => ({
+    inputPathPattern:
+      'protocolNumber/activityProvider/centerSubjectId/timepoint/scan',
+    version: '3.0',
+    hostProps: {},
+    dicomPS315EOptions: 'Off',
+    modifyDicomHeader: () => ({}),
+    outputFilePathComponents: (parser) => [
+      parser.getFilePathComp('protocolNumber'),
+      parser.getFilePathComp('activityProvider'),
+      parser.getFilePathComp(parser.FILENAME),
+    ],
+    errors: () => [],
+  })
+
+  const inputPath =
+    'Sample_Protocol_Number/Sample_CRO/AB12-123/Visit 1/PET-Abdomen'
+
+  function buildDicomBuffer() {
+    const dataset = {
+      PatientName: 'Test',
+      PatientID: 'P001',
+      Modality: 'CT',
+      SOPClassUID: '1.2.840.10008.5.1.4.1.1.2',
+      SOPInstanceUID: '1.2.3.4.5.6.7.8.9',
+      SeriesInstanceUID: '1.2.3.4.5.6.7.8',
+      StudyInstanceUID: '1.2.3.4.5.6.7',
+      SeriesNumber: '1',
+    }
+    const dicomDict = new dcmjs.data.DicomDict({
+      '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2.1'] },
+      '00020002': { vr: 'UI', Value: [dataset.SOPClassUID] },
+      '00020003': { vr: 'UI', Value: [dataset.SOPInstanceUID] },
+    })
+    dicomDict.dict = dcmjs.data.DicomMetaDictionary.denaturalizeDataset(dataset)
+    return dicomDict.write({ allowInvalidVRLength: true })
+  }
+
+  it('includes postMappedHash in fileInfo for output-side skips', async () => {
+    const buffer = buildDicomBuffer()
+
+    // First pass: process the file to get the output hash
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const firstResult = await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+      hashMethod: 'md5',
+    })
+
+    const knownPostMappedHash = firstResult.fileInfo!.postMappedHash!
+    expect(knownPostMappedHash).toBeDefined()
+
+    // Second pass: provide previousMappedFileInfo that returns the same hash
+    // This triggers the output-side skip (postMappedHash match)
+    const fileInfo2: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const secondResult = await curateOne({
+      fileInfo: fileInfo2,
+      outputTarget: {},
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+      hashMethod: 'md5',
+      previousMappedFileInfo: async () => ({
+        postMappedHash: knownPostMappedHash,
+      }),
+    })
+
+    // Should be a skip (noMapResult path)
+    expect(secondResult.mappingRequired).toBe(false)
+    // Output file path should be present (output-side skip includes it)
+    expect(secondResult.outputFilePath).toBeDefined()
+    // postMappedHash should be present in fileInfo for output-side skips
+    expect(secondResult.fileInfo!.postMappedHash).toBe(knownPostMappedHash)
+  })
+
+  it('does not include postMappedHash in fileInfo for input-side skips', async () => {
+    const buffer = buildDicomBuffer()
+    const preMappedHash = await hash(buffer, 'md5')
+
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const result = await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: true },
+      hashMethod: 'md5',
+      previousSourceFileInfo: {
+        preMappedHash,
+      },
+    })
+
+    // Should be a skip (input-side, via preMappedHash match)
+    expect(result.mappingRequired).toBe(false)
+    // Input-side skip does not know the output hash
+    expect(result.fileInfo!.postMappedHash).toBeUndefined()
+    // Input-side skip does not know the output file path
+    expect(result.outputFilePath).toBeUndefined()
+  })
+})
+
+describe('curateOne upload ETag capture', () => {
+  const noOpSpec: () => TCurationSpecification = () => ({
+    inputPathPattern:
+      'protocolNumber/activityProvider/centerSubjectId/timepoint/scan',
+    version: '3.0',
+    hostProps: {},
+    dicomPS315EOptions: 'Off',
+    modifyDicomHeader: () => ({}),
+    outputFilePathComponents: (parser) => [
+      parser.getFilePathComp('protocolNumber'),
+      parser.getFilePathComp('activityProvider'),
+      parser.getFilePathComp(parser.FILENAME),
+    ],
+    errors: () => [],
+  })
+
+  const inputPath =
+    'Sample_Protocol_Number/Sample_CRO/AB12-123/Visit 1/PET-Abdomen'
+
+  function buildDicomBuffer() {
+    const dataset = {
+      PatientName: 'Test',
+      PatientID: 'P001',
+      Modality: 'CT',
+      SOPClassUID: '1.2.840.10008.5.1.4.1.1.2',
+      SOPInstanceUID: '1.2.3.4.5.6.7.8.9',
+      SeriesInstanceUID: '1.2.3.4.5.6.7.8',
+      StudyInstanceUID: '1.2.3.4.5.6.7',
+      SeriesNumber: '1',
+    }
+    const dicomDict = new dcmjs.data.DicomDict({
+      '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2.1'] },
+      '00020002': { vr: 'UI', Value: [dataset.SOPClassUID] },
+      '00020003': { vr: 'UI', Value: [dataset.SOPInstanceUID] },
+    })
+    dicomDict.dict = dcmjs.data.DicomMetaDictionary.denaturalizeDataset(dataset)
+    return dicomDict.write({ allowInvalidVRLength: true })
+  }
+
+  it('captures ETag from HTTP upload response', async () => {
+    const buffer = buildDicomBuffer()
+    const mockEtag = '"d41d8cd98f00b204e9800998ecf8427e"'
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, {
+        status: 200,
+        headers: { ETag: mockEtag },
+      }),
+    )
+
+    try {
+      const fileInfo: TFileInfo = {
+        kind: 'blob',
+        blob: new Blob([buffer], { type: 'application/octet-stream' }),
+        path: inputPath,
+        name: 'test.dcm',
+        size: buffer.byteLength,
+      }
+
+      const result = await curateOne({
+        fileInfo,
+        outputTarget: {
+          http: {
+            url: 'https://example.com/upload',
+          },
+        },
+        mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+        hashMethod: 'md5',
+      })
+
+      expect(result.outputUpload).toBeDefined()
+      expect(result.outputUpload!.status).toBe(200)
+      expect(result.outputUpload!.etag).toBe(mockEtag)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('sets etag to undefined when response has no ETag header', async () => {
+    const buffer = buildDicomBuffer()
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(null, { status: 200 }))
+
+    try {
+      const fileInfo: TFileInfo = {
+        kind: 'blob',
+        blob: new Blob([buffer], { type: 'application/octet-stream' }),
+        path: inputPath,
+        name: 'test.dcm',
+        size: buffer.byteLength,
+      }
+
+      const result = await curateOne({
+        fileInfo,
+        outputTarget: {
+          http: {
+            url: 'https://example.com/upload',
+          },
+        },
+        mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+        hashMethod: 'md5',
+      })
+
+      expect(result.outputUpload).toBeDefined()
+      expect(result.outputUpload!.etag).toBeUndefined()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

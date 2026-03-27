@@ -210,7 +210,10 @@ export async function curateOne({
     }
   }
 
-  const noMapResult = (outputFilePath?: string) => {
+  const noMapResult = (
+    outputFilePath?: string,
+    knownPostMappedHash?: string,
+  ) => {
     const retval: TMapResults = {
       sourceInstanceUID: `unchanged_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
       mappings: {},
@@ -224,6 +227,9 @@ export async function curateOne({
         path: fileInfo.path,
         mtime: previousSourceFileInfo?.mtime,
         preMappedHash: preMappedHash,
+        ...(knownPostMappedHash !== undefined && {
+          postMappedHash: knownPostMappedHash,
+        }),
       },
       // include curationTime even when skipped to measure hashing/check time
       curationTime: performance.now() - startTime,
@@ -366,7 +372,7 @@ export async function curateOne({
       previousPostMappedHash !== undefined &&
       previousPostMappedHash === postMappedHash
     ) {
-      return noMapResult(clonedMapResults.outputFilePath)
+      return noMapResult(clonedMapResults.outputFilePath, postMappedHash)
     }
 
     // Check if outputTarget.directory is a FileSystemDirectoryHandle (browser) or string (Node.js)
@@ -464,9 +470,11 @@ export async function curateOne({
           )
         } else {
           // attach upload info if available
+          const etag = resp.headers.get('etag') ?? undefined
           clonedMapResults.outputUpload = clonedMapResults.outputUpload ?? {
             url: uploadUrl,
             status: resp.status,
+            etag,
           }
         }
       } catch (e) {
@@ -495,7 +503,7 @@ export async function curateOne({
           : ''
         const key = prefix + clonedMapResults.outputFilePath!
 
-        await client.send(
+        const putResponse = await client.send(
           new s3.PutObjectCommand({
             Bucket: outputTarget.s3.bucketName,
             Key: key,
@@ -519,6 +527,7 @@ export async function curateOne({
         clonedMapResults.outputUpload = {
           url: uploadUrl,
           status: 200,
+          etag: putResponse.ETag ?? undefined,
         }
       } catch (e) {
         console.error('S3 Upload error', e)
