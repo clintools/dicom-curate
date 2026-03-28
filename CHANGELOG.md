@@ -1,3 +1,9 @@
+# [0.31.0](https://github.com/clintools/dicom-curate/compare/v0.30.0...v0.31.0) (2026-03-28)
+
+### Features
+
+- decouple file counting from backpressure for accurate progress ([e0cafdd](https://github.com/clintools/dicom-curate/commit/e0cafdd232f9fb048c3f3be6fb52e2fcca2dbf85))
+
 # [0.30.0](https://github.com/clintools/dicom-curate/compare/v0.29.0...v0.30.0) (2026-03-28)
 
 ### Features
