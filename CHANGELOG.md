@@ -1,3 +1,9 @@
+# [0.30.0](https://github.com/clintools/dicom-curate/compare/v0.29.0...v0.30.0) (2026-03-28)
+
+### Features
+
+- add AbortSignal support to curateMany ([4ee688d](https://github.com/clintools/dicom-curate/commit/4ee688d815dbfe25117d8b0f8645d0c48b580a58))
+
 # [0.29.0](https://github.com/clintools/dicom-curate/compare/v0.28.1...v0.29.0) (2026-03-27)
 
 ### Features
