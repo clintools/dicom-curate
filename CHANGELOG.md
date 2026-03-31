@@ -1,3 +1,9 @@
+## [0.32.1](https://github.com/clintools/dicom-curate/compare/v0.32.0...v0.32.1) (2026-03-31)
+
+### Bug Fixes
+
+- emit periodic count messages in normal feeding mode ([#247](https://github.com/clintools/dicom-curate/issues/247)) ([155a6e1](https://github.com/clintools/dicom-curate/commit/155a6e19eb9a6cfd538933affdf881102f540330))
+
 # [0.32.0](https://github.com/clintools/dicom-curate/compare/v0.31.0...v0.32.0) (2026-03-31)
 
 ### Features
