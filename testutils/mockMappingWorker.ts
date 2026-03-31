@@ -8,6 +8,8 @@
 
 export type MockWorkerBehavior =
   | 'normal'
+  | 'slow'
+  | 'slow-then-fast'
   | 'crash-onerror'
   | 'crash-exit'
   | 'crash-onerror-and-exit'
@@ -16,13 +18,20 @@ export type MockWorkerBehavior =
 let mockBehaviors: MockWorkerBehavior[] = []
 let mockWorkerIndex = 0
 let mockWorkersCreated: MockWorker[] = []
+/** Shared counter for slow-then-fast: after this many total responses,
+ *  workers switch from slow to fast. */
+let slowThenFastThreshold = 0
+let totalResponses = 0
 
 export function configureMockMappingWorkers(
   behaviors: MockWorkerBehavior[],
+  options?: { slowThenFastThreshold?: number },
 ): void {
   mockBehaviors = [...behaviors]
   mockWorkerIndex = 0
   mockWorkersCreated = []
+  slowThenFastThreshold = options?.slowThenFastThreshold ?? 0
+  totalResponses = 0
 }
 
 export function getMockWorkersCreated(): MockWorker[] {
@@ -33,6 +42,8 @@ export function resetMockWorkers(): void {
   mockBehaviors = []
   mockWorkerIndex = 0
   mockWorkersCreated = []
+  slowThenFastThreshold = 0
+  totalResponses = 0
 }
 
 export class MockWorker {
@@ -72,7 +83,9 @@ export class MockWorker {
     const fileInfo = data.fileInfo
 
     switch (this.behavior) {
-      case 'normal': {
+      case 'normal':
+      case 'slow':
+      case 'slow-then-fast': {
         const mapResults = {
           sourceInstanceUID: fileInfo?.name || 'unknown',
           outputFilePath: `output/${fileInfo?.name || 'unknown'}`,
@@ -82,11 +95,22 @@ export class MockWorker {
           quarantine: {},
           fileInfo,
         }
+        // 'slow' adds a fixed delay so the scan worker builds up a queue
+        // and triggers backpressure before workers start returning results.
+        // 'slow-then-fast' starts slow then switches to instant responses
+        // after slowThenFastThreshold total responses across all workers.
+        let delay = 0
+        if (this.behavior === 'slow') {
+          delay = 100
+        } else if (this.behavior === 'slow-then-fast') {
+          delay = totalResponses < slowThenFastThreshold ? 100 : 0
+        }
         setTimeout(() => {
           if (!this.terminated) {
+            totalResponses++
             this.emitMessage({ response: 'finished', mapResults })
           }
-        }, 0)
+        }, delay)
         break
       }
       case 'crash-onerror': {

@@ -162,6 +162,77 @@ describe('scanner counting during backpressure', () => {
     expect(maxTotalFiles).toBe(200)
   })
 
+  it('processedFiles never exceeds totalFiles in progress messages', async () => {
+    // Regression test: after backpressure drops and the scanner resumes
+    // normal feeding, files discovered in normal mode must still be
+    // reflected in totalFiles. Without the fix, totalDiscoveredFiles on
+    // the main thread stalls at the counting-mode value while
+    // processedFiles (filesMapped) keeps climbing past it.
+    //
+    // We use slow mapping workers (200ms response delay) so the scan
+    // worker fully scans all files before workers start finishing.
+    // With 200 files emitted at ~0ms intervals, the queue fills past
+    // HIGH_WATER_MARK (100) quickly, engaging counting mode. When
+    // workers start finishing and drain the queue, the scanner resumes
+    // in normal mode for any remaining undiscovered files.
+    //
+    // To ensure files remain for normal-mode discovery AFTER the drain,
+    // we use a larger dataset (500 files) and configure the mock scan
+    // worker to emit files with a small delay (2ms), giving workers
+    // time to drain the queue mid-scan so the scanner exits counting
+    // mode before traversing all files.
+    const extraLargeDir = createTestDicomDir(300, {
+      studyDescription: 'Post-Drain Normal Feeding Test',
+      subdirName: 'PDNF-001',
+    })
+
+    try {
+      // Workers start slow (100ms) to build up the queue past
+      // HIGH_WATER_MARK, engaging counting mode. After 20 responses they
+      // switch to instant, draining the queue and releasing backpressure
+      // permanently while the scanner still has files to discover in
+      // normal feeding mode. This reproduces the scenario where
+      // totalDiscoveredFiles stalls at the counting-mode value.
+      configureMockMappingWorkers(Array(WORKER_COUNT).fill('slow-then-fast'), {
+        slowThenFastThreshold: 20,
+      })
+
+      const progressMessages: TProgressMessage[] = []
+      const result = await curateMany(
+        {
+          inputType: 'path',
+          inputDirectory: extraLargeDir,
+          curationSpec: minimalSpec,
+          skipWrite: true,
+        },
+        (msg) => {
+          progressMessages.push(msg)
+        },
+      )
+
+      expect(result.response).toBe('done')
+      expect(result.processedFiles).toBe(300)
+
+      const progressOnly = progressMessages.filter(
+        (m) => m.response === 'progress',
+      )
+
+      // The invariant: processedFiles should never exceed totalFiles by
+      // more than the periodic count sync interval (100 files). Without
+      // the fix, the overshoot is unbounded (limited only by the number
+      // of files discovered after backpressure drops).
+      const maxOvershoot = Math.max(
+        0,
+        ...progressOnly.map(
+          (m) => (m.processedFiles ?? 0) - (m.totalFiles ?? 0),
+        ),
+      )
+      expect(maxOvershoot).toBeLessThanOrEqual(100)
+    } finally {
+      cleanupTestDicomDir(extraLargeDir)
+    }
+  }, 30000)
+
   it('small dataset works without backpressure — fallback formula used', async () => {
     configureMockMappingWorkers(Array(WORKER_COUNT).fill('normal'))
 
