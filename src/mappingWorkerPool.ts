@@ -6,20 +6,20 @@
  * the stall watchdog. Extracted from index.ts for maintainability.
  */
 
-import { serializeMappingOptions } from './serializeMappingOptions'
-import { getHttpInputHeaders, getHttpOutputHeaders } from './httpHeaders'
-import { createWorker } from './worker'
 import type { MappingRequest } from './applyMappingsWorker'
+import { getHttpInputHeaders, getHttpOutputHeaders } from './httpHeaders'
+import { serializeMappingOptions } from './serializeMappingOptions'
 import type {
-  TMappingOptions,
-  TMapResults,
   TFileInfo,
-  TProgressMessage,
-  TOutputTarget,
   TFileInfoIndex,
   THashMethod,
+  TMappingOptions,
+  TMapResults,
+  TOutputTarget,
+  TProgressMessage,
 } from './types'
 import { OUTPUT_FILE_PREFIX } from './types'
+import { createWorker } from './worker'
 
 // -------------------------------------------------------------------------
 // Types
@@ -98,7 +98,7 @@ let scanPaused = false
 // Total files discovered by the scanner (including those still buffered in the
 // worker). Set via 'count' messages from the scan worker. When available, used
 // in place of the queue-based heuristic for progress reporting.
-let totalDiscoveredFiles: number | undefined = undefined
+let totalDiscoveredFiles: number | undefined
 
 /**
  * Low-water mark for the file processing queue. When the queue size drops
@@ -479,7 +479,7 @@ async function createMappingWorker(): Promise<Worker> {
           console.log(`Finished mapping ${filesMapped} files`)
         }
         break
-      case 'error':
+      case 'error': {
         console.error('Error in mapping worker:', event.data.error)
         availableMappingWorkers.push(mappingWorker)
 
@@ -508,6 +508,7 @@ async function createMappingWorker(): Promise<Worker> {
         dispatchMappingJobs()
 
         break
+      }
       default:
         console.error(`Unknown response from worker ${event.data.response}`)
     }

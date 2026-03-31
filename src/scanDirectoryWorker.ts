@@ -2,10 +2,6 @@ import { loadS3Client } from './s3Client'
 import type { TFileInfo, TFileInfoIndex, TS3BucketOptions } from './types'
 import { fixupNodeWorkerEnvironment } from './worker'
 
-// For editor linter to treat the file as an es module, avoiding the error on
-// keepScanning being redeclared
-export {}
-
 // Case-insensitive filetypes to ALWAYS exclude from processing
 const DEFAULT_EXCLUDED_FILETYPES = [
   'dicomdir',
@@ -568,7 +564,7 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
     })
 
     // Page through the S3 bucket listing using ContinuationToken
-    let continuationToken: string | undefined = undefined
+    let continuationToken: string | undefined
 
     do {
       const listCommand = new s3.ListObjectsV2Command({
@@ -716,6 +712,14 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
             },
             previousFileInfo: prev,
           } satisfies FileScanMsg)
+          // Periodically sync totalDiscovered with the main thread so
+          // progress reporting stays accurate after exiting counting mode.
+          if (totalDiscovered % 100 === 0) {
+            globalThis.postMessage({
+              response: 'count',
+              totalDiscovered,
+            } satisfies FileScanMsg)
+          }
         } else if (fileAnomalies.length > 0) {
           globalThis.postMessage({
             response: 'scanAnomalies',
@@ -749,6 +753,11 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
       countingMode = false
       await drainBuffer()
     }
+    // Final count sync so the main thread has the exact total before 'done'
+    globalThis.postMessage({
+      response: 'count',
+      totalDiscovered,
+    } satisfies FileScanMsg)
     globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
   } catch (error) {
     globalThis.postMessage({
@@ -850,6 +859,14 @@ async function scanDirectoryNode(dirPath: string) {
               },
               previousFileInfo: prev,
             } satisfies FileScanMsg)
+            // Periodically sync totalDiscovered with the main thread so
+            // progress reporting stays accurate after exiting counting mode.
+            if (totalDiscovered % 100 === 0) {
+              globalThis.postMessage({
+                response: 'count',
+                totalDiscovered,
+              } satisfies FileScanMsg)
+            }
           } else if (fileAnomalies.length > 0) {
             globalThis.postMessage({
               response: 'scanAnomalies',
@@ -883,6 +900,11 @@ async function scanDirectoryNode(dirPath: string) {
       countingMode = false
       await drainBuffer()
     }
+    // Final count sync so the main thread has the exact total before 'done'
+    globalThis.postMessage({
+      response: 'count',
+      totalDiscovered,
+    } satisfies FileScanMsg)
     globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
   } catch (error) {
     globalThis.postMessage({

@@ -250,7 +250,8 @@ export class BackpressureScanWorker {
 
     // No buffered files — continue scanning new files
     if (this.scanIndex >= this.files.length) {
-      // All files scanned and drained — done
+      // All files scanned and drained — emit final count sync then done
+      this.emit({ response: 'count', totalDiscovered: this.totalDiscovered })
       this.emit({ response: 'done' })
       return
     }
@@ -259,6 +260,11 @@ export class BackpressureScanWorker {
     this.totalDiscovered++
     this.emitFileAtIndex(this.scanIndex)
     this.scanIndex++
+    // Periodically sync totalDiscovered with the main thread so
+    // progress reporting stays accurate after exiting counting mode.
+    if (this.totalDiscovered % 100 === 0) {
+      this.emit({ response: 'count', totalDiscovered: this.totalDiscovered })
+    }
     this.scheduleNext()
   }
 
