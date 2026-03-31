@@ -2,15 +2,15 @@ import * as dcmjs from 'dcmjs'
 import createNestedDirectories from './createNestedDirectories'
 import curateDict from './curateDict'
 import { fetchWithRetry } from './fetchWithRetry'
+import { hash } from './hash'
+import { loadS3Client } from './s3Client'
 import type {
   TFileInfo,
   THashMethod,
-  TOutputTarget,
   TMappingOptions,
   TMapResults,
+  TOutputTarget,
 } from './types'
-import { hash } from './hash'
-import { loadS3Client } from './s3Client'
 
 export type TCurateOneArgs = {
   fileInfo: TFileInfo
@@ -278,7 +278,6 @@ export async function curateOne({
 
       return mapResults
     }
-
     // 6) perform mapping
 
     ;({ dicomData: mappedDicomData, mapResults: clonedMapResults } = curateDict(
@@ -464,8 +463,8 @@ export async function curateOne({
           console.error(
             `Upload failed for ${uploadUrl}: ${resp.status} ${resp.statusText}`,
           )
-          clonedMapResults.errors = clonedMapResults.errors ?? []
-          clonedMapResults.errors.push(
+          clonedMapResults.uploadErrors = clonedMapResults.uploadErrors ?? []
+          clonedMapResults.uploadErrors.push(
             `Upload failed: ${resp.status} ${resp.statusText}`,
           )
         } else {
@@ -479,8 +478,8 @@ export async function curateOne({
         }
       } catch (e) {
         console.error('Upload error', e)
-        clonedMapResults.errors = clonedMapResults.errors ?? []
-        clonedMapResults.errors.push(
+        clonedMapResults.uploadErrors = clonedMapResults.uploadErrors ?? []
+        clonedMapResults.uploadErrors.push(
           `Upload error: ${e instanceof Error ? e.message : String(e)}`,
         )
       }
@@ -531,8 +530,8 @@ export async function curateOne({
         }
       } catch (e) {
         console.error('S3 Upload error', e)
-        clonedMapResults.errors = clonedMapResults.errors ?? []
-        clonedMapResults.errors.push(
+        clonedMapResults.uploadErrors = clonedMapResults.uploadErrors ?? []
+        clonedMapResults.uploadErrors.push(
           `S3 Upload error: ${e instanceof Error ? e.message : String(e)}`,
         )
       }
