@@ -1,3 +1,9 @@
+# [0.32.0](https://github.com/clintools/dicom-curate/compare/v0.31.0...v0.32.0) (2026-03-31)
+
+### Features
+
+- separate upload errors from DICOM validation errors in TMapResults ([1a9319b](https://github.com/clintools/dicom-curate/commit/1a9319ba5483db74280517a5308e61b225c22bf1))
+
 # [0.31.0](https://github.com/clintools/dicom-curate/compare/v0.30.0...v0.31.0) (2026-03-28)
 
 ### Features
