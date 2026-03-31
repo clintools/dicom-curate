@@ -1,6 +1,6 @@
-import { TColumnMappings, TMappedValues, Row } from './csvMapping'
 import type { TNaturalData } from 'dcmjs'
 import type { SpecPart } from './composeSpecs'
+import type { Row, TColumnMappings, TMappedValues } from './csvMapping'
 
 export type Iso8601Duration = string
 
@@ -199,6 +199,9 @@ export type TMapResults = {
   }
   anomalies: string[]
   errors: string[]
+  /** Upload/write failures only (retryable). Separate from `errors` which
+   *  contains DICOM validation issues that cannot be resolved by retrying. */
+  uploadErrors?: string[]
   quarantine: { [objectPath: string]: string }
   listing?: {
     info: TMappingTwoPassInfo[]
