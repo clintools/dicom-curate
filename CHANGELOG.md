@@ -1,3 +1,13 @@
+# [0.33.0](https://github.com/clintools/dicom-curate/compare/v0.32.1...v0.33.0) (2026-04-01)
+
+### Bug Fixes
+
+- emit count messages during S3 scan for accurate progress ([fd60755](https://github.com/clintools/dicom-curate/commit/fd607554b8425d596bdf58f9ab64aa762157e1e9))
+
+### Features
+
+- parallel counter for accurate progress reporting ([#251](https://github.com/clintools/dicom-curate/issues/251)) ([ebf284f](https://github.com/clintools/dicom-curate/commit/ebf284f8fec6659d0901c20b2ca01945e2ff2594)), closes [#245](https://github.com/clintools/dicom-curate/issues/245) [#247](https://github.com/clintools/dicom-curate/issues/247)
+
 ## [0.32.1](https://github.com/clintools/dicom-curate/compare/v0.32.0...v0.32.1) (2026-03-31)
 
 ### Bug Fixes
