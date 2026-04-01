@@ -473,10 +473,22 @@ async function scanS3Bucket(bucketOptions: TS3BucketOptions) {
         }
       }
 
+      // Sync totalDiscovered after each page so the main thread's
+      // totalFiles stays ahead of processedFiles during listing.
+      globalThis.postMessage({
+        response: 'count',
+        totalDiscovered,
+      } satisfies FileScanMsg)
+
       // Prepare for next page
       continuationToken = data.NextContinuationToken as string | undefined
     } while (continuationToken)
 
+    // Final count sync before done
+    globalThis.postMessage({
+      response: 'count',
+      totalDiscovered,
+    } satisfies FileScanMsg)
     globalThis.postMessage({ response: 'done' } satisfies FileScanMsg)
   } catch (error) {
     globalThis.postMessage({
