@@ -1,4 +1,4 @@
-import { writeFile, mkdir } from 'fs/promises'
+import { mkdir, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { additionalElementsToProtect } from './data/additionalElementsToProtect.js'

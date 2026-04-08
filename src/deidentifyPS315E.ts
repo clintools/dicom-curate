@@ -1,21 +1,20 @@
+import type { TNaturalData } from 'dcmjs'
 import * as dcmjs from 'dcmjs'
+import { get as _get } from 'lodash'
+import { getDcmOrganizeStamp } from './config/dicom/dcmOrganizeStamp'
 import dummyValues from './config/dicom/dummyValues'
-import hashUid from './hashUid'
 import { elementNamesToAlwaysKeep } from './config/dicom/elementNamesToAlwaysKeep'
 import { ps315EElements as rawPs315EElements } from './config/dicom/ps315EElements'
-import { convertKeywordToTagId } from './config/dicom/tagConversion'
-import { offsetDateTime } from './offsetDateTime'
 import { retainAdditionalIds } from './config/dicom/retainAdditionalIds'
+import { convertKeywordToTagId } from './config/dicom/tagConversion'
 import { uidRegistryPS3_06_A1 } from './config/dicom/uidRegistryPS3_06_A1'
-import { getDcmOrganizeStamp } from './config/dicom/dcmOrganizeStamp'
-import { get as _get } from 'lodash'
-
-import type { TNaturalData } from 'dcmjs'
+import hashUid from './hashUid'
+import { offsetDateTime } from './offsetDateTime'
 import type {
   Iso8601Duration,
-  TPs315Options,
-  TPs315EElement,
   TMapResults,
+  TPs315EElement,
+  TPs315Options,
 } from './types'
 
 const nameMap = dcmjs.data.DicomMetaDictionary.nameMap
@@ -148,11 +147,11 @@ export default function deidentifyPS315E({
   })
   const taggedps315EElSet = new Set(cleanPolicy.map((item) => item.keyword))
 
-  let instanceUids: string[] = []
+  const instanceUids: string[] = []
 
   // We handle UIs separately
   cleanPolicy = cleanPolicy.filter((p) => {
-    let vr = getVr(p.keyword)
+    const vr = getVr(p.keyword)
 
     if (vr === 'UI') {
       instanceUids.push(p.keyword)
@@ -221,14 +220,14 @@ export default function deidentifyPS315E({
   // Calls modify mapResults in the outer function scope.
   function collectMappingsInData(data: TNaturalData, path = '') {
     // names here can have a 'RETIRED_' prefix!
-    for (let name in data) {
+    for (const name in data) {
       if (/^_.*/.test(name)) {
         continue // ignore tags marked internal with leading underscore
       }
       const attrPath = path + name
       if (name in nameMap) {
         // means it's a known name
-        let vr = nameMap[name].vr
+        const vr = nameMap[name].vr
 
         // Remove optional RETIRED_ prefix as below we check against
         // dictionaries that don't work this way.
@@ -414,8 +413,8 @@ export default function deidentifyPS315E({
         // marked for (full) replace or deletion before.
         if (vr === 'SQ' && !mapResults.mappings[attrPath]) {
           let subDataIndex = 0
-          for (let subData of Object.values(data[name]) as TNaturalData[]) {
-            let subPath = `${path}${name}[${subDataIndex}].`
+          for (const subData of Object.values(data[name]) as TNaturalData[]) {
+            const subPath = `${path}${name}[${subDataIndex}].`
             collectMappingsInData(subData, subPath)
             subDataIndex += 1
           }

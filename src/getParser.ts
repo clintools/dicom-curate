@@ -1,9 +1,9 @@
+import type { TNaturalData } from 'dcmjs'
 import * as dcmjs from 'dcmjs'
 import { get as _get } from 'lodash'
+import { getCsvMapping, type TColumnMappings } from './csvMapping'
 import { protectUid as rawProtectUid } from './deidentifyPS315E'
-import { getCsvMapping, TColumnMappings } from './csvMapping'
-import type { TNaturalData } from 'dcmjs'
-import type { TParser, TCurationSpecification } from './types'
+import type { TCurationSpecification, TParser } from './types'
 
 export const FILEBASENAME: symbol = Symbol('fileBasename')
 export const FILENAME: symbol = Symbol('filename')

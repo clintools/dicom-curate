@@ -1,10 +1,10 @@
 import { curateOne } from './curateOne'
 import { deserializeMappingOptions } from './serializeMappingOptions'
-import {
-  type TFileInfo,
-  type THashMethod,
-  type TOutputTarget,
-  type TSerializedMappingOptions,
+import type {
+  TFileInfo,
+  THashMethod,
+  TOutputTarget,
+  TSerializedMappingOptions,
 } from './types'
 import { fixupNodeWorkerEnvironment } from './worker'
 

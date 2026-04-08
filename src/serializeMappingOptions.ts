@@ -1,5 +1,5 @@
-import { TMappingOptions, TSerializedMappingOptions } from './types'
 import { assertNoClosure } from './checkClosure'
+import type { TMappingOptions, TSerializedMappingOptions } from './types'
 
 export function serializeMappingOptions(
   mappingOptions: TMappingOptions,

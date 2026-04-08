@@ -1,6 +1,6 @@
-import { THashMethod } from './types'
-import md5 from 'md5'
 import { createModel } from 'js-crc'
+import md5 from 'md5'
+import type { THashMethod } from './types'
 
 const DEFAULT_HASH_PART_SIZE = 5 * 1024 * 1024 // 5 MB — matches @aws-sdk/lib-storage default
 

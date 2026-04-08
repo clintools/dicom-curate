@@ -1,11 +1,10 @@
+import type { TDicomData, TNaturalData } from 'dcmjs'
 import * as dcmjs from 'dcmjs'
+import { get as _get } from 'lodash'
 import { composeSpecs } from './composeSpecs'
 import deidentifyPS315E from './deidentifyPS315E'
 import getParser from './getParser'
-import { get as _get } from 'lodash'
-
 import type { TMappingOptions, TMapResults } from './types'
-import type { TDicomData, TNaturalData } from 'dcmjs'
 
 export default function collectMappings(
   inputFilePath: string,
@@ -144,7 +143,7 @@ export default function collectMappings(
   //   for each tag they want to map
   if (!mappingOptions.skipModifications) {
     const dicomMap = finalSpec.modifyDicomHeader(parser)
-    for (let attrPath in dicomMap) {
+    for (const attrPath in dicomMap) {
       // This overrides any default action if attrPath is the same
       mapResults.mappings[attrPath] = [
         _get(naturalData, attrPath),

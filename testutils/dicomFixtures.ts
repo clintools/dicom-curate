@@ -11,9 +11,9 @@
  */
 
 import * as dcmjs from 'dcmjs'
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs'
-import { join } from 'path'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
+import { join } from 'path'
 
 /**
  * Create a temporary directory containing `count` minimal valid DICOM files.

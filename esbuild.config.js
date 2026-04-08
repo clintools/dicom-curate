@@ -1,6 +1,6 @@
 import esbuild from 'esbuild'
 import { readdirSync, statSync } from 'fs'
-import { join, extname } from 'path'
+import { extname, join } from 'path'
 
 // Function to recursively find TypeScript files, excluding tests and @types
 function findEntryPoints(dir, baseDir = '') {

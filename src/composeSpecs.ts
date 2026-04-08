@@ -2,14 +2,14 @@
  * dicom-curate spec composer (runtime multi-spec, input order)
  */
 import { specVersion } from '../src/config/specVersion'
+import type {
+  HostProps,
+  TCurationSpecification,
+  TParser,
+  TPs315Options,
+} from '../src/types'
 import { defaultSpec } from './defaultSpec'
 import { defaultPs315Options } from './deidentifyPS315E'
-import type {
-  TCurationSpecification,
-  TPs315Options,
-  HostProps,
-} from '../src/types'
-import type { TParser } from '../src/types'
 
 type RetainOpt = string[] | false
 
@@ -79,7 +79,7 @@ function mergePs315(chain: Ps315Chain): TPs315Options | 'Off' {
   let acc = chain[0]
 
   for (let i = 1; i < chain.length; i++) {
-    let cur = chain[i]
+    const cur = chain[i]
 
     if (cur === undefined) continue
 
@@ -161,7 +161,7 @@ export function composeSpecs(
     : [specOrComposedSpec]
 
   // Create a fresh copy of defaultSpec to prevent mutation of the global object
-  let final: TCurationSpecification = {
+  const final: TCurationSpecification = {
     ...defaultSpec,
     modifyDicomHeader: defaultSpec.modifyDicomHeader,
     outputFilePathComponents: defaultSpec.outputFilePathComponents,
@@ -179,11 +179,11 @@ export function composeSpecs(
 
   const ctx: HostProps = {}
 
-  let ps315Chain: Ps315Chain = [final.dicomPS315EOptions]
+  const ps315Chain: Ps315Chain = [final.dicomPS315EOptions]
 
   for (const specIn of specsIn) {
     // Convert spec to identical representation.
-    let { ctx: c = {}, spec = { version: specVersion } } = isTCurationSpec(
+    const { ctx: c = {}, spec = { version: specVersion } } = isTCurationSpec(
       specIn,
     )
       ? { spec: specIn }

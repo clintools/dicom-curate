@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from 'fs'
-import { join, relative, dirname } from 'path'
-import { fileURLToPath } from 'url'
-import ts from 'typescript'
+import { dirname, join, relative } from 'path'
 import prettier from 'prettier'
+import ts from 'typescript'
+import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
