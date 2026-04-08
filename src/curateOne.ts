@@ -59,7 +59,7 @@ export async function curateOne({
   let mtime: string | undefined
 
   // 1) Read the file (from handle or blob)
-  let file
+  let file: Blob
   if (fileInfo.kind === 'blob') {
     file = fileInfo.blob
   } else if (fileInfo.kind === 'path') {
@@ -249,7 +249,7 @@ export async function curateOne({
   if (mappingOptions.curationSpec !== 'none') {
     dcmjs.log.setLevel(dcmjs.log.levels.ERROR)
     dcmjs.log.getLogger('validation.dcmjs').setLevel(dcmjs.log.levels.SILENT)
-    let dicomData
+    let dicomData: dcmjs.data.DicomDict
     try {
       dicomData = dcmjs.data.DicomMessage.readFile(fileArrayBuffer!, {
         ignoreErrors: true,
