@@ -279,7 +279,7 @@ async function curateMany(
     )
   }
 
-  return new Promise<TProgressMessageDone>(async (resolve, reject) => {
+  return new Promise<TProgressMessageDone>((resolve, reject) => {
     // Prevents double-settle when abort races with natural completion.
     let settled = false
 
@@ -369,100 +369,104 @@ async function curateMany(
       signal.addEventListener('abort', onAbort, { once: true })
     }
 
-    try {
-      // create the mapping workers
-      await initializeMappingWorkers(
-        organizeOptions.skipCollectingMappings,
-        organizeOptions.fileInfoIndex,
-        progressCallback,
-        organizeOptions.workerCount,
-      )
-
-      // Set global mappingWorkerOptions
-      setMappingWorkerOptions(
-        (await collectMappingOptions(organizeOptions)) as TMappingWorkerOptions,
-      )
-
-      //
-      // If the request provides a directory, then use the worker
-      // to recursively convert to fileSystemHandles.
-      // If the request provides a list of File objects,
-      // send them to the mapping workers directly.
-      //
-      if (
-        organizeOptions.inputType === 'directory' ||
-        organizeOptions.inputType === 'path' ||
-        organizeOptions.inputType === 's3'
-      ) {
-        fileListWorker = await initializeFileListWorker(rejectCallback)
-
-        // Wire up backpressure resume: when the dispatch loop drains the
-        // queue below the low-water mark, it calls this to resume scanning.
-        setScanResumeCallback(() => {
-          fileListWorker!.postMessage({ request: 'resume' })
-        })
-        let specExcludedFiletypes: string[] | undefined
-        let noDicomSignatureCheck = false
-        let noDefaultExclusions = false
-
-        if (organizeOptions.curationSpec === 'none') {
-          // "none" spec means no curation at all, we just copy everything
-          noDicomSignatureCheck = true
-          noDefaultExclusions = true
-        } else {
-          const curationSpec = composeSpecs(organizeOptions.curationSpec())
-          specExcludedFiletypes = curationSpec.excludedFiletypes
-        }
-
-        // Convert glob patterns to regex source strings for the worker.
-        // Globs are matched against the full file path (S3 key or relative filesystem path).
-        const excludedPathRegexes = organizeOptions.excludedPathGlobs?.map(
-          (glob) => picomatch.makeRe(glob).source,
+    ;(async () => {
+      try {
+        // create the mapping workers
+        await initializeMappingWorkers(
+          organizeOptions.skipCollectingMappings,
+          organizeOptions.fileInfoIndex,
+          progressCallback,
+          organizeOptions.workerCount,
         )
 
-        if (organizeOptions.inputType === 'directory') {
-          fileListWorker.postMessage({
-            request: 'scan',
-            directoryHandle: organizeOptions.inputDirectory,
-            excludedFiletypes: specExcludedFiletypes,
-            excludedPathRegexes,
-            noDicomSignatureCheck,
-            noDefaultExclusions,
-            fileInfoIndex: organizeOptions.fileInfoIndex,
-          } satisfies FileScanRequest)
-        } else if (organizeOptions.inputType === 's3') {
-          fileListWorker.postMessage({
-            request: 'scan',
-            bucketOptions: organizeOptions.inputS3Bucket,
-            excludedFiletypes: specExcludedFiletypes,
-            excludedPathRegexes,
-            fileInfoIndex: organizeOptions.fileInfoIndex,
-            noDicomSignatureCheck,
-            noDefaultExclusions,
-          } satisfies FileScanRequest)
-        } else {
-          fileListWorker.postMessage({
-            request: 'scan',
-            path: organizeOptions.inputDirectory,
-            excludedFiletypes: specExcludedFiletypes,
-            excludedPathRegexes,
-            fileInfoIndex: organizeOptions.fileInfoIndex,
-            noDicomSignatureCheck,
-            noDefaultExclusions,
-          } satisfies FileScanRequest)
-        }
-      } else if (organizeOptions.inputType === 'files') {
-        queueFilesForMapping(organizeOptions)
-      } else if (organizeOptions.inputType === 'http') {
-        queueUrlsForMapping(organizeOptions)
-      } else {
-        console.error('`inputType` does not match any supported type')
-      }
+        // Set global mappingWorkerOptions
+        setMappingWorkerOptions(
+          (await collectMappingOptions(
+            organizeOptions,
+          )) as TMappingWorkerOptions,
+        )
 
-      dispatchMappingJobs()
-    } catch (error) {
-      rejectCallback(error as Error)
-    }
+        //
+        // If the request provides a directory, then use the worker
+        // to recursively convert to fileSystemHandles.
+        // If the request provides a list of File objects,
+        // send them to the mapping workers directly.
+        //
+        if (
+          organizeOptions.inputType === 'directory' ||
+          organizeOptions.inputType === 'path' ||
+          organizeOptions.inputType === 's3'
+        ) {
+          fileListWorker = await initializeFileListWorker(rejectCallback)
+
+          // Wire up backpressure resume: when the dispatch loop drains the
+          // queue below the low-water mark, it calls this to resume scanning.
+          setScanResumeCallback(() => {
+            fileListWorker!.postMessage({ request: 'resume' })
+          })
+          let specExcludedFiletypes: string[] | undefined
+          let noDicomSignatureCheck = false
+          let noDefaultExclusions = false
+
+          if (organizeOptions.curationSpec === 'none') {
+            // "none" spec means no curation at all, we just copy everything
+            noDicomSignatureCheck = true
+            noDefaultExclusions = true
+          } else {
+            const curationSpec = composeSpecs(organizeOptions.curationSpec())
+            specExcludedFiletypes = curationSpec.excludedFiletypes
+          }
+
+          // Convert glob patterns to regex source strings for the worker.
+          // Globs are matched against the full file path (S3 key or relative filesystem path).
+          const excludedPathRegexes = organizeOptions.excludedPathGlobs?.map(
+            (glob) => picomatch.makeRe(glob).source,
+          )
+
+          if (organizeOptions.inputType === 'directory') {
+            fileListWorker.postMessage({
+              request: 'scan',
+              directoryHandle: organizeOptions.inputDirectory,
+              excludedFiletypes: specExcludedFiletypes,
+              excludedPathRegexes,
+              noDicomSignatureCheck,
+              noDefaultExclusions,
+              fileInfoIndex: organizeOptions.fileInfoIndex,
+            } satisfies FileScanRequest)
+          } else if (organizeOptions.inputType === 's3') {
+            fileListWorker.postMessage({
+              request: 'scan',
+              bucketOptions: organizeOptions.inputS3Bucket,
+              excludedFiletypes: specExcludedFiletypes,
+              excludedPathRegexes,
+              fileInfoIndex: organizeOptions.fileInfoIndex,
+              noDicomSignatureCheck,
+              noDefaultExclusions,
+            } satisfies FileScanRequest)
+          } else {
+            fileListWorker.postMessage({
+              request: 'scan',
+              path: organizeOptions.inputDirectory,
+              excludedFiletypes: specExcludedFiletypes,
+              excludedPathRegexes,
+              fileInfoIndex: organizeOptions.fileInfoIndex,
+              noDicomSignatureCheck,
+              noDefaultExclusions,
+            } satisfies FileScanRequest)
+          }
+        } else if (organizeOptions.inputType === 'files') {
+          queueFilesForMapping(organizeOptions)
+        } else if (organizeOptions.inputType === 'http') {
+          queueUrlsForMapping(organizeOptions)
+        } else {
+          console.error('`inputType` does not match any supported type')
+        }
+
+        dispatchMappingJobs()
+      } catch (error) {
+        rejectCallback(error as Error)
+      }
+    })()
   })
 }
 

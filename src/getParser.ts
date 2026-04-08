@@ -43,7 +43,7 @@ export default function getParser(
     const patternParts = inputPathPattern.split('/')
     const fileParts = inputFilePath.split('/')
 
-    let idx
+    let idx: number
     if (typeof component === 'number') {
       // numeric indexing (supports negatives)
       idx =
