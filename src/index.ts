@@ -1,57 +1,52 @@
-import { extractColumnMappings, TColumnMappings } from './csvMapping'
-import { curateOne } from './curateOne'
-import { composeSpecs } from './composeSpecs'
-import { iso8601 } from './offsetDateTime'
 import picomatch from 'picomatch'
-
-import type {
-  TFileInfo,
-  OrganizeOptions,
-  TProgressMessageDone,
-  TPs315Options,
-  TCurationSpecification,
-} from './types'
-
-import type { FileScanMsg, FileScanRequest } from './scanDirectoryWorker'
-import { createWorker } from './worker'
-
+import { composeSpecs } from './composeSpecs'
+import { extractColumnMappings, type TColumnMappings } from './csvMapping'
+import { curateOne } from './curateOne'
 import {
-  type TMappingWorkerOptions,
-  type ProgressCallback,
   availableMappingWorkers,
+  dispatchMappingJobs,
   filesToProcess,
+  getLastWorkerProgressTime,
+  getWorkerCurrentFile,
+  getWorkersActive,
+  initializeMappingWorkers,
+  markScanPaused,
+  type ProgressCallback,
   scanAnomalies,
   setDirectoryScanFinished,
   setMappingWorkerOptions,
-  initializeMappingWorkers,
-  dispatchMappingJobs,
-  getWorkerCurrentFile,
-  getWorkersActive,
-  getLastWorkerProgressTime,
   setScanResumeCallback,
-  markScanPaused,
-  terminateAllWorkers,
   setTotalDiscoveredFiles,
+  type TMappingWorkerOptions,
+  terminateAllWorkers,
 } from './mappingWorkerPool'
+import { iso8601 } from './offsetDateTime'
 
-export type { ProgressCallback } from './mappingWorkerPool'
-
-export type {
-  TPs315Options,
-  TMapResults,
-  TProgressMessage,
+import type { FileScanMsg, FileScanRequest } from './scanDirectoryWorker'
+import type {
   OrganizeOptions,
   TCurationSpecification,
+  TFileInfo,
+  TProgressMessageDone,
+  TPs315Options,
 } from './types'
+import { createWorker } from './worker'
 
-export { TCurateOneArgs } from './curateOne'
-
-export { specVersion } from './config/specVersion'
-export { csvTextToRows } from './csvMapping'
-export type { Row } from './csvMapping'
-export { composeSpecs } from './composeSpecs'
 export type { SpecPart } from './composeSpecs'
+export { composeSpecs } from './composeSpecs'
+export { specVersion } from './config/specVersion'
+export type { Row } from './csvMapping'
+export { csvTextToRows } from './csvMapping'
+export { TCurateOneArgs } from './curateOne'
 export { hash } from './hash'
+export type { ProgressCallback } from './mappingWorkerPool'
+export type {
+  OrganizeOptions,
+  TCurationSpecification,
+  TMapResults,
+  TProgressMessage,
+  TPs315Options,
+} from './types'
 
 function requiresDateOffset(
   deIdOpts: TPs315Options | 'Off',
@@ -168,7 +163,7 @@ async function collectMappingOptions(
   // first, get the folder mappings and set output directory
   //
 
-  let outputTarget: TMappingWorkerOptions['outputTarget'] = {}
+  const outputTarget: TMappingWorkerOptions['outputTarget'] = {}
   if (organizeOptions.outputEndpoint) {
     if ('bucketName' in organizeOptions.outputEndpoint) {
       outputTarget.s3 = organizeOptions.outputEndpoint
@@ -188,8 +183,9 @@ async function collectMappingOptions(
   let deIdOpts: TPs315Options | 'Off' = 'Off'
 
   if (typeof curationSpec === 'function') {
-    ;({ dicomPS315EOptions: deIdOpts, additionalData } =
-      composeSpecs(curationSpec()))
+    ;({ dicomPS315EOptions: deIdOpts, additionalData } = composeSpecs(
+      curationSpec(),
+    ))
   }
 
   // Parse the column mappings if the spec requires them and they exist.

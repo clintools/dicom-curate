@@ -1,9 +1,9 @@
-import type { TDicomData, DicomDataset } from 'dcmjs'
-import dummyTestValues from '../testdata/dummyTestValues'
-import { allElements } from '../testdata/allElements'
+import type { DicomDataset, TDicomData } from 'dcmjs'
 import { writeFileSync } from 'fs'
-import { join, dirname } from 'path'
+import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
+import { allElements } from '../testdata/allElements'
+import dummyTestValues from '../testdata/dummyTestValues'
 
 function getValueForVR(
   id: string,

@@ -1,7 +1,7 @@
 declare module 'dcmjs' {
   export type TDicomDataValue = any[]
   /**/
-  /* prettier-ignore */
+  /* biome-ignore */
   export type TVR = string
   export interface DicomJsonElement {
     vr: TVR

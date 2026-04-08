@@ -1,5 +1,5 @@
-import { defaultPs315Options } from './deidentifyPS315E'
 import { specVersion } from './config/specVersion'
+import { defaultPs315Options } from './deidentifyPS315E'
 import type { TCurationSpecification } from './types'
 
 export const defaultSpec: TCurationSpecification = {

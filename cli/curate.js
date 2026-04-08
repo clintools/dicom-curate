@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+
 /* eslint-env node */
 
-import { curateMany } from 'dicom-curate'
-import { Command } from 'commander'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { Command } from 'commander'
+import { curateMany } from 'dicom-curate'
 
 const program = new Command()
 

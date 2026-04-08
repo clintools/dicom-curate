@@ -1,5 +1,5 @@
-import type { TCurationSpecification, TParser } from '../types'
 import type { SpecPart } from '../composeSpecs'
+import type { TCurationSpecification, TParser } from '../types'
 
 type THostProps = {
   protocolNumber: string

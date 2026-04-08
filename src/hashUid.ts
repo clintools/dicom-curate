@@ -12,8 +12,9 @@
  * @param uid A unique identifier string.
  * @returns A mapped UID string.
  */
-import { parse as uuidParse } from 'uuid'
+
 import { sha256 } from '@noble/hashes/sha2.js'
+import { parse as uuidParse } from 'uuid'
 
 // value defined here:
 // https://www.rfc-editor.org/rfc/rfc9562#name-uuid-version-5

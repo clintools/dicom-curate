@@ -1,7 +1,7 @@
-import { writeFile, mkdir } from 'fs/promises'
+import { mkdir, writeFile } from 'fs/promises'
+import fetch from 'node-fetch' // If you're on Node 18+, you can use the built-in global fetch
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
-import fetch from 'node-fetch' // If you're on Node 18+, you can use the built-in global fetch
 import { parseStringPromise } from 'xml2js'
 
 // Derive __dirname in ESM context

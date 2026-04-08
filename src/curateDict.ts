@@ -1,11 +1,10 @@
-import * as dcmjs from 'dcmjs'
-import collectMappings from './collectMappings'
-import mapMetaheader from './mapMetaheader'
-import { convertKeywordPathToTagIdPath } from './config/dicom/tagConversion'
 import type { TDicomData } from 'dcmjs'
+import * as dcmjs from 'dcmjs'
+import { cloneDeep as _cloneDeep, set as _set, unset as _unset } from 'lodash'
+import collectMappings from './collectMappings'
+import { convertKeywordPathToTagIdPath } from './config/dicom/tagConversion'
+import mapMetaheader from './mapMetaheader'
 import type { TMappingOptions } from './types'
-
-import { set as _set, unset as _unset, cloneDeep as _cloneDeep } from 'lodash'
 
 export default function curateDict(
   inputFilePath: string,
@@ -20,7 +19,7 @@ export default function curateDict(
     dicomData,
     mappingOptions,
   )
-  for (let tagPath in mapResults.mappings) {
+  for (const tagPath in mapResults.mappings) {
     const [, operation, , mappedValue] = mapResults.mappings[tagPath]
     switch (operation) {
       case 'delete':
@@ -45,7 +44,7 @@ export default function curateDict(
 
   // Restore quarantined private tags directly to the final DICOM dict
   // This must be done after denaturalization since private tags aren't in the dictionary
-  for (let tagPath in mapResults.quarantine) {
+  for (const tagPath in mapResults.quarantine) {
     const quarantinedElement = mapResults.quarantine[tagPath]
     if (!quarantinedElement) continue
 

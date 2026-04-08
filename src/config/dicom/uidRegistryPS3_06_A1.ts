@@ -8,8 +8,7 @@ export const uidRegistryPS3_06_A1 = {
   '1.2.840.10008.1.​1': 'Verification',
   '1.2.840.10008.1.​2': 'Implicit​VR​Little​Endian',
   '1.2.840.10008.1.​2.​1': 'Explicit​VR​Little​Endian',
-  '1.2.840.10008.1.​2.​1.98':
-    'Encapsulated​Uncompressed​Explicit​VR​Little​Endian',
+  '1.2.840.10008.1.​2.​1.98': 'Encapsulated​Uncompressed​Explicit​VR​Little​Endian',
   '1.2.840.10008.1.2.​1.​99': 'Deflated​Explicit​VR​Little​Endian',
   '1.2.840.10008.1.​2.​2': 'Explicit​VR​Big​Endian',
   '1.2.840.10008.1.2.​4.​50': 'JPEG​Baseline​8​Bit',
@@ -65,10 +64,8 @@ export const uidRegistryPS3_06_A1 = {
   '1.2.840.10008.1.​2.​5': 'RLE​Lossless',
   '1.2.840.10008.1.2.​6.​1': 'RFC​2557​MIME​Encapsulation',
   '1.2.840.10008.1.2.​6.​2': 'XML​Encoding',
-  '1.2.840.10008.1.2.7.1':
-    'SMPTE​ST​211020​Uncompressed​Progressive​Active​Video',
-  '1.2.840.10008.1.2.7.2':
-    'SMPTE​ST​211020​Uncompressed​Interlaced​Active​Video',
+  '1.2.840.10008.1.2.7.1': 'SMPTE​ST​211020​Uncompressed​Progressive​Active​Video',
+  '1.2.840.10008.1.2.7.2': 'SMPTE​ST​211020​Uncompressed​Interlaced​Active​Video',
   '1.2.840.10008.1.2.7.3': 'SMPTE​ST​211030​PCMDigital​Audio',
   '1.2.840.10008.1.​3.​10': 'Media​Storage​Directory​Storage',
   '1.2.840.10008.1.​5.​1': 'Hot​Iron​Palette',
@@ -149,10 +146,8 @@ export const uidRegistryPS3_06_A1 = {
   '1.2.840.10008.5.1.1.40': 'Display​System',
   '1.2.840.10008.5.1.1.40.1': 'Display​System​Instance',
   '1.2.840.10008.5.1.4.1.​1.​1': 'Computed​Radiography​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​1.​1':
-    'Digital​X​Ray​Image​​StorageFor​Presentation',
-  '1.2.840.10008.​5.​1.​4.​1.​1.1.​1.​1':
-    'Digital​X​Ray​Image​​StorageFor​Processing',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​1.​1': 'Digital​X​Ray​Image​​StorageFor​Presentation',
+  '1.2.840.10008.​5.​1.​4.​1.​1.1.​1.​1': 'Digital​X​Ray​Image​​StorageFor​Processing',
   '1.2.840.10008.​5.​1.​4.​1.​1.​1.​2':
     'Digital​Mammography​X​Ray​Image​​StorageFor​Presentation',
   '1.2.840.10008.​5.​1.​4.​1.​1.1.​2.​1':
@@ -163,16 +158,14 @@ export const uidRegistryPS3_06_A1 = {
     'Digital​Intra​Oral​X​Ray​Image​​StorageFor​Processing',
   '1.2.840.10008.5.1.4.1.​1.​2': 'CT​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​2.​1': 'Enhanced​CT​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​2.​2':
-    'Legacy​Converted​Enhanced​CT​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​2.​2': 'Legacy​Converted​Enhanced​CT​Image​Storage',
   '1.2.840.10008.5.1.4.1.​1.​3': 'Ultrasound​Multi​Frame​Image​Storage​Retired',
   '1.2.840.10008.​5.​1.​4.​1.​1.​3.​1': 'Ultrasound​Multi​Frame​Image​Storage',
   '1.2.840.10008.5.1.4.1.​1.​4': 'MR​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​4.​1': 'Enhanced​MR​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​4.​2': 'MR​Spectroscopy​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​4.​3': 'Enhanced​MR​Color​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​4.​4':
-    'Legacy​Converted​Enhanced​MR​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​4.​4': 'Legacy​Converted​Enhanced​MR​Image​Storage',
   '1.2.840.10008.5.1.4.1.​1.​5': 'Nuclear​Medicine​Image​Storage​Retired',
   '1.2.840.10008.5.1.4.1.​1.​6': 'Ultrasound​Image​Storage​Retired',
   '1.2.840.10008.​5.​1.​4.​1.​1.​6.​1': 'Ultrasound​Image​Storage',
@@ -195,39 +188,31 @@ export const uidRegistryPS3_06_A1 = {
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​1.​3': 'Ambulatory​ECG​Waveform​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​1.​4': 'General​32bit​ECG​Waveform​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​2.​1': 'Hemodynamic​Waveform​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.9.​3.​1':
-    'Cardiac​Electrophysiology​Waveform​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.9.​3.​1': 'Cardiac​Electrophysiology​Waveform​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​4.​1': 'Basic​Voice​Audio​Waveform​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​4.​2': 'General​Audio​Waveform​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​5.​1': 'Arterial​Pulse​Waveform​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​6.​1': 'Respiratory​Waveform​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.9.​6.​2':
-    'Multi​channel​Respiratory​Waveform​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.9.​6.​2': 'Multi​channel​Respiratory​Waveform​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​7.​1':
     'Routine​Scalp​Electroencephalogram​Waveform​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​7.​2': 'Electromyogram​Waveform​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​7.​3': 'Electrooculogram​Waveform​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.9.​7.​4':
-    'Sleep​Electroencephalogram​Waveform​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.9.​7.​4': 'Sleep​Electroencephalogram​Waveform​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.9.​8.​1': 'Body​Position​Waveform​Storage',
   '1.2.840.10008.5.1.4.1.​1.​10': 'Standalone​Modality​LUT​Storage',
   '1.2.840.10008.5.1.4.1.​1.​11': 'Standalone​VOI​LUT​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​11.​1':
-    'Grayscale​Softcopy​Presentation​State​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​11.​2':
-    'Color​Softcopy​Presentation​State​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​11.​3':
-    'Pseudo​Color​Softcopy​Presentation​State​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​11.​4':
-    'Blending​Softcopy​Presentation​State​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​11.​1': 'Grayscale​Softcopy​Presentation​State​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​11.​2': 'Color​Softcopy​Presentation​State​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​11.​3': 'Pseudo​Color​Softcopy​Presentation​State​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​11.​4': 'Blending​Softcopy​Presentation​State​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​11.​5':
     'XA​XRF​Grayscale​Softcopy​Presentation​State​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​11.​6':
     'Grayscale​Planar​MPR​Volumetric​Presentation​State​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​11.​7':
     'Compositing​Planar​MPR​Volumetric​Presentation​State​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​11.​8':
-    'Advanced​Blending​Presentation​State​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​11.​8': 'Advanced​Blending​Presentation​State​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​11.​9':
     'Volume​Rendering​Volumetric​Presentation​State​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​11.​10':
@@ -238,15 +223,11 @@ export const uidRegistryPS3_06_A1 = {
     'Variable​Modality​LUT​Softcopy​Presentation​State​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​12.​1': 'X​Ray​Angiographic​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.12.​1.​1': 'Enhanced​XA​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​12.​2':
-    'X​Ray​Radiofluoroscopic​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​12.​2': 'X​Ray​Radiofluoroscopic​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.12.​2.​1': 'Enhanced​XRF​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​12.​3':
-    'XRay​Angiographic​Bi​Plane​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.13.​1.​1':
-    'X​Ray​3D​Angiographic​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.13.​1.​2':
-    'X​Ray​3D​Craniofacial​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​12.​3': 'XRay​Angiographic​Bi​Plane​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.13.​1.​1': 'X​Ray​3D​Angiographic​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.13.​1.​2': 'X​Ray​3D​Craniofacial​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.13.​1.​3': 'Breast​Tomosynthesis​Image​Storage',
   '1.2.840.10008.​5.1.4.1.1.13.1.4':
     'Breast​Projection​X​Ray​Image​​StorageFor​Presentation',
@@ -261,8 +242,7 @@ export const uidRegistryPS3_06_A1 = {
   '1.2.840.10008.5.1.4.1.​1.​66': 'Raw​Data​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​66.​1': 'Spatial​Registration​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​66.​2': 'Spatial​Fiducials​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​66.​3':
-    'Deformable​Spatial​Registration​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​66.​3': 'Deformable​Spatial​Registration​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​66.​4': 'Segmentation​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​66.​5': 'Surface​Segmentation​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​66.​6': 'Tractography​Results​Storage',
@@ -277,18 +257,13 @@ export const uidRegistryPS3_06_A1 = {
   '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​1.​1': 'Video​Endoscopic​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.77.​1.​2': 'VL​Microscopic​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​2.​1': 'Video​Microscopic​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.77.​1.​3':
-    'VL​Slide​Coordinates​Microscopic​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.77.​1.​3': 'VL​Slide​Coordinates​Microscopic​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.77.​1.​4': 'VL​Photographic​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​4.​1': 'Video​Photographic​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​1':
-    'Ophthalmic​Photography​8​Bit​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​2':
-    'Ophthalmic​Photography​16​Bit​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​3':
-    'Stereometric​Relationship​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​4':
-    'Ophthalmic​Tomography​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​1': 'Ophthalmic​Photography​8​Bit​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​2': 'Ophthalmic​Photography​16​Bit​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​3': 'Stereometric​Relationship​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​4': 'Ophthalmic​Tomography​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​5':
     'Wide​Field​Ophthalmic​Photography​Stereographic​Projection​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​6':
@@ -297,27 +272,20 @@ export const uidRegistryPS3_06_A1 = {
     'Ophthalmic​Optical​Coherence​Tomography​En​Face​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.77.1.​5.​8':
     'Ophthalmic​Optical​Coherence​Tomography​B​scan​Volume​Analysis​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.77.​1.​6':
-    'VL​Whole​Slide​Microscopy​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.77.​1.​7':
-    'Dermoscopic​Photography​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.77.​1.​6': 'VL​Whole​Slide​Microscopy​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.77.​1.​7': 'Dermoscopic​Photography​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.77.​1.​8': 'Confocal​Microscopy​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.77.​1.​9':
     'Confocal​Microscopy​Tiled​Pyramidal​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​78.​1': 'Lensometry​Measurements​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​78.​2': 'Autorefraction​Measurements​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​78.​3': 'Keratometry​Measurements​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​78.​4':
-    'Subjective​Refraction​Measurements​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​78.​4': 'Subjective​Refraction​Measurements​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​78.​5': 'Visual​Acuity​Measurements​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​78.​6':
-    'Spectacle​Prescription​Report​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​78.​7':
-    'Ophthalmic​Axial​Measurements​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​78.​8':
-    'Intraocular​Lens​Calculations​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​79.​1':
-    'Macular​Grid​Thickness​And​Volume​Report​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​78.​6': 'Spectacle​Prescription​Report​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​78.​7': 'Ophthalmic​Axial​Measurements​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​78.​8': 'Intraocular​Lens​Calculations​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​79.​1': 'Macular​Grid​Thickness​And​Volume​Report​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​80.​1':
     'Ophthalmic​Visual​Field​Static​Perimetry​Measurements​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​81.​1': 'Ophthalmic​Thickness​Map​Storage',
@@ -333,35 +301,29 @@ export const uidRegistryPS3_06_A1 = {
   '1.2.840.10008.​5.​1.​4.​1.​1.​88.​35': 'Extensible​SR​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​88.​40': 'Procedure​Log​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​88.​50': 'Mammography​CAD​SR​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​88.​59':
-    'Key​Object​Selection​Document​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​88.​59': 'Key​Object​Selection​Document​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​88.​65': 'Chest​CAD​SR​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​88.​67': 'X​Ray​Radiation​Dose​SR​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​88.​68':
-    'Radiopharmaceutical​Radiation​Dose​SR​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​88.​68': 'Radiopharmaceutical​Radiation​Dose​SR​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​88.​69': 'Colon​CAD​SR​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​88.​70': 'Implantation​Plan​SR​Storage',
   '1.2.840.10008.5.​1.​4.​1.​1.​88.​71': 'Acquisition​Context​SR​Storage',
   '1.2.840.10008.5.​1.​4.​1.​1.​88.​72': 'Simplified​Adult​Echo​SR​Storage',
   '1.2.840.10008.5.​1.​4.​1.​1.​88.​73': 'Patient​Radiation​Dose​SR​Storage',
-  '1.2.840.10008.5.​1.​4.​1.​1.​88.​74':
-    'Planned​Imaging​Agent​Administration​SR​Storage',
+  '1.2.840.10008.5.​1.​4.​1.​1.​88.​74': 'Planned​Imaging​Agent​Administration​SR​Storage',
   '1.2.840.10008.5.​1.​4.​1.​1.​88.​75':
     'Performed​Imaging​Agent​Administration​SR​Storage',
-  '1.2.840.10008.5.​1.​4.​1.​1.​88.​76':
-    'Enhanced​XRay​Radiation​Dose​SR​Storage',
+  '1.2.840.10008.5.​1.​4.​1.​1.​88.​76': 'Enhanced​XRay​Radiation​Dose​SR​Storage',
   '1.2.840.10008.5.​1.​4.​1.​1.​88.​77': 'Waveform​Annotation​SR​Storage',
   '1.2.840.10008.5.​1.​4.​1.​1.​90.​1': 'Content​Assessment​Results​Storage',
-  '1.2.840.10008.5.​1.​4.​1.​1.​91.​1':
-    'Microscopy​Bulk​Simple​Annotations​Storage',
+  '1.2.840.10008.5.​1.​4.​1.​1.​91.​1': 'Microscopy​Bulk​Simple​Annotations​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​104.​1': 'Encapsulated​PDF​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​104.​2': 'Encapsulated​CDA​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​104.​3': 'Encapsulated​STL​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​104.​4': 'Encapsulated​OBJ​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​104.​5': 'Encapsulated​MTL​Storage',
   '1.2.840.10008.5.1.4.1.​1.​128': 'Positron​Emission​Tomography​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​128.​1':
-    'Legacy​Converted​Enhanced​PET​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​128.​1': 'Legacy​Converted​Enhanced​PET​Image​Storage',
   '1.2.840.10008.5.1.4.1.​1.​129': 'Standalone​PET​Curve​Storage',
   '1.2.840.10008.5.1.4.1.​1.​130': 'Enhanced​PET​Image​Storage',
   '1.2.840.10008.5.1.4.1.​1.​131': 'Basic​Structured​Display​Storage',
@@ -388,29 +350,22 @@ export const uidRegistryPS3_06_A1 = {
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​6': 'RT​Brachy​Treatment​Record​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​7': 'RT​Treatment​Summary​Record​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​8': 'RT​Ion​Plan​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​9':
-    'RT​Ion​Beams​Treatment​Record​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​9': 'RT​Ion​Beams​Treatment​Record​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​10': 'RT​Physician​Intent​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​11': 'RT​Segment​Annotation​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​12': 'RT​Radiation​Set​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​13':
-    'C​Arm​Photon​Electron​Radiation​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​13': 'C​Arm​Photon​Electron​Radiation​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​14': 'Tomotherapeutic​Radiation​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​15': 'Robotic​Arm​Radiation​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​16': 'RT​Radiation​Record​Set​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​17':
-    'RT​Radiation​Salvage​Record​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​18':
-    'Tomotherapeutic​Radiation​Record​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​19':
-    'C​Arm​Photon​Electron​Radiation​Record​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​17': 'RT​Radiation​Salvage​Record​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​18': 'Tomotherapeutic​Radiation​Record​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​19': 'C​Arm​Photon​Electron​Radiation​Record​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​20': 'Robotic​Radiation​Record​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​21':
-    'RT​Radiation​Set​Delivery​Instruction​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​21': 'RT​Radiation​Set​Delivery​Instruction​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​22': 'RT​Treatment​Preparation​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​23': 'Enhanced​RT​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​24':
-    'Enhanced​Continuous​RT​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​481.​24': 'Enhanced​Continuous​RT​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​481.​25':
     'RT​Patient​Position​Acquisition​Instruction​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​501.​1': 'DICOS​CT​Image​Storage',
@@ -418,29 +373,20 @@ export const uidRegistryPS3_06_A1 = {
     'DICOS​Digital​X​Ray​Image​​StorageFor​Presentation',
   '1.2.840.10008.​5.​1.​4.​1.​1.501.​2.​2':
     'DICOS​Digital​X​Ray​Image​​StorageFor​Processing',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​501.​3':
-    'DICOS​Threat​Detection​Report​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​501.​3': 'DICOS​Threat​Detection​Report​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​501.​4': 'DICOS​2D​AIT​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​501.​5': 'DICOS​3D​AIT​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​501.​6': 'DICOS​Quadrupole​Resonance​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​601.​1': 'Eddy​Current​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​601.​2':
-    'Eddy​Current​Multi​Frame​Image​Storage',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​601.​2': 'Eddy​Current​Multi​Frame​Image​Storage',
   '1.2.840.10008.​5.​1.​4.​1.​1.​601.​3': 'Thermography​Image​Storage',
-  '1.2.840.10008.​5.​1.​4.​1.​1.​601.​4':
-    'Thermography​Multi​Frame​Image​Storage',
-  '1.2.840.10008.5.1.4.1.2.​1.​1':
-    'Patient​Root​Query​Retrieve​Information​Model​Find',
-  '1.2.840.10008.5.1.4.1.2.​1.​2':
-    'Patient​Root​Query​Retrieve​Information​Model​Move',
-  '1.2.840.10008.5.1.4.1.2.​1.​3':
-    'Patient​Root​Query​Retrieve​Information​Model​Get',
-  '1.2.840.10008.5.1.4.1.2.​2.​1':
-    'Study​Root​Query​Retrieve​Information​Model​Find',
-  '1.2.840.10008.5.1.4.1.2.​2.​2':
-    'Study​Root​Query​Retrieve​Information​Model​Move',
-  '1.2.840.10008.5.1.4.1.2.​2.​3':
-    'Study​Root​Query​Retrieve​Information​Model​Get',
+  '1.2.840.10008.​5.​1.​4.​1.​1.​601.​4': 'Thermography​Multi​Frame​Image​Storage',
+  '1.2.840.10008.5.1.4.1.2.​1.​1': 'Patient​Root​Query​Retrieve​Information​Model​Find',
+  '1.2.840.10008.5.1.4.1.2.​1.​2': 'Patient​Root​Query​Retrieve​Information​Model​Move',
+  '1.2.840.10008.5.1.4.1.2.​1.​3': 'Patient​Root​Query​Retrieve​Information​Model​Get',
+  '1.2.840.10008.5.1.4.1.2.​2.​1': 'Study​Root​Query​Retrieve​Information​Model​Find',
+  '1.2.840.10008.5.1.4.1.2.​2.​2': 'Study​Root​Query​Retrieve​Information​Model​Move',
+  '1.2.840.10008.5.1.4.1.2.​2.​3': 'Study​Root​Query​Retrieve​Information​Model​Get',
   '1.2.840.10008.5.1.4.1.2.​3.​1':
     'Patient​​Study​Only​Query​Retrieve​Information​Model​Find',
   '1.2.840.10008.5.1.4.1.2.​3.​2':
@@ -449,18 +395,13 @@ export const uidRegistryPS3_06_A1 = {
     'Patient​Study​Only​Query​Retrieve​Information​Model​Get',
   '1.2.840.10008.5.1.4.1.2.​4.​2': 'Composite​Instance​Root​Retrieve​Move',
   '1.2.840.10008.5.1.4.1.2.​4.​3': 'Composite​Instance​Root​Retrieve​Get',
-  '1.2.840.10008.5.1.4.1.2.​5.​3':
-    'Composite​Instance​Retrieve​Without​Bulk​Data​Get',
-  '1.2.840.10008.5.1.4.20.1':
-    'Defined​Procedure​Protocol​Information​Model​Find',
-  '1.2.840.10008.5.1.4.20.2':
-    'Defined​Procedure​Protocol​Information​Model​Move',
-  '1.2.840.10008.5.1.4.20.3':
-    'Defined​Procedure​Protocol​Information​Model​Get',
+  '1.2.840.10008.5.1.4.1.2.​5.​3': 'Composite​Instance​Retrieve​Without​Bulk​Data​Get',
+  '1.2.840.10008.5.1.4.20.1': 'Defined​Procedure​Protocol​Information​Model​Find',
+  '1.2.840.10008.5.1.4.20.2': 'Defined​Procedure​Protocol​Information​Model​Move',
+  '1.2.840.10008.5.1.4.20.3': 'Defined​Procedure​Protocol​Information​Model​Get',
   '1.2.840.10008.5.1.​4.​31': 'Modality​Worklist​Information​Model​Find',
   '1.2.840.10008.5.1.​4.​32': 'General​Purpose​Worklist​Management​Meta',
-  '1.2.840.10008.5.1.4.​32.​1':
-    'General​Purpose​Worklist​Information​ModelFind',
+  '1.2.840.10008.5.1.4.​32.​1': 'General​Purpose​Worklist​Information​ModelFind',
   '1.2.840.10008.5.1.4.​32.​2': 'General​Purpose​Scheduled​Procedure​Step',
   '1.2.840.10008.5.1.4.​32.​3': 'General​Purpose​Performed​Procedure​Step',
   '1.2.840.10008.5.1.​4.​33': 'Instance​Availability​Notification',
@@ -486,36 +427,26 @@ export const uidRegistryPS3_06_A1 = {
   '1.2.840.10008.5.1.4.​34.​10':
     'RT​Brachy​Application​Setup​Delivery​Instruction​Storage',
   '1.2.840.10008.5.1.4.​37.​1': 'General​Relevant​Patient​Information​Query',
-  '1.2.840.10008.5.1.4.​37.​2':
-    'Breast​Imaging​Relevant​Patient​Information​Query',
+  '1.2.840.10008.5.1.4.​37.​2': 'Breast​Imaging​Relevant​Patient​Information​Query',
   '1.2.840.10008.5.1.4.​37.​3': 'Cardiac​Relevant​Patient​Information​Query',
   '1.2.840.10008.5.1.4.​38.​1': 'Hanging​Protocol​Storage',
   '1.2.840.10008.5.1.4.​38.​2': 'Hanging​Protocol​Information​Model​Find',
   '1.2.840.10008.5.1.4.​38.​3': 'Hanging​Protocol​Information​Model​Move',
   '1.2.840.10008.5.1.4.​38.​4': 'Hanging​Protocol​Information​Model​Get',
   '1.2.840.10008.5.1.4.​39.​1': 'Color​Palette​Storage',
-  '1.2.840.10008.5.1.4.​39.​2':
-    'Color​Palette​Query​Retrieve​Information​Model​Find',
-  '1.2.840.10008.5.1.4.​39.​3':
-    'Color​Palette​Query​Retrieve​Information​Model​Move',
-  '1.2.840.10008.5.1.4.​39.​4':
-    'Color​Palette​Query​Retrieve​Information​Model​Get',
+  '1.2.840.10008.5.1.4.​39.​2': 'Color​Palette​Query​Retrieve​Information​Model​Find',
+  '1.2.840.10008.5.1.4.​39.​3': 'Color​Palette​Query​Retrieve​Information​Model​Move',
+  '1.2.840.10008.5.1.4.​39.​4': 'Color​Palette​Query​Retrieve​Information​Model​Get',
   '1.2.840.10008.5.1.​4.​41': 'Product​Characteristics​Query',
   '1.2.840.10008.5.1.​4.​42': 'Substance​Approval​Query',
   '1.2.840.10008.5.1.4.​43.​1': 'Generic​Implant​Template​Storage',
-  '1.2.840.10008.5.1.4.​43.​2':
-    'Generic​Implant​Template​Information​Model​Find',
-  '1.2.840.10008.5.1.4.​43.​3':
-    'Generic​Implant​Template​Information​Model​Move',
-  '1.2.840.10008.5.1.4.​43.​4':
-    'Generic​Implant​Template​Information​Model​Get',
+  '1.2.840.10008.5.1.4.​43.​2': 'Generic​Implant​Template​Information​Model​Find',
+  '1.2.840.10008.5.1.4.​43.​3': 'Generic​Implant​Template​Information​Model​Move',
+  '1.2.840.10008.5.1.4.​43.​4': 'Generic​Implant​Template​Information​Model​Get',
   '1.2.840.10008.5.1.4.​44.​1': 'Implant​Assembly​Template​Storage',
-  '1.2.840.10008.5.1.4.​44.​2':
-    'Implant​Assembly​Template​Information​Model​Find',
-  '1.2.840.10008.5.1.4.​44.​3':
-    'Implant​Assembly​Template​Information​Model​Move',
-  '1.2.840.10008.5.1.4.​44.​4':
-    'Implant​Assembly​Template​Information​Model​Get',
+  '1.2.840.10008.5.1.4.​44.​2': 'Implant​Assembly​Template​Information​Model​Find',
+  '1.2.840.10008.5.1.4.​44.​3': 'Implant​Assembly​Template​Information​Model​Move',
+  '1.2.840.10008.5.1.4.​44.​4': 'Implant​Assembly​Template​Information​Model​Get',
   '1.2.840.10008.5.1.4.​45.​1': 'Implant​Template​Group​Storage',
   '1.2.840.10008.5.1.4.​45.​2': 'Implant​Template​Group​Information​Model​Find',
   '1.2.840.10008.5.1.4.​45.​3': 'Implant​Template​Group​Information​Model​Move',

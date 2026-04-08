@@ -82,15 +82,15 @@ export async function fixupNodeWorkerEnvironment() {
     // Only needed in Node.js
     const workerThreads = await initializeNodeWorker()
 
-    globalThis.addEventListener = function (event: any, listener: any) {
+    globalThis.addEventListener = (event: any, listener: any) => {
       workerThreads!.parentPort?.addEventListener(event, listener)
     }
 
-    globalThis.postMessage = function (data: any, transferList?: any) {
+    globalThis.postMessage = (data: any, transferList?: any) => {
       workerThreads!.parentPort?.postMessage({ data }, transferList)
     }
 
-    globalThis.close = function () {
+    globalThis.close = () => {
       workerThreads!.parentPort?.close()
     }
   }
