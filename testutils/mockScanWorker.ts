@@ -27,6 +27,7 @@ export class MockScanWorker {
   public terminated = false
 
   private messageListeners: ((event: { data: any }) => void)[] = []
+  private pendingEmitTimeout: ReturnType<typeof setTimeout> | null = null
 
   addEventListener(event: string, listener: any): void {
     if (event === 'message') {
@@ -60,6 +61,7 @@ export class MockScanWorker {
     // postMessage, which goes through the event loop. setTimeout(0) simulates this.
     let i = 0
     const emitNext = () => {
+      this.pendingEmitTimeout = null
       if (this.terminated) return
       if (i < files.length) {
         const relPath = files[i]
@@ -79,16 +81,21 @@ export class MockScanWorker {
           },
         })
         i++
-        setTimeout(emitNext, 0)
+        this.pendingEmitTimeout = setTimeout(emitNext, 0)
       } else {
+        this.pendingEmitTimeout = null
         this.emit({ response: 'done' })
       }
     }
-    setTimeout(emitNext, 0)
+    this.pendingEmitTimeout = setTimeout(emitNext, 0)
   }
 
   terminate(): void {
     this.terminated = true
+    if (this.pendingEmitTimeout) {
+      clearTimeout(this.pendingEmitTimeout)
+      this.pendingEmitTimeout = null
+    }
   }
 
   private emit(data: any): void {

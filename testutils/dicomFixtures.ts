@@ -11,8 +11,8 @@
  */
 
 import * as dcmjs from 'dcmjs'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { randomUUID } from 'node:crypto'
+import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs'
 import { join } from 'path'
 
 /**
@@ -38,7 +38,7 @@ export function createTestDicomDir(
   const studyDescription = options?.studyDescription ?? 'Crash Recovery Test'
   const subdirName = options?.subdirName ?? 'TEST-001'
 
-  const baseDir = join(tmpdir(), `dicom-curate-test-${Date.now()}`)
+  const baseDir = join(tmpdir(), `dicom-curate-test-${randomUUID()}`)
   const filesDir = join(baseDir, subdirName)
   mkdirSync(filesDir, { recursive: true })
 
