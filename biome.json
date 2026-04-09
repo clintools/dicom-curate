@@ -15,13 +15,11 @@
       "!**/dist",
       "!**/coverage",
       "!**/generated",
-      "!**/sst-env.d.ts",
       "!**/*.d.ts",
       "!**/*.test.ts",
       "!**/*.test.tsx",
       "!**/*__mocks__",
-      "!**/*e2e/data",
-      "!**/*src/config"
+      "!**/*e2e/data"
     ]
   },
   "formatter": {
