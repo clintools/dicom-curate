@@ -1,19 +1,19 @@
-import { jest } from '@jest/globals'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchWithRetry } from './fetchWithRetry'
 
 describe('fetchWithRetry', () => {
-  let fetchSpy: jest.SpiedFunction<typeof globalThis.fetch>
+  let fetchSpy: ReturnType<typeof vi.spyOn<typeof globalThis, 'fetch'>>
 
   beforeEach(() => {
-    jest.useFakeTimers()
-    fetchSpy = jest
+    vi.useFakeTimers()
+    fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async () => new Response('ok', { status: 200 }))
   })
 
   afterEach(() => {
-    jest.useRealTimers()
-    jest.restoreAllMocks()
+    vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('succeeds on first attempt without retrying', async () => {
@@ -30,7 +30,7 @@ describe('fetchWithRetry', () => {
     const resultPromise = fetchWithRetry('https://example.com')
 
     // First attempt fails, backoff 1000ms
-    await jest.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(1000)
 
     const resp = await resultPromise
     expect(resp.status).toBe(200)
@@ -46,9 +46,9 @@ describe('fetchWithRetry', () => {
 
     const resultPromise = fetchWithRetry('https://example.com')
 
-    await jest.advanceTimersByTimeAsync(1000) // attempt 1 backoff
-    await jest.advanceTimersByTimeAsync(3000) // attempt 2 backoff
-    await jest.advanceTimersByTimeAsync(9000) // attempt 3 backoff
+    await vi.advanceTimersByTimeAsync(1000) // attempt 1 backoff
+    await vi.advanceTimersByTimeAsync(3000) // attempt 2 backoff
+    await vi.advanceTimersByTimeAsync(9000) // attempt 3 backoff
 
     const resp = await resultPromise
     expect(resp.status).toBe(200)
@@ -65,10 +65,10 @@ describe('fetchWithRetry', () => {
     const assertion = expect(resultPromise).rejects.toThrow('Failed to fetch')
 
     // Advance through all 4 backoff delays (attempts 1-4 fail and wait)
-    await jest.advanceTimersByTimeAsync(1000) // after attempt 1
-    await jest.advanceTimersByTimeAsync(3000) // after attempt 2
-    await jest.advanceTimersByTimeAsync(9000) // after attempt 3
-    await jest.advanceTimersByTimeAsync(27000) // after attempt 4
+    await vi.advanceTimersByTimeAsync(1000) // after attempt 1
+    await vi.advanceTimersByTimeAsync(3000) // after attempt 2
+    await vi.advanceTimersByTimeAsync(9000) // after attempt 3
+    await vi.advanceTimersByTimeAsync(27000) // after attempt 4
 
     // Attempt 5 fails and throws
     await assertion
@@ -104,17 +104,17 @@ describe('fetchWithRetry', () => {
     const resultPromise = fetchWithRetry('https://example.com')
 
     // First attempt fails immediately, then waits 1000ms
-    await jest.advanceTimersByTimeAsync(999)
+    await vi.advanceTimersByTimeAsync(999)
     expect(fetchSpy).toHaveBeenCalledTimes(1) // still waiting
 
-    await jest.advanceTimersByTimeAsync(1)
+    await vi.advanceTimersByTimeAsync(1)
     expect(fetchSpy).toHaveBeenCalledTimes(2) // second attempt fires
 
     // Second attempt fails, then waits 3000ms
-    await jest.advanceTimersByTimeAsync(2999)
+    await vi.advanceTimersByTimeAsync(2999)
     expect(fetchSpy).toHaveBeenCalledTimes(2) // still waiting
 
-    await jest.advanceTimersByTimeAsync(1)
+    await vi.advanceTimersByTimeAsync(1)
     expect(fetchSpy).toHaveBeenCalledTimes(3) // third attempt fires
 
     const resp = await resultPromise

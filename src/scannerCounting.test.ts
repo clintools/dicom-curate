@@ -10,7 +10,15 @@
  * filter), the feeder corrects the count with decremented 'count' messages.
  */
 
-import { jest } from '@jest/globals'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import { cpus } from 'node:os'
 
 import {
@@ -37,7 +45,7 @@ import type { TProgressMessage } from './types'
 
 let scanWorkerInstance: ParallelScanWorker | undefined
 
-jest.unstable_mockModule('./worker', () => ({
+vi.doMock('./worker', () => ({
   createWorker: async (scriptPath: string | URL, _options?: any) => {
     const urlStr = scriptPath.toString()
 
@@ -56,7 +64,7 @@ jest.unstable_mockModule('./worker', () => ({
 
 const { curateMany } = await import('./index')
 
-const WORKER_COUNT = Math.min(cpus().length, 8)
+const WORKER_COUNT = Math.max(1, Math.min(cpus().length || 1, 8))
 
 function minimalSpec() {
   return {
@@ -88,6 +96,7 @@ describe('parallel counter + feeder', () => {
   })
 
   afterEach(() => {
+    scanWorkerInstance?.terminate()
     resetMockWorkers()
     resetParallelScanWorker()
     scanWorkerInstance = undefined
@@ -102,6 +111,7 @@ describe('parallel counter + feeder', () => {
         inputDirectory: largeDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       () => {},
     )
@@ -127,6 +137,7 @@ describe('parallel counter + feeder', () => {
         inputDirectory: largeDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       (msg) => {
         progressMessages.push(msg)
@@ -158,6 +169,7 @@ describe('parallel counter + feeder', () => {
         inputDirectory: largeDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       (msg) => {
         progressMessages.push(msg)
@@ -192,6 +204,7 @@ describe('parallel counter + feeder', () => {
         inputDirectory: largeDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       (msg) => {
         progressMessages.push(msg)
@@ -220,6 +233,7 @@ describe('parallel counter + feeder', () => {
         inputDirectory: smallDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       (msg) => {
         progressMessages.push(msg)
@@ -254,6 +268,7 @@ describe('parallel counter + feeder', () => {
           inputDirectory: largeDir,
           curationSpec: minimalSpec,
           skipWrite: true,
+          workerCount: WORKER_COUNT,
           signal: controller.signal,
         },
         (msg) => {
