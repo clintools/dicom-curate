@@ -10,10 +10,11 @@
  *   await cleanupTestDicomDir(dir)
  */
 
-import * as dcmjs from 'dcmjs'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs'
-import { join } from 'path'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as dcmjs from 'dcmjs'
 
 /**
  * Create a temporary directory containing `count` minimal valid DICOM files.
