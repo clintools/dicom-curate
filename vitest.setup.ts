@@ -1,8 +1,8 @@
 // Polyfill TextEncoder/TextDecoder for Node.js test environment
-import { TextDecoder, TextEncoder } from 'util'
+import { TextDecoder, TextEncoder } from 'node:util'
 
-global.TextEncoder = global.TextEncoder || TextEncoder
-global.TextDecoder = global.TextDecoder || TextDecoder
+globalThis.TextEncoder = globalThis.TextEncoder || TextEncoder
+globalThis.TextDecoder = globalThis.TextDecoder || TextDecoder
 
 // Filter out known dcmjs console errors
 const originalConsoleError = console.error

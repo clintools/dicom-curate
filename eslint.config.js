@@ -51,15 +51,7 @@ export default [
     files: ['**/*.test.ts', '**/*.spec.ts'],
     languageOptions: {
       globals: {
-        jest: 'readonly',
-        describe: 'readonly',
-        it: 'readonly',
-        expect: 'readonly',
-        beforeEach: 'readonly',
-        afterEach: 'readonly',
-        beforeAll: 'readonly',
-        afterAll: 'readonly',
-        fail: 'readonly',
+        ...globals.vitest,
       },
     },
   },
