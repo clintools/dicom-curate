@@ -1,250 +1,256 @@
-import { jest } from '@jest/globals'
+import {
+  describe,
+  beforeEach,
+  it,
+  expect,
+  vi,
+  type MockedFunction,
+} from "vitest";
 
 async function flushAsyncSetup() {
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
-describe('curateMany', () => {
-  let curateMany: typeof import('./index').curateMany
-  let mappingWorkerPool: typeof import('./mappingWorkerPool')
-  let composeSpecsModule: typeof import('./composeSpecs')
+describe("curateMany", () => {
+  let curateMany: typeof import("./index").curateMany;
+  let mappingWorkerPool: typeof import("./mappingWorkerPool");
+  let composeSpecsModule: typeof import("./composeSpecs");
 
-  let capturedProgressCallback: ((msg: any) => void) | undefined
+  let capturedProgressCallback: ((msg: any) => void) | undefined;
 
   function emitDone(result: Record<string, unknown> = {}) {
     if (!capturedProgressCallback) {
-      throw new Error('Progress callback was not captured')
+      throw new Error("Progress callback was not captured");
     }
 
     capturedProgressCallback({
-      response: 'done',
+      response: "done",
       fileCount: 1,
       fileErrors: 0,
       warnings: [],
       elapsedSeconds: 0,
       ...result,
-    })
+    });
   }
 
   beforeEach(async () => {
-    jest.resetModules()
-    jest.clearAllMocks()
-    capturedProgressCallback = undefined
+    vi.resetModules();
+    vi.clearAllMocks();
+    capturedProgressCallback = undefined;
 
-    await jest.unstable_mockModule('./mappingWorkerPool', () => ({
+    vi.doMock("./mappingWorkerPool", () => ({
       availableMappingWorkers: [],
-      dispatchMappingJobs: jest.fn(),
+      dispatchMappingJobs: vi.fn(),
       filesToProcess: [],
-      getLastWorkerProgressTime: jest.fn(() => Date.now()),
-      getWorkerCurrentFile: jest.fn(() => new Map()),
-      getWorkersActive: jest.fn(() => 0),
-      initializeMappingWorkers: jest.fn(
+      getLastWorkerProgressTime: vi.fn(() => Date.now()),
+      getWorkerCurrentFile: vi.fn(() => new Map()),
+      getWorkersActive: vi.fn(() => 0),
+      initializeMappingWorkers: vi.fn(
         async (
           _skipCollectingMappings: unknown,
           _fileInfoIndex: unknown,
           progressCallback: (msg: any) => void,
         ) => {
-          capturedProgressCallback = progressCallback
+          capturedProgressCallback = progressCallback;
         },
       ),
-      markScanPaused: jest.fn(),
+      markScanPaused: vi.fn(),
       scanAnomalies: [],
-      setDirectoryScanFinished: jest.fn(),
-      setMappingWorkerOptions: jest.fn(),
-      setScanResumeCallback: jest.fn(),
-      setTotalDiscoveredFiles: jest.fn(),
-      terminateAllWorkers: jest.fn(),
-    }))
+      setDirectoryScanFinished: vi.fn(),
+      setMappingWorkerOptions: vi.fn(),
+      setScanResumeCallback: vi.fn(),
+      setTotalDiscoveredFiles: vi.fn(),
+      terminateAllWorkers: vi.fn(),
+    }));
 
-    await jest.unstable_mockModule('./composeSpecs', () => ({
-      composeSpecs: jest.fn(() => ({
-        dicomPS315EOptions: 'Off',
+    vi.doMock("./composeSpecs", () => ({
+      composeSpecs: vi.fn(() => ({
+        dicomPS315EOptions: "Off",
       })),
-    }))
+    }));
 
-    await jest.unstable_mockModule('./worker', () => ({
-      createWorker: jest.fn(),
-    }))
+    vi.doMock("./worker", () => ({
+      createWorker: vi.fn(),
+    }));
 
-    mappingWorkerPool = await import('./mappingWorkerPool')
-    composeSpecsModule = await import('./composeSpecs')
-    ;({ curateMany } = await import('./index'))
-  })
+    mappingWorkerPool = await import("./mappingWorkerPool");
+    composeSpecsModule = await import("./composeSpecs");
+    ({ curateMany } = await import("./index"));
+  });
 
-  it('rejects immediately for a pre-aborted signal and does not start worker initialization', async () => {
-    const controller = new AbortController()
-    controller.abort()
+  it("rejects immediately for a pre-aborted signal and does not start worker initialization", async () => {
+    const controller = new AbortController();
+    controller.abort();
 
     await expect(
       curateMany({
-        inputType: 'http',
-        inputUrls: ['https://example.com/file.dcm'],
-        curationSpec: 'none',
+        inputType: "http",
+        inputUrls: ["https://example.com/file.dcm"],
+        curationSpec: "none",
         signal: controller.signal,
       } as any),
     ).rejects.toMatchObject({
-      name: 'AbortError',
-    })
+      name: "AbortError",
+    });
 
-    expect(mappingWorkerPool.initializeMappingWorkers).not.toHaveBeenCalled()
-    expect(mappingWorkerPool.terminateAllWorkers).not.toHaveBeenCalled()
-  })
+    expect(mappingWorkerPool.initializeMappingWorkers).not.toHaveBeenCalled();
+    expect(mappingWorkerPool.terminateAllWorkers).not.toHaveBeenCalled();
+  });
 
-  it('rejects when initializeMappingWorkers fails inside the async IIFE', async () => {
-    ;(
-      mappingWorkerPool.initializeMappingWorkers as jest.MockedFunction<
+  it("rejects when initializeMappingWorkers fails inside the async IIFE", async () => {
+    (
+      mappingWorkerPool.initializeMappingWorkers as MockedFunction<
         typeof mappingWorkerPool.initializeMappingWorkers
       >
-    ).mockRejectedValueOnce(new Error('init failed'))
+    ).mockRejectedValueOnce(new Error("init failed"));
 
     await expect(
       curateMany({
-        inputType: 'http',
-        inputUrls: ['https://example.com/file.dcm'],
-        curationSpec: 'none',
+        inputType: "http",
+        inputUrls: ["https://example.com/file.dcm"],
+        curationSpec: "none",
       } as any),
-    ).rejects.toThrow('init failed')
+    ).rejects.toThrow("init failed");
 
-    expect(mappingWorkerPool.initializeMappingWorkers).toHaveBeenCalledTimes(1)
-    expect(mappingWorkerPool.setMappingWorkerOptions).not.toHaveBeenCalled()
-  })
+    expect(mappingWorkerPool.initializeMappingWorkers).toHaveBeenCalledTimes(1);
+    expect(mappingWorkerPool.setMappingWorkerOptions).not.toHaveBeenCalled();
+  });
 
-  it('rejects when collectMappingOptions throws inside the async IIFE', async () => {
-    ;(
-      composeSpecsModule.composeSpecs as jest.MockedFunction<
+  it("rejects when collectMappingOptions throws inside the async IIFE", async () => {
+    (
+      composeSpecsModule.composeSpecs as MockedFunction<
         typeof composeSpecsModule.composeSpecs
       >
     ).mockReturnValueOnce({
       dicomPS315EOptions: {
-        retainLongitudinalTemporalInformationOptions: 'Offset',
+        retainLongitudinalTemporalInformationOptions: "Offset",
       },
-    } as any)
+    } as any);
 
     await expect(
       curateMany({
-        inputType: 'http',
-        inputUrls: ['https://example.com/file.dcm'],
+        inputType: "http",
+        inputUrls: ["https://example.com/file.dcm"],
         curationSpec: () => ({}),
-        dateOffset: 'not-an-iso8601-offset',
+        dateOffset: "not-an-iso8601-offset",
       } as any),
     ).rejects.toThrow(
       'When using "Offset" for retainLongitudinalTemporalInformationOptions',
-    )
+    );
 
-    expect(mappingWorkerPool.initializeMappingWorkers).toHaveBeenCalledTimes(1)
-    expect(mappingWorkerPool.setMappingWorkerOptions).not.toHaveBeenCalled()
-    expect(mappingWorkerPool.dispatchMappingJobs).not.toHaveBeenCalled()
-  })
+    expect(mappingWorkerPool.initializeMappingWorkers).toHaveBeenCalledTimes(1);
+    expect(mappingWorkerPool.setMappingWorkerOptions).not.toHaveBeenCalled();
+    expect(mappingWorkerPool.dispatchMappingJobs).not.toHaveBeenCalled();
+  });
 
-  it('rejects with AbortError if aborted while async setup is still in progress', async () => {
-    let resolveInit!: () => void
-
-    ;(
-      mappingWorkerPool.initializeMappingWorkers as jest.MockedFunction<
+  it("rejects with AbortError if aborted while async setup is still in progress", async () => {
+    let resolveInit!: () => void;
+    (
+      mappingWorkerPool.initializeMappingWorkers as MockedFunction<
         typeof mappingWorkerPool.initializeMappingWorkers
       >
     ).mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
-          resolveInit = resolve
+          resolveInit = resolve;
         }),
-    )
+    );
 
-    const controller = new AbortController()
+    const controller = new AbortController();
 
     const promise = curateMany({
-      inputType: 'http',
-      inputUrls: ['https://example.com/file.dcm'],
-      curationSpec: 'none',
+      inputType: "http",
+      inputUrls: ["https://example.com/file.dcm"],
+      curationSpec: "none",
       signal: controller.signal,
-    } as any)
+    } as any);
 
-    controller.abort()
+    controller.abort();
 
     await expect(promise).rejects.toMatchObject({
-      name: 'AbortError',
-    })
+      name: "AbortError",
+    });
 
-    expect(mappingWorkerPool.terminateAllWorkers).toHaveBeenCalledTimes(1)
+    expect(mappingWorkerPool.terminateAllWorkers).toHaveBeenCalledTimes(1);
 
-    resolveInit()
-    await Promise.resolve()
-  })
+    resolveInit();
+    await Promise.resolve();
+  });
 
-  it('resolves on the happy path for http input', async () => {
+  it("resolves on the happy path for http input", async () => {
     const promise = curateMany({
-      inputType: 'http',
+      inputType: "http",
       inputUrls: [
-        'https://example.com/file1.dcm',
-        'https://example.com/file2.dcm',
+        "https://example.com/file1.dcm",
+        "https://example.com/file2.dcm",
       ],
-      curationSpec: 'none',
-    } as any)
+      curationSpec: "none",
+    } as any);
 
-    await flushAsyncSetup()
+    await flushAsyncSetup();
 
     emitDone({
       fileCount: 2,
       elapsedSeconds: 1,
-    })
+    });
 
-    const result = await promise
+    const result = await promise;
 
     expect(result).toMatchObject({
-      response: 'done',
+      response: "done",
       fileCount: 2,
       elapsedSeconds: 1,
-    })
-    expect(mappingWorkerPool.initializeMappingWorkers).toHaveBeenCalledTimes(1)
-    expect(mappingWorkerPool.setMappingWorkerOptions).toHaveBeenCalledTimes(1)
-    expect(mappingWorkerPool.dispatchMappingJobs).toHaveBeenCalled()
+    });
+    expect(mappingWorkerPool.initializeMappingWorkers).toHaveBeenCalledTimes(1);
+    expect(mappingWorkerPool.setMappingWorkerOptions).toHaveBeenCalledTimes(1);
+    expect(mappingWorkerPool.dispatchMappingJobs).toHaveBeenCalled();
     expect(mappingWorkerPool.setDirectoryScanFinished).toHaveBeenCalledWith(
       true,
-    )
-    expect(mappingWorkerPool.filesToProcess).toHaveLength(2)
-  })
+    );
+    expect(mappingWorkerPool.filesToProcess).toHaveLength(2);
+  });
 
-  it('forwards progress messages to the caller before resolving', async () => {
-    const onProgress = jest.fn()
+  it("forwards progress messages to the caller before resolving", async () => {
+    const onProgress = vi.fn();
 
     const promise = curateMany(
       {
-        inputType: 'http',
-        inputUrls: ['https://example.com/file.dcm'],
-        curationSpec: 'none',
+        inputType: "http",
+        inputUrls: ["https://example.com/file.dcm"],
+        curationSpec: "none",
       } as any,
       onProgress,
-    )
+    );
 
-    await Promise.resolve()
+    await Promise.resolve();
 
     if (!capturedProgressCallback) {
-      throw new Error('Progress callback was not captured')
+      throw new Error("Progress callback was not captured");
     }
 
     capturedProgressCallback({
-      response: 'progress',
+      response: "progress",
       completedFileCount: 1,
       totalFileCount: 1,
-      currentFile: 'file.dcm',
-    })
+      currentFile: "file.dcm",
+    });
 
     emitDone({
       fileCount: 1,
       elapsedSeconds: 1,
-    })
+    });
 
     await expect(promise).resolves.toMatchObject({
-      response: 'done',
+      response: "done",
       fileCount: 1,
-    })
+    });
 
     expect(onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ response: 'progress' }),
-    )
+      expect.objectContaining({ response: "progress" }),
+    );
     expect(onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ response: 'done' }),
-    )
-  })
-})
+      expect.objectContaining({ response: "done" }),
+    );
+  });
+});
