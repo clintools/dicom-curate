@@ -14,7 +14,15 @@
  * are guaranteed to receive files.
  */
 
-import { jest } from '@jest/globals'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import { cpus } from 'node:os'
 
 import {
@@ -32,12 +40,15 @@ import {
   cleanupTestDicomDir,
 } from '../testutils/dicomFixtures'
 
-jest.unstable_mockModule('./worker', () => ({
+let scanWorkerInstance: MockScanWorker | undefined
+
+vi.doMock('./worker', () => ({
   createWorker: async (scriptPath: string | URL, _options?: any) => {
     const urlStr = scriptPath.toString()
 
     if (urlStr.includes('scanDirectoryWorker')) {
-      return new MockScanWorker() as unknown as Worker
+      scanWorkerInstance = new MockScanWorker()
+      return scanWorkerInstance as unknown as Worker
     }
 
     const behavior = getNextMockBehavior()
@@ -50,7 +61,7 @@ jest.unstable_mockModule('./worker', () => ({
 
 const { curateMany } = await import('./index')
 
-const WORKER_COUNT = Math.min(cpus().length, 8)
+const WORKER_COUNT = Math.max(3, Math.min(cpus().length || 1, 8))
 
 /** Create a behaviors array with normal workers first, crash workers last (LIFO). */
 function makeBehaviors(
@@ -84,6 +95,9 @@ describe('worker crash recovery', () => {
   })
 
   afterEach(() => {
+    scanWorkerInstance?.terminate()
+    scanWorkerInstance = undefined
+    vi.useRealTimers()
     resetMockWorkers()
   })
 
@@ -96,6 +110,7 @@ describe('worker crash recovery', () => {
         inputDirectory: testDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       () => {},
     )
@@ -119,6 +134,7 @@ describe('worker crash recovery', () => {
         inputDirectory: testDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       () => {},
     )
@@ -144,6 +160,7 @@ describe('worker crash recovery', () => {
         inputDirectory: testDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       () => {},
     )
@@ -168,6 +185,7 @@ describe('worker crash recovery', () => {
         inputDirectory: testDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       () => {},
     )
@@ -191,6 +209,7 @@ describe('worker crash recovery', () => {
         inputDirectory: testDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       () => {},
     )
@@ -201,7 +220,7 @@ describe('worker crash recovery', () => {
   })
 
   it('stall watchdog terminates stuck workers', async () => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
 
     configureMockMappingWorkers(makeBehaviors('hang'))
 
@@ -211,17 +230,18 @@ describe('worker crash recovery', () => {
         inputDirectory: testDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       () => {},
     )
 
     // The mock scan worker uses setTimeout(0) per file, and mock mapping
     // workers use setTimeout(0) for responses. With fake timers, each
-    // jest.advanceTimersByTime() + microtask flush processes one tick.
+    // vi.advanceTimersByTime() + microtask flush processes one tick.
     // We need enough ticks for: 10 file emissions + 9 normal worker
     // responses + dispatch cycles.
     for (let i = 0; i < 200; i++) {
-      jest.advanceTimersByTime(1)
+      vi.advanceTimersByTime(1)
       await Promise.resolve()
       await Promise.resolve()
       await Promise.resolve()
@@ -231,7 +251,7 @@ describe('worker crash recovery', () => {
     // Advance past the stall watchdog timeout (10 minutes).
     // The watchdog checks every 60s, so advance in 60s chunks.
     for (let i = 0; i < 11; i++) {
-      jest.advanceTimersByTime(60 * 1000)
+      vi.advanceTimersByTime(60 * 1000)
       await Promise.resolve()
       await Promise.resolve()
       await Promise.resolve()
@@ -239,7 +259,7 @@ describe('worker crash recovery', () => {
 
     // Let the recovery, replacement worker creation, and final dispatch complete
     for (let i = 0; i < 50; i++) {
-      jest.advanceTimersByTime(1)
+      vi.advanceTimersByTime(1)
       await Promise.resolve()
       await Promise.resolve()
       await Promise.resolve()
@@ -247,7 +267,7 @@ describe('worker crash recovery', () => {
 
     const result = await curatePromise
 
-    jest.useRealTimers()
+    vi.useRealTimers()
 
     expect(result.response).toBe('done')
     expect(result.processedFiles).toBe(10)

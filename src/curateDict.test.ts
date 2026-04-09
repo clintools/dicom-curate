@@ -7,6 +7,7 @@ import type { TMappingOptions, TCurationSpecification } from './types'
 import { elementNamesToAlwaysKeep } from './config/dicom/elementNamesToAlwaysKeep'
 import { allElements } from '../testdata/allElements'
 import { sampleBatchCurationSpecification } from './config/sampleBatchCurationSpecification'
+import { describe, expect, it } from 'vitest'
 
 // Like default curation spec with dicom header modifications ignored, plus custom options
 function specWithOptions(
@@ -994,7 +995,7 @@ describe('curateDict basic functionality', () => {
             const allowedValues = getAllowedValues(element.vr as TemporalVRType)
             expect(allowedValues.includes(value)).toBe(true)
           } else if (value === undefined) {
-            fail(`Unexpected undefined value for tag ${tagId}`)
+            expect.fail(`Unexpected undefined value for tag ${tagId}`)
           }
         }
       }
@@ -1013,7 +1014,7 @@ describe('curateDict basic functionality', () => {
 
       if (isTemporalValue) {
         // For Full retention, temporal values should not appear in mappings at all
-        fail(
+        expect.fail(
           `Found temporal value "${valueToMap}" in mappings. With 'Full' retention, it should be preserved and not appear in mappings.`,
         )
       }

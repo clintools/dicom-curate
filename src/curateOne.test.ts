@@ -1,5 +1,5 @@
 import * as dcmjs from 'dcmjs'
-import { jest } from '@jest/globals'
+import { describe, expect, it, vi } from 'vitest'
 import { curateOne } from './curateOne'
 import type {
   TFileInfo,
@@ -24,7 +24,7 @@ describe('curateOne with none specification', () => {
       skipWrite: true,
     }
 
-    const readFileSpy = jest.spyOn(dcmjs.data.DicomMessage, 'readFile')
+    const readFileSpy = vi.spyOn(dcmjs.data.DicomMessage, 'readFile')
 
     const result = await curateOne({
       fileInfo,
@@ -299,7 +299,7 @@ describe('curateOne upload ETag capture', () => {
     const mockEtag = '"d41d8cd98f00b204e9800998ecf8427e"'
 
     const originalFetch = globalThis.fetch
-    globalThis.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+    globalThis.fetch = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(null, {
         status: 200,
         headers: { ETag: mockEtag },
@@ -338,7 +338,7 @@ describe('curateOne upload ETag capture', () => {
     const buffer = buildDicomBuffer()
 
     const originalFetch = globalThis.fetch
-    globalThis.fetch = jest
+    globalThis.fetch = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response(null, { status: 200 }))
 

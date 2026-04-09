@@ -11,7 +11,15 @@
  * worker pushed to availableMappingWorkers is the first to receive work.
  */
 
-import { jest } from '@jest/globals'
+import {
+  vi,
+  describe,
+  beforeAll,
+  afterAll,
+  afterEach,
+  expect,
+  it,
+} from 'vitest'
 import { cpus } from 'node:os'
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -56,6 +64,7 @@ class SlowScanWorker {
   public emissionDelay: number
 
   private messageListeners: ((event: { data: any }) => void)[] = []
+  private pendingEmitTimeout: ReturnType<typeof setTimeout> | null = null
 
   constructor(emissionDelay = 50) {
     this.emissionDelay = emissionDelay
@@ -90,6 +99,7 @@ class SlowScanWorker {
 
     let i = 0
     const emitNext = () => {
+      this.pendingEmitTimeout = null
       if (this.terminated) return
       if (i < files.length) {
         const relPath = files[i]
@@ -109,16 +119,20 @@ class SlowScanWorker {
           },
         })
         i++
-        setTimeout(emitNext, this.emissionDelay)
+        this.pendingEmitTimeout = setTimeout(emitNext, this.emissionDelay)
       } else {
         this.emit({ response: 'done' })
       }
     }
-    setTimeout(emitNext, this.emissionDelay)
+    this.pendingEmitTimeout = setTimeout(emitNext, this.emissionDelay)
   }
 
   terminate(): void {
     this.terminated = true
+    if (this.pendingEmitTimeout) {
+      clearTimeout(this.pendingEmitTimeout)
+      this.pendingEmitTimeout = null
+    }
   }
 
   private emit(data: any): void {
@@ -137,7 +151,7 @@ let useSlowScanWorker = false
 let slowScanDelay = 50
 let scanWorkerInstance: MockScanWorker | SlowScanWorker | undefined
 
-jest.unstable_mockModule('./worker', () => ({
+vi.doMock('./worker', () => ({
   createWorker: async (scriptPath: string | URL, _options?: any) => {
     const urlStr = scriptPath.toString()
 
@@ -160,7 +174,7 @@ jest.unstable_mockModule('./worker', () => ({
 
 const { curateMany } = await import('./index')
 
-const WORKER_COUNT = Math.min(cpus().length, 8)
+const WORKER_COUNT = Math.max(3, Math.min(cpus().length || 1, 8))
 
 function minimalSpec() {
   return {
@@ -187,6 +201,7 @@ describe('AbortSignal support', () => {
   })
 
   afterEach(() => {
+    scanWorkerInstance?.terminate()
     resetMockWorkers()
     useSlowScanWorker = false
     slowScanDelay = 50
@@ -206,6 +221,7 @@ describe('AbortSignal support', () => {
           inputDirectory: testDir,
           curationSpec: minimalSpec,
           skipWrite: true,
+          workerCount: WORKER_COUNT,
           signal: controller.signal,
         },
         () => {},
@@ -247,6 +263,7 @@ describe('AbortSignal support', () => {
           inputDirectory: testDir,
           curationSpec: minimalSpec,
           skipWrite: true,
+          workerCount: WORKER_COUNT,
           signal: controller.signal,
         },
         progressCallback,
@@ -294,6 +311,7 @@ describe('AbortSignal support', () => {
           inputDirectory: testDir,
           curationSpec: minimalSpec,
           skipWrite: true,
+          workerCount: WORKER_COUNT,
           signal: controller.signal,
         },
         progressCallback,
@@ -322,6 +340,7 @@ describe('AbortSignal support', () => {
         inputDirectory: testDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
         signal: controller.signal,
       },
       () => {},
@@ -353,6 +372,7 @@ describe('AbortSignal support', () => {
           inputDirectory: testDir,
           curationSpec: minimalSpec,
           skipWrite: true,
+          workerCount: WORKER_COUNT,
           signal: controller1.signal,
         },
         () => {
@@ -367,7 +387,8 @@ describe('AbortSignal support', () => {
       expect(error.name).toBe('AbortError')
     }
 
-    // Reset mocks for the second run
+    // Reset mocks for the second run — stop the slow scan worker's timer chain
+    scanWorkerInstance?.terminate()
     resetMockWorkers()
     useSlowScanWorker = false
     scanWorkerInstance = undefined
@@ -381,6 +402,7 @@ describe('AbortSignal support', () => {
         inputDirectory: testDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       () => {},
     )
@@ -415,6 +437,7 @@ describe('AbortSignal support', () => {
           inputDirectory: testDir,
           curationSpec: minimalSpec,
           skipWrite: true,
+          workerCount: WORKER_COUNT,
           signal: controller.signal,
         },
         () => {
@@ -444,6 +467,7 @@ describe('AbortSignal support', () => {
     }
 
     // Now run again to verify no zombie state
+    scanWorkerInstance?.terminate()
     resetMockWorkers()
     scanWorkerInstance = undefined
     useSlowScanWorker = false
@@ -456,6 +480,7 @@ describe('AbortSignal support', () => {
         inputDirectory: testDir,
         curationSpec: minimalSpec,
         skipWrite: true,
+        workerCount: WORKER_COUNT,
       },
       () => {},
     )
