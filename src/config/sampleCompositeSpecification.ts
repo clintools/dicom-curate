@@ -152,7 +152,8 @@ export function composedSpec(): SpecPart<THostProps, Ctx>[] {
             return [
               [
                 `Invalid protocol number provided, should be '${ctxIn.hostProps!.protocolNumber}'`,
-                ctxIn.protocolNumber !== ctxIn.protocolNumber,
+                parser.getFilePathComp('protocolNumber') !==
+                  ctxIn.hostProps!.protocolNumber,
               ],
               [
                 'Invalid DICOM site-subject format',
