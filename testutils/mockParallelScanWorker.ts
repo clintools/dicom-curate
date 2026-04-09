@@ -147,8 +147,10 @@ export class ParallelScanWorker {
   }
 
   private scheduleNextFeed(): void {
+    if (this.terminated) return
     this.pendingTimeout = setTimeout(() => {
       this.pendingTimeout = null
+      if (this.terminated) return
       this.feedNext()
     }, this.emissionDelay)
   }
@@ -186,10 +188,13 @@ export class ParallelScanWorker {
       this.emitFileAtIndex(fileIndex)
     }
 
+    if (this.terminated) return
     this.scheduleNextFeed()
   }
 
   private emitFileAtIndex(fileIndex: number): void {
+    if (this.terminated) return
+
     const relPath = this.files[fileIndex]
     const parts = relPath.split('/')
     const name = parts.pop()!
@@ -209,6 +214,8 @@ export class ParallelScanWorker {
   }
 
   private emitAnomalyAtIndex(fileIndex: number): void {
+    if (this.terminated) return
+
     const relPath = this.files[fileIndex]
     const parts = relPath.split('/')
     const name = parts.pop()!

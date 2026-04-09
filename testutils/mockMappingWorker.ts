@@ -2,7 +2,7 @@
  * Mock mapping worker for testing worker crash recovery.
  *
  * Provides configurable MockWorker instances that simulate normal operation,
- * crashes (onerror/exit), or hangs. Used with jest.unstable_mockModule to
+ * crashes (onerror/exit), or hangs. Used with vi.doMock (Vitest) to
  * replace the real worker.ts module in tests.
  */
 
