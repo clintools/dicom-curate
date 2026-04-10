@@ -1,3 +1,10 @@
+# [0.34.0](https://github.com/clintools/dicom-curate/compare/v0.33.0...v0.34.0) (2026-04-10)
+
+
+### Features
+
+* add biome and config ([fa4b405](https://github.com/clintools/dicom-curate/commit/fa4b4056cc5ed230837fd6763a9c021c2cd8f24c))
+
 # [0.33.0](https://github.com/clintools/dicom-curate/compare/v0.32.1...v0.33.0) (2026-04-01)
 
 ### Bug Fixes
