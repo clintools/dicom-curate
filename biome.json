@@ -16,8 +16,6 @@
       "!**/coverage",
       "!**/generated",
       "!**/*.d.ts",
-      "!**/*.test.ts",
-      "!**/*.test.tsx",
       "!**/*__mocks__",
       "!**/*e2e/data"
     ]
