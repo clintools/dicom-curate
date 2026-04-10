@@ -1,12 +1,11 @@
 import * as dcmjs from 'dcmjs'
-import { describe, expect, it, vi } from 'vitest'
 import { curateOne } from './curateOne'
+import { hash } from './hash'
 import type {
+  TCurationSpecification,
   TFileInfo,
   TMappingOptions,
-  TCurationSpecification,
 } from './types'
-import { hash } from './hash'
 
 describe('curateOne with none specification', () => {
   it('returns passthrough mapping results and skips DICOM parsing', async () => {

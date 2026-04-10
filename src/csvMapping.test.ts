@@ -1,9 +1,9 @@
 import {
+  extractColumnMappings,
   extractCsvMappings,
   getCsvMapping,
-  extractColumnMappings,
-  Row,
-  TMappedValues,
+  type Row,
+  type TMappedValues,
 } from './csvMapping'
 
 const csvText = 'old,new,ignore\noldV1,newV1,ignoreV1\noldV2,newV2,ignoreV2\n'

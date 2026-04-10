@@ -1,7 +1,7 @@
 import {
-  getDicomVR,
-  dicomToCanonicalDT,
   canonicalDTToDicom,
+  dicomToCanonicalDT,
+  getDicomVR,
   offsetDateTime,
 } from './offsetDateTime'
 

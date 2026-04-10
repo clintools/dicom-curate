@@ -1,5 +1,6 @@
-import curateDict from './curateDict'
+import type { TDicomData } from 'dcmjs'
 import * as dcmjs from 'dcmjs'
+import curateDict from './curateDict'
 import type { TMappingOptions } from './types'
 
 describe('Integration tests: Date offsets should only affect instance data, not scanner data', () => {
@@ -8,42 +9,43 @@ describe('Integration tests: Date offsets should only affect instance data, not 
   const originalManufactureDate = '20200815'
   const originalCalibrationDateTime = '20220301101530.000000'
 
-  const createTestDicomData = () => ({
-    meta: {
-      '00020000': { vr: 'UL', Value: ['194'] },
-      '00020001': { vr: 'OB', Value: [''] },
-      '00020002': { vr: 'UI', Value: ['1.2.840.10008.5.1.4.1.1.2'] },
-      '00020003': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.1'] },
-      '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2'] },
-      '00020012': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.2'] },
-      '00020013': { vr: 'SH', Value: ['DICOM-CURATE'] },
-    },
-    dict: {
-      // Instance data dates (should be offset)
-      '00080020': { vr: 'DA', Value: ['20230415'] }, // StudyDate
-      '00080021': { vr: 'DA', Value: ['20230415'] }, // SeriesDate
-      '00080022': { vr: 'DA', Value: ['20230415'] }, // AcquisitionDate
-      '00080023': { vr: 'DA', Value: ['20230415'] }, // ContentDate
-      '00080030': { vr: 'TM', Value: ['143022.123456'] }, // StudyTime
-      '00080031': { vr: 'TM', Value: ['143522.654321'] }, // SeriesTime
-      '00080032': { vr: 'TM', Value: ['144022.987654'] }, // AcquisitionTime
-      '00080033': { vr: 'TM', Value: ['144522.123456'] }, // ContentTime
+  const createTestDicomData = (): TDicomData =>
+    ({
+      meta: {
+        '00020000': { vr: 'UL', Value: ['194'] },
+        '00020001': { vr: 'OB', Value: [''] },
+        '00020002': { vr: 'UI', Value: ['1.2.840.10008.5.1.4.1.1.2'] },
+        '00020003': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.1'] },
+        '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2'] },
+        '00020012': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.2'] },
+        '00020013': { vr: 'SH', Value: ['DICOM-CURATE'] },
+      },
+      dict: {
+        // Instance data dates (should be offset)
+        '00080020': { vr: 'DA', Value: ['20230415'] }, // StudyDate
+        '00080021': { vr: 'DA', Value: ['20230415'] }, // SeriesDate
+        '00080022': { vr: 'DA', Value: ['20230415'] }, // AcquisitionDate
+        '00080023': { vr: 'DA', Value: ['20230415'] }, // ContentDate
+        '00080030': { vr: 'TM', Value: ['143022.123456'] }, // StudyTime
+        '00080031': { vr: 'TM', Value: ['143522.654321'] }, // SeriesTime
+        '00080032': { vr: 'TM', Value: ['144022.987654'] }, // AcquisitionTime
+        '00080033': { vr: 'TM', Value: ['144522.123456'] }, // ContentTime
 
-      // Scanner/Device data dates (should NOT be offset when retainDeviceIdentityOption is true)
-      '00181200': { vr: 'DA', Value: [originalCalibrationDate] }, // DateOfLastCalibration
-      '00181204': { vr: 'DA', Value: [originalManufactureDate] }, // DateOfManufacture
-      '00181202': { vr: 'DT', Value: [originalCalibrationDateTime] }, // DateTimeOfLastCalibration
+        // Scanner/Device data dates (should NOT be offset when retainDeviceIdentityOption is true)
+        '00181200': { vr: 'DA', Value: [originalCalibrationDate] }, // DateOfLastCalibration
+        '00181204': { vr: 'DA', Value: [originalManufactureDate] }, // DateOfManufacture
+        '00181202': { vr: 'DT', Value: [originalCalibrationDateTime] }, // DateTimeOfLastCalibration
 
-      // Other required fields for valid DICOM
-      '00100010': { vr: 'PN', Value: ['Test^Patient'] }, // PatientName
-      '00100020': { vr: 'LO', Value: ['TEST123'] }, // PatientID
-      '0020000d': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.3'] }, // StudyInstanceUID
-      '0020000e': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.4'] }, // SeriesInstanceUID
-      '00080018': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.5'] }, // SOPInstanceUID
-      '00080016': { vr: 'UI', Value: ['1.2.840.10008.5.1.4.1.1.2'] }, // SOPClassUID
-      '00080060': { vr: 'CS', Value: ['CT'] }, // Modality
-    },
-  })
+        // Other required fields for valid DICOM
+        '00100010': { vr: 'PN', Value: ['Test^Patient'] }, // PatientName
+        '00100020': { vr: 'LO', Value: ['TEST123'] }, // PatientID
+        '0020000d': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.3'] }, // StudyInstanceUID
+        '0020000e': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.4'] }, // SeriesInstanceUID
+        '00080018': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.5'] }, // SOPInstanceUID
+        '00080016': { vr: 'UI', Value: ['1.2.840.10008.5.1.4.1.1.2'] }, // SOPClassUID
+        '00080060': { vr: 'CS', Value: ['CT'] }, // Modality
+      },
+    }) as TDicomData
 
   const createMappingOptions = (
     dateOffset: string,
@@ -206,7 +208,7 @@ describe('Integration tests: Date offsets should only affect instance data, not 
         '00080032': { vr: 'TM', Value: ['143022'] }, // Hours, minutes, seconds
         '00080033': { vr: 'TM', Value: ['143022.123'] }, // With fractional seconds
       },
-    }
+    } as TDicomData
 
     const mappingOptions = createMappingOptions('PT1H')
 

@@ -11,33 +11,24 @@
  * worker pushed to availableMappingWorkers is the first to receive work.
  */
 
-import {
-  vi,
-  describe,
-  beforeAll,
-  afterAll,
-  afterEach,
-  expect,
-  it,
-} from 'vitest'
-import { cpus } from 'node:os'
 import { readdirSync, statSync } from 'node:fs'
+import { cpus } from 'node:os'
 import { join } from 'node:path'
-
 import {
-  MockWorker,
+  cleanupTestDicomDir,
+  createTestDicomDir,
+} from '../testutils/dicomFixtures'
+import type { MockWorkerBehavior } from '../testutils/mockMappingWorker'
+import {
   configureMockMappingWorkers,
-  resetMockWorkers,
   getMockWorkersCreated,
   getNextMockBehavior,
+  MockWorker,
   registerMockWorker,
+  resetMockWorkers,
 } from '../testutils/mockMappingWorker'
-import type { MockWorkerBehavior } from '../testutils/mockMappingWorker'
 import { MockScanWorker } from '../testutils/mockScanWorker'
-import {
-  createTestDicomDir,
-  cleanupTestDicomDir,
-} from '../testutils/dicomFixtures'
+import type { TCurationSpecification } from './types'
 
 // ---------------------------------------------------------------------------
 // Slow scan worker: emits files with a configurable delay between each.
@@ -182,7 +173,7 @@ function minimalSpec() {
     hostProps: {
       protocolNumber: 'abort-signal-test',
     },
-  }
+  } as unknown as TCurationSpecification
 }
 
 // ---------------------------------------------------------------------------

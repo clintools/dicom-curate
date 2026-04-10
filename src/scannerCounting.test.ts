@@ -10,34 +10,24 @@
  * filter), the feeder corrects the count with decremented 'count' messages.
  */
 
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest'
 import { cpus } from 'node:os'
-
 import {
-  MockWorker,
+  cleanupTestDicomDir,
+  createTestDicomDir,
+} from '../testutils/dicomFixtures'
+import {
   configureMockMappingWorkers,
-  resetMockWorkers,
   getNextMockBehavior,
+  MockWorker,
   registerMockWorker,
+  resetMockWorkers,
 } from '../testutils/mockMappingWorker'
 import {
-  ParallelScanWorker,
   configureParallelScanWorker,
+  ParallelScanWorker,
   resetParallelScanWorker,
 } from '../testutils/mockParallelScanWorker'
-import {
-  createTestDicomDir,
-  cleanupTestDicomDir,
-} from '../testutils/dicomFixtures'
-import type { TProgressMessage } from './types'
+import type { TCurationSpecification, TProgressMessage } from './types'
 
 // ---------------------------------------------------------------------------
 // Track the scan worker instance so tests can inspect it
@@ -72,7 +62,7 @@ function minimalSpec() {
     hostProps: {
       protocolNumber: 'scanner-counting-test',
     },
-  }
+  } as unknown as TCurationSpecification
 }
 
 describe('parallel counter + feeder', () => {

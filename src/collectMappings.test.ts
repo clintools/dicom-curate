@@ -1,6 +1,6 @@
 import * as dcmjs from 'dcmjs'
-import collectMappings from './collectMappings'
 import { sample } from '../testdata/sample'
+import collectMappings from './collectMappings'
 import type { TMappingOptions } from './types'
 
 describe('collectMappings with none specification', () => {
