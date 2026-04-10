@@ -1,30 +1,32 @@
-import curateDict from './curateDict'
+import type { TDicomData } from 'dcmjs'
 import * as dcmjs from 'dcmjs'
+import curateDict from './curateDict'
 import type { TMappingOptions } from './types'
 
 describe('Nested Sequence ID Retention Tests', () => {
   // Test DICOM data structure for nested sequence testing
-  const createTestDicomData = () => ({
-    meta: {
-      '00020000': { vr: 'UL', Value: ['194'] },
-      '00020001': { vr: 'OB', Value: [''] },
-      '00020002': { vr: 'UI', Value: ['1.2.840.10008.5.1.4.1.1.2'] },
-      '00020003': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.1'] },
-      '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2'] },
-      '00020012': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.2'] },
-      '00020013': { vr: 'SH', Value: ['DICOM-CURATE'] },
-    },
-    dict: {
-      // Basic required fields for valid DICOM
-      '00100010': { vr: 'PN', Value: ['Test^Patient'] }, // PatientName
-      '00100020': { vr: 'LO', Value: ['TEST123'] }, // PatientID
-      '0020000d': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.3'] }, // StudyInstanceUID
-      '0020000e': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.4'] }, // SeriesInstanceUID
-      '00080018': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.5'] }, // SOPInstanceUID
-      '00080016': { vr: 'UI', Value: ['1.2.840.10008.5.1.4.1.1.2'] }, // SOPClassUID
-      '00080060': { vr: 'CS', Value: ['CT'] }, // Modality
-    },
-  })
+  const createTestDicomData = (): TDicomData =>
+    ({
+      meta: {
+        '00020000': { vr: 'UL', Value: ['194'] },
+        '00020001': { vr: 'OB', Value: [''] },
+        '00020002': { vr: 'UI', Value: ['1.2.840.10008.5.1.4.1.1.2'] },
+        '00020003': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.1'] },
+        '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2'] },
+        '00020012': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.2'] },
+        '00020013': { vr: 'SH', Value: ['DICOM-CURATE'] },
+      },
+      dict: {
+        // Basic required fields for valid DICOM
+        '00100010': { vr: 'PN', Value: ['Test^Patient'] }, // PatientName
+        '00100020': { vr: 'LO', Value: ['TEST123'] }, // PatientID
+        '0020000d': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.3'] }, // StudyInstanceUID
+        '0020000e': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.4'] }, // SeriesInstanceUID
+        '00080018': { vr: 'UI', Value: ['1.2.3.4.5.6.7.8.9.5'] }, // SOPInstanceUID
+        '00080016': { vr: 'UI', Value: ['1.2.840.10008.5.1.4.1.1.2'] }, // SOPClassUID
+        '00080060': { vr: 'CS', Value: ['CT'] }, // Modality
+      },
+    }) as TDicomData
 
   const createBasicMappingOptions = (): TMappingOptions => ({
     curationSpec: () => ({

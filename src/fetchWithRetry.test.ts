@@ -1,14 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchWithRetry } from './fetchWithRetry'
 
 describe('fetchWithRetry', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn<typeof globalThis, 'fetch'>>
+  // Vitest augments `globalThis` in a way that excludes `fetch` from `spyOn`'s key union.
+  let fetchSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     vi.useFakeTimers()
     fetchSpy = vi
       .spyOn(globalThis, 'fetch')
-      .mockImplementation(async () => new Response('ok', { status: 200 }))
+      .mockImplementation(
+        async () => new Response('ok', { status: 200 }),
+      ) as ReturnType<typeof vi.spyOn>
   })
 
   afterEach(() => {

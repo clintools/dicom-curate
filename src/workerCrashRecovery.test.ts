@@ -14,31 +14,22 @@
  * are guaranteed to receive files.
  */
 
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest'
 import { cpus } from 'node:os'
-
 import {
-  MockWorker,
+  cleanupTestDicomDir,
+  createTestDicomDir,
+} from '../testutils/dicomFixtures'
+import type { MockWorkerBehavior } from '../testutils/mockMappingWorker'
+import {
   configureMockMappingWorkers,
-  resetMockWorkers,
   getMockWorkersCreated,
   getNextMockBehavior,
+  MockWorker,
   registerMockWorker,
+  resetMockWorkers,
 } from '../testutils/mockMappingWorker'
-import type { MockWorkerBehavior } from '../testutils/mockMappingWorker'
 import { MockScanWorker } from '../testutils/mockScanWorker'
-import {
-  createTestDicomDir,
-  cleanupTestDicomDir,
-} from '../testutils/dicomFixtures'
+import type { TCurationSpecification } from './types'
 
 let scanWorkerInstance: MockScanWorker | undefined
 
@@ -80,7 +71,7 @@ function minimalSpec() {
     hostProps: {
       protocolNumber: 'crash-recovery-test',
     },
-  }
+  } as unknown as TCurationSpecification
 }
 
 describe('worker crash recovery', () => {
@@ -266,8 +257,6 @@ describe('worker crash recovery', () => {
     }
 
     const result = await curatePromise
-
-    vi.useRealTimers()
 
     expect(result.response).toBe('done')
     expect(result.processedFiles).toBe(10)

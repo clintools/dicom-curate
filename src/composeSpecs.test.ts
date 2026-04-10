@@ -1,9 +1,9 @@
-import { composeSpecs } from './composeSpecs'
-import { sampleBatchCurationSpecification } from './config/sampleBatchCurationSpecification'
-import { sample2PassCurationSpecification } from './config/sample2PassCurationSpecification'
 import { sample } from '../testdata/sample'
+import { composeSpecs } from './composeSpecs'
+import { sample2PassCurationSpecification } from './config/sample2PassCurationSpecification'
+import { sampleBatchCurationSpecification } from './config/sampleBatchCurationSpecification'
 import curateDict from './curateDict'
-import type { TMappingOptions, TCurationSpecification, TParser } from './types'
+import type { TCurationSpecification, TMappingOptions, TParser } from './types'
 
 // Helper function to create equivalent composite spec from batch spec
 function createEquivalentCompositeSpecFromBatch(): () => TCurationSpecification {

@@ -1,13 +1,12 @@
 import * as dcmjs from 'dcmjs'
-import curateDict from './curateDict'
-import { sample } from '../testdata/sample'
-import { writeFileSync, mkdirSync, existsSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import type { TMappingOptions, TCurationSpecification } from './types'
-import { elementNamesToAlwaysKeep } from './config/dicom/elementNamesToAlwaysKeep'
 import { allElements } from '../testdata/allElements'
+import { sample } from '../testdata/sample'
+import { elementNamesToAlwaysKeep } from './config/dicom/elementNamesToAlwaysKeep'
 import { sampleBatchCurationSpecification } from './config/sampleBatchCurationSpecification'
-import { describe, expect, it } from 'vitest'
+import curateDict from './curateDict'
+import type { TCurationSpecification, TMappingOptions, TParser } from './types'
 
 // Like default curation spec with dicom header modifications ignored, plus custom options
 function specWithOptions(
@@ -1042,60 +1041,60 @@ describe('curateDict basic functionality', () => {
       value: '20250101123000.000000',
       expectedOffsetDateTime: '20260304163506.000000',
     },
-  ])(
-    'successfully offsets RadiopharmaceuticalStartDateTime with $description',
-    ({ value, expectedOffsetDateTime }) => {
-      const dateOffset = 'P1Y2M3DT4H5M6S' // 1 year, 2 months, 3 days, 4 hours, 5 minutes, 6 seconds
+  ])('successfully offsets RadiopharmaceuticalStartDateTime with $description', ({
+    value,
+    expectedOffsetDateTime,
+  }) => {
+    const dateOffset = 'P1Y2M3DT4H5M6S' // 1 year, 2 months, 3 days, 4 hours, 5 minutes, 6 seconds
 
-      // Create a modified sample with spaces in RadiopharmaceuticalStartDateTime
-      const sampleWithSpaces = {
-        ...sample,
-        dict: {
-          ...sample.dict,
-          '00181078': {
-            vr: 'DT',
-            Value: [value], // Use the parameterised value with spaces
-          },
+    // Create a modified sample with spaces in RadiopharmaceuticalStartDateTime
+    const sampleWithSpaces = {
+      ...sample,
+      dict: {
+        ...sample.dict,
+        '00181078': {
+          vr: 'DT',
+          Value: [value], // Use the parameterised value with spaces
         },
-      }
+      },
+    }
 
-      const withOffsetTemporalData = {
-        ...defaultTestOptions,
-        curationSpec: specWithOptions({
-          dicomPS315EOptions: {
-            cleanDescriptorsOption: false,
-            cleanDescriptorsExceptions: [],
-            retainLongitudinalTemporalInformationOptions: 'Offset' as const,
-            retainPatientCharacteristicsOption: [],
-            retainDeviceIdentityOption: false,
-            retainUIDsOption: 'On' as const,
-            retainSafePrivateOption: 'Off',
-            retainInstitutionIdentityOption: false,
-          },
-        }),
-        dateOffset,
-      }
+    const withOffsetTemporalData = {
+      ...defaultTestOptions,
+      curationSpec: specWithOptions({
+        dicomPS315EOptions: {
+          cleanDescriptorsOption: false,
+          cleanDescriptorsExceptions: [],
+          retainLongitudinalTemporalInformationOptions: 'Offset' as const,
+          retainPatientCharacteristicsOption: [],
+          retainDeviceIdentityOption: false,
+          retainUIDsOption: 'On' as const,
+          retainSafePrivateOption: 'Off',
+          retainInstitutionIdentityOption: false,
+        },
+      }),
+      dateOffset,
+    }
 
-      const result = curateDict(
-        passingFilename,
-        sampleWithSpaces,
-        withOffsetTemporalData,
-      )
-      verifyNoErrors(result)
+    const result = curateDict(
+      passingFilename,
+      sampleWithSpaces,
+      withOffsetTemporalData,
+    )
+    verifyNoErrors(result)
 
-      // Verify that RadiopharmaceuticalStartDateTime (00181078) is preserved and correctly offset
-      verifyDicomTagIsPreserved(result, '00181078', expectedOffsetDateTime)
+    // Verify that RadiopharmaceuticalStartDateTime (00181078) is preserved and correctly offset
+    verifyDicomTagIsPreserved(result, '00181078', expectedOffsetDateTime)
 
-      // Verify that the original value (with spaces) appears in mappings as a replacement
-      const mappings = result.mapResults.mappings
-      const radiopharmMapping = mappings['RadiopharmaceuticalStartDateTime']
-      expect(radiopharmMapping).toBeDefined()
-      expect(radiopharmMapping[0]).toBe(value) // Original value with spaces
-      expect(radiopharmMapping[1]).toBe('replace')
-      expect(radiopharmMapping[2]).toBe('offsetTemporalOpt')
-      expect(radiopharmMapping[3]).toBe(expectedOffsetDateTime) // Correctly offset value
-    },
-  )
+    // Verify that the original value (with spaces) appears in mappings as a replacement
+    const mappings = result.mapResults.mappings
+    const radiopharmMapping = mappings['RadiopharmaceuticalStartDateTime']
+    expect(radiopharmMapping).toBeDefined()
+    expect(radiopharmMapping[0]).toBe(value) // Original value with spaces
+    expect(radiopharmMapping[1]).toBe('replace')
+    expect(radiopharmMapping[2]).toBe('offsetTemporalOpt')
+    expect(radiopharmMapping[3]).toBe(expectedOffsetDateTime) // Correctly offset value
+  })
 
   it('preserves private tags when retainSafePrivateOption is Quarantine', () => {
     // Use sampleBatchCurationSpecification with quarantine mode
@@ -1109,7 +1108,7 @@ describe('curateDict basic functionality', () => {
           retainSafePrivateOption: 'Quarantine' as const,
         },
         // Disable DICOM header modifications for cleaner testing
-        modifyDicomHeader(parser) {
+        modifyDicomHeader(_parser: TParser) {
           return {}
         },
       }),
