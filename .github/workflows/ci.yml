@@ -4,24 +4,43 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   ci:
     runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
+    permissions:
+      contents: read
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: '22'
+          fetch-depth: 0
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.13.1"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Upgrade npm
+        run: npm i -g npm@11
+
+      - name: Debug npm
+        run: |
+          node -v
+          npm -v
+          npm config get registry
+          npm config get cache
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Type Check
         run: pnpm tsc --noEmit
