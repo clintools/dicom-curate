@@ -1,5 +1,7 @@
+import { md5 } from '@noble/hashes/legacy.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
 import { createModel } from 'js-crc'
-import md5 from 'md5'
 import type { THashMethod } from './types'
 
 const DEFAULT_HASH_PART_SIZE = 5 * 1024 * 1024 // 5 MB — matches @aws-sdk/lib-storage default
@@ -11,7 +13,7 @@ export async function hash(
 ): Promise<string> {
   switch (hashMethod) {
     case 'sha256':
-      return await sha256Hex(buffer)
+      return sha256Hex(buffer)
     case 'crc32':
       return crc32Hex(buffer)
     case 'crc64':
@@ -19,20 +21,146 @@ export async function hash(
     case 'aws-s3-etag-2025':
       return awsS3Etag(buffer, hashPartSize ?? DEFAULT_HASH_PART_SIZE)
     case 'md5':
+      return md5Hex(buffer)
     default:
       return md5Hex(buffer)
   }
 }
 
-// helper: compute sha256 hex
-async function sha256Hex(buffer: ArrayBuffer) {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+/**
+ * Computes a hash over a stream of data chunks without materializing the full
+ * data into memory at once.
+ *
+ * md5/sha256: uses @noble/hashes for true incremental hashing in all
+ * environments (Node.js and browser).
+ * crc32/crc64: always collects chunks (js-crc has no incremental API), but
+ * these aren't typically used on image-sized files.
+ * aws-s3-etag-2025: streaming multi-part MD5 — each part is hashed
+ * incrementally; no part buffer is ever materialized in memory.
+ */
+export async function hashStream(
+  stream: AsyncIterable<Uint8Array>,
+  hashMethod: THashMethod,
+  hashPartSize?: number,
+): Promise<string> {
+  switch (hashMethod) {
+    case 'sha256':
+      return sha256HexStream(stream)
+    case 'crc32':
+      return crc32Hex(await collectStream(stream))
+    case 'crc64':
+      return crc64Hex(await collectStream(stream))
+    case 'aws-s3-etag-2025':
+      return awsS3EtagStream(stream, hashPartSize ?? DEFAULT_HASH_PART_SIZE)
+    case 'md5':
+    default:
+      return md5HexStream(stream)
+  }
 }
 
-function md5Hex(buffer: ArrayBuffer) {
-  return md5(new Uint8Array(buffer))
+/** Drain a stream into a single contiguous Uint8Array. Used as fallback for
+ *  algorithms that lack an incremental API. */
+async function collectStream(
+  stream: AsyncIterable<Uint8Array>,
+): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for await (const chunk of stream) {
+    chunks.push(chunk)
+    total += chunk.byteLength
+  }
+  const out = new Uint8Array(total)
+  let off = 0
+  for (const chunk of chunks) {
+    out.set(chunk, off)
+    off += chunk.byteLength
+  }
+  return out
+}
+
+/** True streaming MD5 via @noble/hashes — works in Node.js and browsers. */
+async function md5HexStream(
+  stream: AsyncIterable<Uint8Array>,
+): Promise<string> {
+  const h = md5.create()
+  for await (const chunk of stream) h.update(chunk)
+  return bytesToHex(h.digest())
+}
+
+/** True streaming SHA-256 via @noble/hashes — works in Node.js and browsers. */
+async function sha256HexStream(
+  stream: AsyncIterable<Uint8Array>,
+): Promise<string> {
+  const h = sha256.create()
+  for await (const chunk of stream) h.update(chunk)
+  return bytesToHex(h.digest())
+}
+
+/**
+ * Streaming S3 multipart ETag computation.
+ *
+ * - If total bytes <= partSize: returns plain MD5 (matches PUT Object ETag).
+ * - Otherwise: returns `md5(concat(rawMd5s))-N` (matches multipart upload ETag).
+ *
+ * Each part is hashed incrementally as chunks arrive — no part buffer is ever
+ * materialized, so peak memory is O(chunk size) rather than O(part size).
+ */
+async function awsS3EtagStream(
+  stream: AsyncIterable<Uint8Array>,
+  partSize: number,
+): Promise<string> {
+  const partRawDigests: Uint8Array[] = []
+  let partHasher = md5.create()
+  let currentPartBytes = 0
+  let totalBytes = 0
+
+  function finalizeCurrentPart(): void {
+    partRawDigests.push(partHasher.digest())
+    partHasher = md5.create()
+    currentPartBytes = 0
+  }
+
+  for await (const chunk of stream) {
+    totalBytes += chunk.byteLength
+    let pos = 0
+    while (pos < chunk.byteLength) {
+      const space = partSize - currentPartBytes
+      const take = Math.min(chunk.byteLength - pos, space)
+      partHasher.update(chunk.subarray(pos, pos + take))
+      currentPartBytes += take
+      pos += take
+      if (currentPartBytes === partSize) {
+        finalizeCurrentPart()
+      }
+    }
+  }
+
+  if (currentPartBytes > 0) {
+    finalizeCurrentPart()
+  }
+
+  if (partRawDigests.length === 0) {
+    return bytesToHex(md5(new Uint8Array(0)))
+  }
+
+  if (totalBytes <= partSize) {
+    // Single-part: plain MD5 (not multipart format)
+    return bytesToHex(partRawDigests[0])
+  }
+
+  const combined = new Uint8Array(partRawDigests.length * 16)
+  partRawDigests.forEach((d, i) => {
+    combined.set(d, i * 16)
+  })
+  return `${bytesToHex(md5(combined))}-${partRawDigests.length}`
+}
+
+function sha256Hex(buffer: ArrayBuffer): string {
+  return bytesToHex(sha256(new Uint8Array(buffer)))
+}
+
+function md5Hex(buffer: ArrayBuffer): string {
+  return bytesToHex(md5(new Uint8Array(buffer)))
 }
 
 /**
@@ -71,15 +199,11 @@ function multipartMd5(buffer: ArrayBuffer, partSize: number): string {
   for (let i = 0; i < partCount; i++) {
     const start = i * partSize
     const end = Math.min(start + partSize, totalSize)
-    const partBuffer = buffer.slice(start, end)
-    // md5() returns a 32-char hex string; convert to 16 raw bytes
-    const hex = md5(new Uint8Array(partBuffer))
-    for (let j = 0; j < 16; j++) {
-      rawDigests[i * 16 + j] = parseInt(hex.slice(j * 2, j * 2 + 2), 16)
-    }
+    const raw = md5(new Uint8Array(buffer, start, end - start))
+    rawDigests.set(raw, i * 16)
   }
 
-  return `${md5(rawDigests)}-${partCount}`
+  return `${bytesToHex(md5(rawDigests))}-${partCount}`
 }
 
 // helper: compute crc32 hex (use js-crc). Accepts ArrayBuffer and returns
