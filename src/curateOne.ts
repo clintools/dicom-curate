@@ -3,8 +3,8 @@ import { composeSpecs } from './composeSpecs'
 import createNestedDirectories from './createNestedDirectories'
 import curateDict from './curateDict'
 import { fetchWithRetry } from './fetchWithRetry'
-import { hash } from './hash'
 import { loadLibStorage } from './libStorage'
+import { hash, hashStream } from './hash'
 import { loadS3Client } from './s3Client'
 import type {
   TFileInfo,
@@ -49,6 +49,21 @@ function specHasFilter(mappingOptions: TMappingOptions): boolean {
   return !!(composed.preExclude ?? composed.postExclude)
 }
 
+async function* readableStreamToAsyncIterable(
+  stream: ReadableStream<Uint8Array>,
+): AsyncIterable<Uint8Array> {
+  const reader = stream.getReader()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      yield value
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export async function curateOne({
   fileInfo,
   outputTarget,
@@ -72,7 +87,7 @@ export async function curateOne({
     file = fileInfo.blob
   } else if (fileInfo.kind === 'path') {
     // Node.js environment - use fs module to read file
-    const fs = await import('fs').then((mod) => mod.promises)
+    const fs = await import('node:fs').then((mod) => mod.promises)
     const fileBuffer = await fs.readFile(fileInfo.fullPath)
 
     // Casting trick is here to overcome type mismatches between the web declaration of Blob
@@ -177,11 +192,6 @@ export async function curateOne({
     }
   }
 
-  // 3) read bytes (needed for deep hash)
-  // Use let so we can null the reference after the last use, allowing GC to
-  // reclaim the buffer while the rest of the function (upload, hashing) runs.
-  let fileArrayBuffer: ArrayBuffer | null = await file.arrayBuffer()
-
   let preMappedHash: string | undefined
   let postMappedHash: string | undefined
   const postMappedHashHeader = 'x-source-file-hash'
@@ -192,8 +202,8 @@ export async function curateOne({
   if (previousSourceFileInfo?.preMappedHash !== undefined) {
     try {
       // choose hashing algorithm: default to md5 for S3 ETag compatibility
-      preMappedHash = await hash(
-        fileArrayBuffer!,
+      preMappedHash = await hashStream(
+        file.stream() as unknown as AsyncIterable<Uint8Array>,
         hashMethod ?? 'md5',
         hashPartSize,
       )
@@ -253,17 +263,35 @@ export async function curateOne({
   }
 
   // 5) parse DICOM
-  let mappedDicomData: { write: (...args: any[]) => ArrayBuffer }
+  let mappedDicomData: {
+    write: (...args: any[]) => ArrayBuffer | Blob | Promise<ArrayBuffer | Blob>
+  }
   let clonedMapResults: TMapResults
 
   if (mappingOptions.curationSpec !== 'none') {
     dcmjs.log.setLevel(dcmjs.log.levels.ERROR)
     dcmjs.log.getLogger('validation.dcmjs').setLevel(dcmjs.log.levels.SILENT)
     let dicomData: dcmjs.data.DicomDict
+    let pixelDataOffset = -1
     try {
-      dicomData = dcmjs.data.DicomMessage.readFile(fileArrayBuffer!, {
+      const reader = new dcmjs.async.AsyncDicomReader()
+      const feedDone = reader.stream.fromAsyncStream(
+        readableStreamToAsyncIterable(file.stream()),
+      )
+      await reader.readFile({
         ignoreErrors: true,
+        noCopy: true,
+        untilTag: '7FE00010',
       })
+      await feedDone
+      // readTagHeader consumes the 4-byte tag identifier before detecting untilTag,
+      // so subtract 4 to recover the tag's start offset in the original file.
+      const rawOffset = reader.stream.offset - 4
+      if (rawOffset > 0 && rawOffset < file.size) {
+        pixelDataOffset = rawOffset
+      }
+      dicomData = new dcmjs.data.DicomDict(reader.meta)
+      dicomData.dict = reader.dict
     } catch (error) {
       console.warn(
         `[dicom-curate] Could not parse ${fileInfo.name} as DICOM data:`,
@@ -300,7 +328,20 @@ export async function curateOne({
     // preserve the original file bytes (the dcmjs round-trip is not byte-preserving).
     if (Object.keys(clonedMapResults.mappings).length === 0) {
       mappedDicomData = {
-        write: () => fileArrayBuffer!,
+        write: () => file,
+      }
+    } else if (pixelDataOffset >= 0) {
+      // Append PixelData from the original file as a zero-copy Blob slice.
+      // dcmjs never saw the pixel data (untilTag stopped it), so its write()
+      // output is header-only; we append the original bytes from pixelDataOffset.
+      const origWrite = mappedDicomData.write.bind(mappedDicomData)
+      mappedDicomData = {
+        write: (options?: any) => {
+          const headerBuf = origWrite(options) as ArrayBuffer
+          return new Blob([headerBuf, file.slice(pixelDataOffset)], {
+            type: 'application/octet-stream',
+          })
+        },
       }
     }
 
@@ -326,7 +367,7 @@ export async function curateOne({
   } else {
     // If curationSpec is 'none', we skip all mapping and just pass through the original data with minimal mapResults
     mappedDicomData = {
-      write: (...args: any[]) => fileArrayBuffer!,
+      write: () => file,
     }
     clonedMapResults = {
       sourceInstanceUID: `passthrough_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
@@ -350,8 +391,8 @@ export async function curateOne({
   if (!preMappedHash) {
     try {
       // choose hashing algorithm: default to md5 for S3 ETag compatibility
-      preMappedHash = await hash(
-        fileArrayBuffer!,
+      preMappedHash = await hashStream(
+        readableStreamToAsyncIterable(file.stream()),
         hashMethod ?? 'md5',
         hashPartSize,
       )
@@ -368,23 +409,23 @@ export async function curateOne({
       .join('/')
     const fileName = clonedMapResults.outputFilePath!.split('/').slice(-1)[0]
 
-    const modifiedArrayBuffer = mappedDicomData.write({
+    const modifiedData = await mappedDicomData.write({
       allowInvalidVRLength: true,
     })
+    // Normalize to Blob so all downstream paths stream rather than holding
+    // the full file in memory.  When write() already returns a Blob (zero-copy
+    // header+pixel-data concat) no extra copy is made here.
+    const modifiedBlob: Blob =
+      modifiedData instanceof Blob
+        ? modifiedData
+        : new Blob([modifiedData], { type: 'application/octet-stream' })
 
-    // Always calculate post-mapped hash even if deep compare is not requested
-    postMappedHash = await hash(
-      modifiedArrayBuffer,
+    // Stream through once for hashing — no full materialization.
+    postMappedHash = await hashStream(
+      readableStreamToAsyncIterable(modifiedBlob.stream()),
       hashMethod ?? 'md5',
       hashPartSize,
     )
-
-    // Release the original file buffer — the modifiedArrayBuffer is all we
-    // need from this point. In the passthrough case (no header changes),
-    // modifiedArrayBuffer === fileArrayBuffer so the data stays alive through
-    // that reference; in the modified case, fileArrayBuffer is a separate
-    // allocation that can now be GC'd.
-    fileArrayBuffer = null
 
     const previousPostMappedHash = previousMappedFileInfo
       ? (await previousMappedFileInfo(clonedMapResults.outputFilePath!))
@@ -414,7 +455,7 @@ export async function curateOne({
           create: true,
         })
         const writable = await fileHandle.createWritable()
-        await writable.write(modifiedArrayBuffer)
+        await writable.write(modifiedBlob)
         await writable.close()
       }
     } else if (typeof outputTarget?.directory === 'string') {
@@ -431,16 +472,14 @@ export async function curateOne({
       }
 
       const fullFilePath = path.join(fullDirPath, fileName)
-      await fs.writeFile(fullFilePath, new DataView(modifiedArrayBuffer))
+      await fs.writeFile(fullFilePath, modifiedBlob.stream() as any)
     } else if (!outputTarget?.http && !outputTarget?.s3) {
       // Only create mappedBlob when there is no output target at all (no
       // directory, no HTTP endpoint, no S3 bucket). When an upload target is
       // present the blob has already been consumed and keeping it around
       // retains the full file content in memory for every processed file,
       // causing OOM crashes at scale.
-      clonedMapResults.mappedBlob = new Blob([modifiedArrayBuffer], {
-        type: 'application/octet-stream',
-      })
+      clonedMapResults.mappedBlob = modifiedBlob
     }
 
     // If upload URL (bucket) is provided, perform an HTTP PUT upload to the server
@@ -460,7 +499,7 @@ export async function curateOne({
           'Content-Type': 'application/octet-stream',
           'X-File-Name': fileName,
           'X-File-Type': 'application/octet-stream',
-          'X-File-Size': String(modifiedArrayBuffer.byteLength),
+          'X-File-Size': String(modifiedBlob.size),
           'X-Source-File-Size': String(clonedMapResults.fileInfo?.size ?? ''),
           'X-Source-File-Modified-Time': mtime ?? '',
           'X-Source-File-Hash': preMappedHash ?? '',
@@ -473,14 +512,10 @@ export async function curateOne({
         if (postMappedHashHeader && postMappedHash)
           headers[postMappedHashHeader] = postMappedHash
 
-        // Send the ArrayBuffer directly instead of wrapping in a Blob first —
-        // avoids an extra copy in memory.
         const resp = await fetchWithRetry(uploadUrl, {
           method: 'PUT',
           headers,
-          body: new Blob([modifiedArrayBuffer], {
-            type: 'application/octet-stream',
-          }),
+          body: modifiedBlob,
         })
 
         if (!resp.ok) {
@@ -543,9 +578,8 @@ export async function curateOne({
           params: {
             Bucket: outputTarget.s3.bucketName,
             Key: key,
-            // Use the ArrayBuffer directly — going through Blob.arrayBuffer()
-            // would create yet another copy of the data in memory.
-            Body: new Uint8Array(modifiedArrayBuffer),
+            Body: modifiedBlob.stream(),
+            ContentLength: modifiedBlob.size,
             ContentType: 'application/octet-stream',
             Metadata: {
               'source-file-size': String(clonedMapResults.fileInfo?.size ?? ''),

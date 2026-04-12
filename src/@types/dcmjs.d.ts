@@ -33,6 +33,14 @@ declare module 'dcmjs' {
   export namespace data {
     interface ReadFileOptions {
       ignoreErrors?: boolean
+      /** Stop parsing when this tag is reached (8-char hex string, e.g. "7FE00010"). */
+      untilTag?: string | null
+      /** When untilTag is set, whether to decode and include the stop tag's value (default: false). */
+      includeUntilTagValue?: boolean
+      /** Use zero-copy Uint8Array views into the source buffer for binary tags instead of slice copies (default: false). */
+      noCopy?: boolean
+      /** Force all VRs including OW/OB to store a _rawValue alongside Value (default: false). */
+      forceStoreRaw?: boolean
     }
 
     interface WriteOptions {
@@ -125,6 +133,20 @@ declare module 'dcmjs' {
     info(...msg: any[]): void
     warn(...msg: any[]): void
     error(...msg: any[]): void
+  }
+
+  export namespace async {
+    interface StreamBuffer {
+      fromAsyncStream(stream: AsyncIterable<Uint8Array>): Promise<void>
+    }
+
+    class AsyncDicomReader {
+      stream: StreamBuffer & { offset: number }
+      meta: data.DicomDataset
+      dict: data.DicomDataset
+      constructor(options?: { isLittleEndian?: boolean; maxFragmentSize?: number })
+      readFile(options?: data.ReadFileOptions): Promise<AsyncDicomReader>
+    }
   }
 
   /**
