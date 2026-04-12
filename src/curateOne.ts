@@ -1,5 +1,10 @@
 import * as dcmjs from 'dcmjs'
 import { composeSpecs } from './composeSpecs'
+import {
+  LazyCompositeBlob,
+  LazyFileBlob,
+  readableStreamToAsyncIterable,
+} from './blobUtil'
 import createNestedDirectories from './createNestedDirectories'
 import curateDict from './curateDict'
 import { fetchWithRetry } from './fetchWithRetry'
@@ -49,21 +54,6 @@ function specHasFilter(mappingOptions: TMappingOptions): boolean {
   return !!(composed.preExclude ?? composed.postExclude)
 }
 
-async function* readableStreamToAsyncIterable(
-  stream: ReadableStream<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  const reader = stream.getReader()
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      yield value
-    }
-  } finally {
-    reader.releaseLock()
-  }
-}
-
 export async function curateOne({
   fileInfo,
   outputTarget,
@@ -86,15 +76,13 @@ export async function curateOne({
   if (fileInfo.kind === 'blob') {
     file = fileInfo.blob
   } else if (fileInfo.kind === 'path') {
-    // Node.js environment - use fs module to read file
-    const fs = await import('node:fs').then((mod) => mod.promises)
-    const fileBuffer = await fs.readFile(fileInfo.fullPath)
-
-    // Casting trick is here to overcome type mismatches between the web declaration of Blob
-    // and that of Node.js
-    file = new Blob([fileBuffer as unknown as ArrayBuffer], {
-      type: 'application/octet-stream',
-    })
+    // Node.js environment — stat the file for size/mtime, then wrap it in a
+    // LazyFileBlob so the contents are streamed on demand rather than loaded
+    // into memory up-front.
+    const { stat } = await import('node:fs').then((m) => m.promises)
+    const fileStats = await stat(fileInfo.fullPath)
+    mtime = new Date(fileStats.mtimeMs).toISOString()
+    file = new LazyFileBlob(fileInfo.fullPath, 0, fileStats.size)
   } else if (fileInfo.kind === 'http') {
     const headers: Record<string, string> = {}
     if (fileInfo.headers) {
@@ -338,9 +326,7 @@ export async function curateOne({
       mappedDicomData = {
         write: (options?: any) => {
           const headerBuf = origWrite(options) as ArrayBuffer
-          return new Blob([headerBuf, file.slice(pixelDataOffset)], {
-            type: 'application/octet-stream',
-          })
+          return new LazyCompositeBlob(headerBuf, file.slice(pixelDataOffset))
         },
       }
     }
