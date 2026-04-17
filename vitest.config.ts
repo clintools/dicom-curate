@@ -11,5 +11,17 @@ export default defineConfig({
         inline: ['@noble/hashes'],
       },
     },
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json-summary', 'html'],
+      reportsDirectory: './coverage',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.test.ts',
+        'src/**/*.integration.test.ts',
+        'src/**/*.spec.ts',
+        'src/**/*.d.ts',
+      ],
+    },
   },
 })
