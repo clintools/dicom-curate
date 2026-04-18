@@ -1,4 +1,5 @@
 import * as dcmjs from 'dcmjs'
+import { composeSpecs } from './composeSpecs'
 import createNestedDirectories from './createNestedDirectories'
 import curateDict from './curateDict'
 import { fetchWithRetry } from './fetchWithRetry'
@@ -39,6 +40,12 @@ export type TCurateOneArgs = {
       }
     | undefined
   >
+}
+
+function specHasFilter(mappingOptions: TMappingOptions): boolean {
+  if (mappingOptions.curationSpec === 'none') return false
+  const composed = composeSpecs(mappingOptions.curationSpec())
+  return !!(composed.preExclude ?? composed.postExclude)
 }
 
 export async function curateOne({
@@ -238,7 +245,9 @@ export async function curateOne({
     return retval
   }
 
-  if (canSkip && previousSourceFileInfo) {
+  const hasFilter = specHasFilter(mappingOptions)
+
+  if (canSkip && previousSourceFileInfo && !hasFilter) {
     return noMapResult()
   }
 
@@ -292,6 +301,20 @@ export async function curateOne({
       mappedDicomData = {
         write: () => fileArrayBuffer!,
       }
+    }
+
+    // File excluded by preExclude or postExclude — skip write and return immediately.
+    if (clonedMapResults.excluded) {
+      clonedMapResults.mappingRequired = false
+      clonedMapResults.fileInfo = {
+        name: fileInfo.name,
+        size: fileInfo.size,
+        path: fileInfo.path,
+        mtime,
+        preMappedHash,
+      }
+      clonedMapResults.curationTime = performance.now() - startTime
+      return clonedMapResults
     }
 
     // Indicate that mapping was required (we didn't hit the early-skip branch above)

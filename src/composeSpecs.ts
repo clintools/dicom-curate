@@ -6,6 +6,7 @@ import type {
   HostProps,
   TCurationSpecification,
   TParser,
+  TPostExcludeParser,
   TPs315Options,
 } from '../src/types'
 import { defaultSpec } from './defaultSpec'
@@ -238,6 +239,22 @@ export function composeSpecs(
       final.errors = (p: TParser) => {
         return [...prev(p), ...next(p)]
       }
+    }
+
+    // preExclude: exclude if any excluder returns true (logical OR)
+    if (spec.preExclude) {
+      const prev = final.preExclude
+      const next = spec.preExclude
+      final.preExclude = prev ? (p) => prev(p) || next(p) : next
+    }
+
+    // postExclude: exclude if any excluder returns true (logical OR)
+    if (spec.postExclude) {
+      const prev = final.postExclude
+      const next = spec.postExclude
+      final.postExclude = prev
+        ? (p: TPostExcludeParser) => prev(p) || next(p)
+        : next
     }
   }
 

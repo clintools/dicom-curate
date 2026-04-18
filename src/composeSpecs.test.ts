@@ -3,7 +3,12 @@ import { composeSpecs } from './composeSpecs'
 import { sample2PassCurationSpecification } from './config/sample2PassCurationSpecification'
 import { sampleBatchCurationSpecification } from './config/sampleBatchCurationSpecification'
 import curateDict from './curateDict'
-import type { TCurationSpecification, TMappingOptions, TParser } from './types'
+import type {
+  TCurationSpecification,
+  TMappingOptions,
+  TParser,
+  TPostExcludeParser,
+} from './types'
 
 // Helper function to create equivalent composite spec from batch spec
 function createEquivalentCompositeSpecFromBatch(): () => TCurationSpecification {
@@ -274,6 +279,139 @@ describe('composeSpecs equivalence tests', () => {
       'base',
       'output',
     ])
+  })
+
+  describe('preExclude and postExclude composition', () => {
+    const mockParser = {} as Partial<TParser> as TParser
+    const mockPostParser = {
+      outputFilePath: '/out/file.dcm',
+    } as Partial<TPostExcludeParser> as TPostExcludeParser
+
+    it('preExclude is undefined when no spec defines it', () => {
+      const composed = composeSpecs({ version: '3.0' })
+      expect(composed.preExclude).toBeUndefined()
+    })
+
+    it('postExclude is undefined when no spec defines it', () => {
+      const composed = composeSpecs({ version: '3.0' })
+      expect(composed.postExclude).toBeUndefined()
+    })
+
+    it('preExclude from single spec is preserved as-is', () => {
+      const filter = vi.fn().mockReturnValue(true)
+      const composed = composeSpecs({ version: '3.0', preExclude: filter })
+      expect(composed.preExclude!(mockParser)).toBe(true)
+      expect(filter).toHaveBeenCalledWith(mockParser)
+    })
+
+    it('postExclude from single spec is preserved as-is', () => {
+      const filter = vi.fn().mockReturnValue(true)
+      const composed = composeSpecs({ version: '3.0', postExclude: filter })
+      expect(composed.postExclude!(mockPostParser)).toBe(true)
+      expect(filter).toHaveBeenCalledWith(mockPostParser)
+    })
+
+    it('preExclude: any spec returning true causes exclusion (logical OR)', () => {
+      const spec1 = { version: '3.0', preExclude: () => false }
+      const spec2 = { version: '3.0', preExclude: () => true }
+      const spec3 = { version: '3.0', preExclude: () => false }
+      const composed = composeSpecs([spec1, spec2, spec3])
+      expect(composed.preExclude!(mockParser)).toBe(true)
+    })
+
+    it('preExclude: all returning false does not exclude', () => {
+      const spec1 = { version: '3.0', preExclude: () => false }
+      const spec2 = { version: '3.0', preExclude: () => false }
+      const composed = composeSpecs([spec1, spec2])
+      expect(composed.preExclude!(mockParser)).toBe(false)
+    })
+
+    it('postExclude: any spec returning true causes exclusion (logical OR)', () => {
+      const spec1 = { version: '3.0', postExclude: () => false }
+      const spec2 = { version: '3.0', postExclude: () => true }
+      const composed = composeSpecs([spec1, spec2])
+      expect(composed.postExclude!(mockPostParser)).toBe(true)
+    })
+
+    it('preExclude: short-circuits on first true — subsequent filters not called', () => {
+      const first = vi.fn().mockReturnValue(true)
+      const second = vi.fn().mockReturnValue(false)
+      const composed = composeSpecs([
+        { version: '3.0', preExclude: first },
+        { version: '3.0', preExclude: second },
+      ])
+      composed.preExclude!(mockParser)
+      expect(first).toHaveBeenCalled()
+      expect(second).not.toHaveBeenCalled()
+    })
+
+    it('postExclude: short-circuits on first true — subsequent filters not called', () => {
+      const first = vi.fn().mockReturnValue(true)
+      const second = vi.fn().mockReturnValue(false)
+      const composed = composeSpecs([
+        { version: '3.0', postExclude: first },
+        { version: '3.0', postExclude: second },
+      ])
+      composed.postExclude!(mockPostParser)
+      expect(first).toHaveBeenCalled()
+      expect(second).not.toHaveBeenCalled()
+    })
+
+    it('preExclude: spec with filter + spec without → filter still applied', () => {
+      const filter = vi.fn().mockReturnValue(true)
+      const composed = composeSpecs([
+        { version: '3.0', preExclude: filter },
+        { version: '3.0' },
+      ])
+      expect(composed.preExclude!(mockParser)).toBe(true)
+      expect(filter).toHaveBeenCalledOnce()
+    })
+
+    it('postExclude: spec without filter + spec with filter → filter still applied', () => {
+      const filter = vi.fn().mockReturnValue(true)
+      const composed = composeSpecs([
+        { version: '3.0' },
+        { version: '3.0', postExclude: filter },
+      ])
+      expect(composed.postExclude!(mockPostParser)).toBe(true)
+      expect(filter).toHaveBeenCalledOnce()
+    })
+
+    it('preExclude: filters applied in input order', () => {
+      const callOrder: number[] = []
+      const first = vi.fn().mockImplementation(() => {
+        callOrder.push(1)
+        return false
+      })
+      const second = vi.fn().mockImplementation(() => {
+        callOrder.push(2)
+        return false
+      })
+      const composed = composeSpecs([
+        { version: '3.0', preExclude: first },
+        { version: '3.0', preExclude: second },
+      ])
+      composed.preExclude!(mockParser)
+      expect(callOrder).toEqual([1, 2])
+    })
+
+    it('postExclude: filters applied in input order', () => {
+      const callOrder: number[] = []
+      const first = vi.fn().mockImplementation(() => {
+        callOrder.push(1)
+        return false
+      })
+      const second = vi.fn().mockImplementation(() => {
+        callOrder.push(2)
+        return false
+      })
+      const composed = composeSpecs([
+        { version: '3.0', postExclude: first },
+        { version: '3.0', postExclude: second },
+      ])
+      composed.postExclude!(mockPostParser)
+      expect(callOrder).toEqual([1, 2])
+    })
   })
 
   it('composeSpecs validates version consistency', () => {

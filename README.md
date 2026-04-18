@@ -287,6 +287,56 @@ export function sampleBatchCurationSpecification(): TCurationSpecification {
 }
 ```
 
+## Filtering files with preFilter and postFilter
+
+The curation specification supports two optional filter functions that let you skip files at different stages of processing.
+
+### preFilter — skip before mapping
+
+`preFilter` receives a `parser` with access to the **original, unmapped DICOM tags**. Return `false` to skip the file entirely — it will not be mapped, written, or uploaded.
+
+```ts
+export function myCurationSpec(): TCurationSpecification {
+  return {
+    // ... other fields ...
+
+    // Only process files whose PatientID matches the expected study format.
+    preFilter(parser) {
+      return /^AB\d{2}-\d{3}$/.test(parser.getDicom('PatientID'))
+    },
+  }
+}
+```
+
+### postFilter — skip after mapping
+
+`postFilter` receives the **final output file path** and a `parser` whose `getDicom()` returns **de-identified tag values** (PS315E de-identification has already run at this point). Return `false` to skip writing or uploading the mapped file.
+
+```ts
+export function myCurationSpec(): TCurationSpecification {
+  return {
+    // ... other fields ...
+
+    // Skip structured reports and files routed to an 'exclude' output folder.
+    postFilter(outputFilePath, parser) {
+      if (parser.getDicom('Modality') === 'SR') return false
+      if (outputFilePath.includes('/exclude/')) return false
+      return true
+    },
+  }
+}
+```
+
+### Result shape
+
+When a file is skipped by either filter, `curateOne` / `curateMany` still returns a result object for it. The `filtered` field indicates which filter excluded it:
+
+```ts
+// 'pre'  — excluded by preFilter (file was never mapped)
+// 'post' — excluded by postFilter (file was mapped but not written)
+result.filtered // => 'pre' | 'post' | undefined
+```
+
 ## DICOM Conformance Notes
 
 dicom-curate

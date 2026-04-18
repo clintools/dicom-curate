@@ -214,6 +214,9 @@ export type TMapResults = {
   // New semantics: mappingRequired indicates that mapping must be applied.
   // This replaces the old `noMappingRequired` flag (inverted semantics).
   mappingRequired?: boolean
+  // Set when the file was excluded by a preExclude or postExclude in the curation spec.
+  // 'pre': excluded before mapping (original tags); 'post': excluded after output path computed.
+  excluded?: 'pre' | 'post'
   // Time in ms for curation logic
   curationTime?: number
 }
@@ -249,6 +252,13 @@ export type TParser = {
   addDays: (dicomDateString: string, offsetDays: number) => string
   FILENAME: symbol
   FILEBASENAME: symbol
+}
+
+// Parser passed to postExclude — same as TParser but with the computed output path attached.
+// Use parser.outputFilePath to access the output path; parser.getFilePathComp() still
+// returns input path components (as in preExclude).
+export type TPostExcludeParser = TParser & {
+  outputFilePath: string
 }
 
 type TMappingInputDirect = {
@@ -302,6 +312,20 @@ export type TCurationSpecification<THost extends HostProps = HostProps> = {
     | TMappingInputTwoPass
   )
   excludedFiletypes?: string[]
+  // Called with original (pre-mapping) DICOM tags. Return true to exclude (skip) the file.
+  //
+  // Example — skip files whose Patient ID doesn't match the expected format:
+  //   preExclude: (parser) => !/^AB\d{2}-\d{3}$/.test(parser.getDicom('PatientID')),
+  preExclude?: (parser: TParser) => boolean
+  // Called after the output path is computed and PS315E de-identification has run.
+  // parser.getDicom() returns de-identified tag values at this point.
+  // Use parser.outputFilePath to access the computed output path.
+  // Return true to exclude (skip) writing/uploading the file.
+  //
+  // Example — skip files mapped into an 'exclude' output folder, or with an unwanted modality:
+  //   postExclude: (parser) =>
+  //     parser.outputFilePath.includes('/exclude/') || parser.getDicom('Modality') === 'SR',
+  postExclude?: (parser: TPostExcludeParser) => boolean
 }
 
 type TProgressMessageBase = {
