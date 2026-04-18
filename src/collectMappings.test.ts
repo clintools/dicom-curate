@@ -1,7 +1,24 @@
 import * as dcmjs from 'dcmjs'
 import { sample } from '../testdata/sample'
 import collectMappings from './collectMappings'
-import type { TMappingOptions } from './types'
+import type { TCurationSpecification, TMappingOptions } from './types'
+
+// A minimal spec that maps input path 'study/subject/test.dcm' to the same
+// output path, so no filename replacement occurs and outputFilePath is predictable.
+function makeSpec(
+  overrides: Partial<TCurationSpecification> = {},
+): () => TCurationSpecification {
+  return () => ({
+    version: '3.0',
+    inputPathPattern: 'study/subject',
+    hostProps: {},
+    dicomPS315EOptions: 'Off',
+    modifyDicomHeader: () => ({}),
+    outputFilePathComponents: () => ['study', 'subject', 'test.dcm'],
+    errors: () => [],
+    ...overrides,
+  })
+}
 
 describe('collectMappings with none specification', () => {
   it('returns early with naturalized dataset and empty map results', () => {
@@ -41,5 +58,187 @@ describe('collectMappings with none specification', () => {
     expect(() =>
       collectMappings('input.dcm', sample, mappingOptions),
     ).not.toThrow()
+  })
+})
+
+describe('collectMappings preExclude', () => {
+  it('sets excluded: pre and returns early when preExclude returns true', () => {
+    const mappingOptions: TMappingOptions = {
+      curationSpec: makeSpec({ preExclude: () => true }),
+    }
+
+    const [, mapResults] = collectMappings(
+      'study/subject/test.dcm',
+      sample,
+      mappingOptions,
+    )
+
+    expect(mapResults.excluded).toBe('pre')
+    expect(mapResults.mappings).toEqual({})
+    expect(mapResults.outputFilePath).toBe('')
+  })
+
+  it('continues normally when preExclude returns false', () => {
+    const mappingOptions: TMappingOptions = {
+      curationSpec: makeSpec({ preExclude: () => false }),
+    }
+
+    const [, mapResults] = collectMappings(
+      'study/subject/test.dcm',
+      sample,
+      mappingOptions,
+    )
+
+    expect(mapResults.excluded).toBeUndefined()
+    expect(mapResults.outputFilePath).toBe('study/subject/test.dcm')
+  })
+
+  it('passes original DICOM tags to preExclude via parser.getDicom', () => {
+    let capturedPatientId: string | undefined
+
+    const mappingOptions: TMappingOptions = {
+      curationSpec: makeSpec({
+        preExclude: (parser) => {
+          capturedPatientId = parser.getDicom('PatientID')
+          return false
+        },
+      }),
+    }
+
+    collectMappings('study/subject/test.dcm', sample, mappingOptions)
+
+    // sample has PatientID '00100020' → 'Test Long String'
+    expect(capturedPatientId).toBe('Test Long String')
+  })
+
+  it('does not call postExclude when preExclude returns true', () => {
+    const postExclude = vi.fn(() => false)
+
+    const mappingOptions: TMappingOptions = {
+      curationSpec: makeSpec({ preExclude: () => true, postExclude }),
+    }
+
+    collectMappings('study/subject/test.dcm', sample, mappingOptions)
+
+    expect(postExclude).not.toHaveBeenCalled()
+  })
+})
+
+describe('collectMappings postExclude', () => {
+  it('sets excluded: post and skips header mappings when postExclude returns true', () => {
+    const modifyDicomHeader = vi.fn(() => ({ PatientID: 'REPLACED' }))
+
+    const mappingOptions: TMappingOptions = {
+      curationSpec: makeSpec({
+        postExclude: () => true,
+        modifyDicomHeader,
+      }),
+    }
+
+    const [, mapResults] = collectMappings(
+      'study/subject/test.dcm',
+      sample,
+      mappingOptions,
+    )
+
+    expect(mapResults.excluded).toBe('post')
+    expect(mapResults.mappings).toEqual({})
+    expect(modifyDicomHeader).not.toHaveBeenCalled()
+  })
+
+  it('continues normally when postExclude returns false', () => {
+    const mappingOptions: TMappingOptions = {
+      curationSpec: makeSpec({ postExclude: () => false }),
+    }
+
+    const [, mapResults] = collectMappings(
+      'study/subject/test.dcm',
+      sample,
+      mappingOptions,
+    )
+
+    expect(mapResults.excluded).toBeUndefined()
+  })
+
+  it('exposes the computed output file path via parser.outputFilePath', () => {
+    let capturedPath: string | undefined
+
+    const mappingOptions: TMappingOptions = {
+      curationSpec: makeSpec({
+        outputFilePathComponents: () => ['out', 'dir', 'file.dcm'],
+        postExclude: (parser) => {
+          capturedPath = parser.outputFilePath
+          return false
+        },
+      }),
+    }
+
+    collectMappings('study/subject/test.dcm', sample, mappingOptions)
+
+    // When outputFilePath differs from inputFilePath, the filename segment is
+    // replaced with `${modality}_${uid}.dcm`; verify the directory prefix.
+    expect(capturedPath).toMatch(/^out\/dir\//)
+  })
+
+  it('exposes DICOM tags via parser.getDicom in postExclude', () => {
+    let capturedModality: string | undefined
+
+    const mappingOptions: TMappingOptions = {
+      curationSpec: makeSpec({
+        postExclude: (parser) => {
+          capturedModality = parser.getDicom('Modality')
+          return false
+        },
+      }),
+    }
+
+    collectMappings('study/subject/test.dcm', sample, mappingOptions)
+
+    // sample has Modality '00080060' → 'TEST_CODE'
+    expect(capturedModality).toBe('TEST_CODE')
+  })
+})
+
+describe('collectMappings filter error handling', () => {
+  it('treats file as included and records error when preExclude throws', () => {
+    const mappingOptions: TMappingOptions = {
+      curationSpec: makeSpec({
+        preExclude: () => {
+          throw new Error('boom in preExclude')
+        },
+      }),
+    }
+
+    const [, mapResults] = collectMappings(
+      'study/subject/test.dcm',
+      sample,
+      mappingOptions,
+    )
+
+    expect(mapResults.excluded).toBeUndefined()
+    expect(mapResults.errors).toContain(
+      'preExclude threw an error: boom in preExclude — treating file as included (fail-safe)',
+    )
+  })
+
+  it('treats file as included and records error when postExclude throws', () => {
+    const mappingOptions: TMappingOptions = {
+      curationSpec: makeSpec({
+        postExclude: () => {
+          throw new Error('boom in postExclude')
+        },
+      }),
+    }
+
+    const [, mapResults] = collectMappings(
+      'study/subject/test.dcm',
+      sample,
+      mappingOptions,
+    )
+
+    expect(mapResults.excluded).toBeUndefined()
+    expect(mapResults.errors).toContain(
+      'postExclude threw an error: boom in postExclude — treating file as included (fail-safe)',
+    )
   })
 })

@@ -254,6 +254,268 @@ describe('curateOne skip paths', () => {
   })
 })
 
+describe('curateOne preExclude and postExclude', () => {
+  const inputPath =
+    'Sample_Protocol_Number/Sample_CRO/AB12-123/Visit 1/PET-Abdomen'
+
+  function buildDicomBuffer(patientId = 'AB12-123') {
+    const dataset = {
+      PatientName: patientId,
+      PatientID: patientId,
+      Modality: 'CT',
+      SOPClassUID: '1.2.840.10008.5.1.4.1.1.2',
+      SOPInstanceUID: '1.2.3.4.5.6.7.8.9',
+      SeriesInstanceUID: '1.2.3.4.5.6.7.8',
+      StudyInstanceUID: '1.2.3.4.5.6.7',
+      SeriesNumber: '1',
+    }
+    const dicomDict = new dcmjs.data.DicomDict({
+      '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2.1'] },
+      '00020002': { vr: 'UI', Value: [dataset.SOPClassUID] },
+      '00020003': { vr: 'UI', Value: [dataset.SOPInstanceUID] },
+    })
+    dicomDict.dict = dcmjs.data.DicomMetaDictionary.denaturalizeDataset(dataset)
+    return dicomDict.write({ allowInvalidVRLength: true })
+  }
+
+  function makeSpec(
+    overrides: Partial<TCurationSpecification> = {},
+  ): () => TCurationSpecification {
+    return () => ({
+      inputPathPattern:
+        'protocolNumber/activityProvider/centerSubjectId/timepoint/scan',
+      version: '3.0',
+      hostProps: {},
+      dicomPS315EOptions: 'Off',
+      modifyDicomHeader: () => ({}),
+      outputFilePathComponents: (parser) => [
+        parser.getFilePathComp('protocolNumber'),
+        parser.getFilePathComp('activityProvider'),
+        parser.getFilePathComp(parser.FILENAME),
+      ],
+      errors: () => [],
+      ...overrides,
+    })
+  }
+
+  it('returns excluded: pre and skips write when preExclude returns true', async () => {
+    const buffer = buildDicomBuffer()
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const result = await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: {
+        curationSpec: makeSpec({ preExclude: () => true }),
+        skipWrite: false,
+      },
+    })
+
+    expect(result.excluded).toBe('pre')
+    expect(result.mappedBlob).toBeUndefined()
+    expect(result.fileInfo).toBeDefined()
+    expect(result.fileInfo!.name).toBe('test.dcm')
+    expect(result.fileInfo!.size).toBe(buffer.byteLength)
+  })
+
+  it('returns excluded: post and skips write when postExclude returns true', async () => {
+    const buffer = buildDicomBuffer()
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const result = await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: {
+        curationSpec: makeSpec({ postExclude: () => true }),
+        skipWrite: false,
+      },
+    })
+
+    expect(result.excluded).toBe('post')
+    expect(result.mappedBlob).toBeUndefined()
+    expect(result.fileInfo).toBeDefined()
+    expect(result.fileInfo!.name).toBe('test.dcm')
+  })
+
+  it('processes normally when preExclude returns false', async () => {
+    const buffer = buildDicomBuffer()
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const result = await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: {
+        curationSpec: makeSpec({ preExclude: () => false }),
+        skipWrite: false,
+      },
+    })
+
+    expect(result.excluded).toBeUndefined()
+    expect(result.mappedBlob).toBeDefined()
+    expect(result.mappingRequired).toBe(true)
+  })
+
+  it('passes original PatientID to preExclude before any mapping', async () => {
+    const buffer = buildDicomBuffer('ORIGINAL_ID')
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    let capturedId: string | undefined
+
+    await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: {
+        curationSpec: makeSpec({
+          preExclude: (parser) => {
+            capturedId = parser.getDicom('PatientID')
+            return false
+          },
+          // modifyDicomHeader replaces PatientID — preExclude must see the original
+          modifyDicomHeader: () => ({ PatientID: 'REPLACED' }),
+        }),
+        skipWrite: false,
+      },
+    })
+
+    expect(capturedId).toBe('ORIGINAL_ID')
+  })
+
+  it('passes computed output file path to postExclude', async () => {
+    const buffer = buildDicomBuffer()
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    let capturedPath: string | undefined
+
+    await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: {
+        curationSpec: makeSpec({
+          outputFilePathComponents: () => ['out', 'subdir', 'result.dcm'],
+          postExclude: (parser) => {
+            capturedPath = parser.outputFilePath
+            return false
+          },
+        }),
+        skipWrite: false,
+      },
+    })
+
+    expect(capturedPath).toContain('out/subdir/')
+  })
+
+  it('does not upload when postExclude excludes the file', async () => {
+    const buffer = buildDicomBuffer()
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const mockFetch = vi.fn<typeof fetch>()
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mockFetch
+
+    try {
+      const result = await curateOne({
+        fileInfo,
+        outputTarget: { http: { url: 'https://example.com/upload' } },
+        mappingOptions: {
+          curationSpec: makeSpec({ postExclude: () => true }),
+          skipWrite: false,
+        },
+      })
+
+      expect(mockFetch).not.toHaveBeenCalled()
+      expect(result.excluded).toBe('post')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('evaluates preExclude even when previousSourceFileInfo hash matches', async () => {
+    const buffer = buildDicomBuffer()
+    const preMappedHash = await hash(buffer, 'md5')
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const result = await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: {
+        curationSpec: makeSpec({ preExclude: () => true }),
+        skipWrite: false,
+      },
+      hashMethod: 'md5',
+      previousSourceFileInfo: { preMappedHash },
+    })
+
+    expect(result.excluded).toBe('pre')
+  })
+
+  it('evaluates postExclude even when previousSourceFileInfo hash matches', async () => {
+    const buffer = buildDicomBuffer()
+    const preMappedHash = await hash(buffer, 'md5')
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const result = await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: {
+        curationSpec: makeSpec({ postExclude: () => true }),
+        skipWrite: false,
+      },
+      hashMethod: 'md5',
+      previousSourceFileInfo: { preMappedHash },
+    })
+
+    expect(result.excluded).toBe('post')
+  })
+})
+
 describe('curateOne upload ETag capture', () => {
   const noOpSpec: () => TCurationSpecification = () => ({
     inputPathPattern:

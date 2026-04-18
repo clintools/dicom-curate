@@ -48,12 +48,27 @@ export default function collectMappings(
     finalSpec.additionalData,
   )
 
+  // preExclude: original DICOM tags visible via parser.getDicom
+  let preExcludeError: string | undefined
+  try {
+    if (finalSpec.preExclude?.(parser)) {
+      mapResults.excluded = 'pre'
+      return [naturalData, mapResults]
+    }
+  } catch (e) {
+    preExcludeError = `preExclude threw an error: ${e instanceof Error ? e.message : String(e)} — treating file as included (fail-safe)`
+  }
+
   // List all validation errors
   if (!mappingOptions.skipValidation) {
     mapResults.errors = finalSpec
       .errors(parser)
       .filter(([, failure]) => failure)
       .map(([message]) => message)
+  }
+
+  if (preExcludeError) {
+    mapResults.errors.push(preExcludeError)
   }
 
   // Return listing for the "two-pass add mapping" scenario
@@ -135,6 +150,23 @@ export default function collectMappings(
         `${modality}_${mapResults.sourceInstanceUID}.dcm`
       mapResults.outputFilePath = parts.join('/')
     }
+  }
+
+  // postExclude: output path is finalised; parser.getDicom() returns de-identified values
+  try {
+    if (
+      finalSpec.postExclude?.({
+        ...parser,
+        outputFilePath: mapResults.outputFilePath,
+      })
+    ) {
+      mapResults.excluded = 'post'
+      return [naturalData, mapResults]
+    }
+  } catch (e) {
+    mapResults.errors.push(
+      `postExclude threw an error: ${e instanceof Error ? e.message : String(e)} — treating file as included (fail-safe)`,
+    )
   }
 
   // Moving this after collectMappingsInData as this should take precedence.
