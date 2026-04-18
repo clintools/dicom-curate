@@ -254,6 +254,177 @@ describe('curateOne skip paths', () => {
   })
 })
 
+describe('curateOne PixelData preservation', () => {
+  // A spec that changes the PatientName, ensuring mappings is non-empty.
+  // This forces curateOne into the LazyCompositeBlob path for PixelData files.
+  const pixelSpec: () => TCurationSpecification = () => ({
+    inputPathPattern:
+      'protocolNumber/activityProvider/centerSubjectId/timepoint/scan',
+    version: '3.0',
+    hostProps: {},
+    dicomPS315EOptions: 'Off',
+    modifyDicomHeader: () => ({ PatientName: 'ANON' }),
+    outputFilePathComponents: (parser) => [
+      parser.getFilePathComp('protocolNumber'),
+      parser.getFilePathComp('activityProvider'),
+      parser.getFilePathComp(parser.FILENAME),
+    ],
+    errors: () => [],
+  })
+
+  const inputPath =
+    'Sample_Protocol_Number/Sample_CRO/AB12-123/Visit 1/PET-Abdomen'
+
+  /**
+   * Build a minimal but valid DICOM file that includes a PixelData tag
+   * (7FE0,0010) with the supplied bytes.  The file is explicit little-endian
+   * (Transfer Syntax 1.2.840.10008.1.2.1) so that dcmjs's AsyncDicomReader can
+   * parse the header and stop exactly at the PixelData tag.
+   */
+  function buildDicomWithPixelData(pixelBytes: Uint8Array): Uint8Array {
+    const dataset = {
+      PatientName: 'Test^Patient',
+      PatientID: 'P001',
+      Modality: 'CT',
+      SOPClassUID: '1.2.840.10008.5.1.4.1.1.2',
+      SOPInstanceUID: '1.2.3.4.5.6.7.8.9',
+      SeriesInstanceUID: '1.2.3.4.5.6.7.8',
+      StudyInstanceUID: '1.2.3.4.5.6.7',
+      SeriesNumber: '1',
+    }
+    const dicomDict = new dcmjs.data.DicomDict({
+      '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2.1'] },
+      '00020002': { vr: 'UI', Value: [dataset.SOPClassUID] },
+      '00020003': { vr: 'UI', Value: [dataset.SOPInstanceUID] },
+    })
+    dicomDict.dict = dcmjs.data.DicomMetaDictionary.denaturalizeDataset(dataset)
+    const headerBuf = dicomDict.write({ allowInvalidVRLength: true })
+    const headerBytes = new Uint8Array(headerBuf)
+
+    // DICOM requires even-length pixel data values.
+    const paddedPixel =
+      pixelBytes.length % 2 === 0
+        ? pixelBytes
+        : new Uint8Array([...pixelBytes, 0x00])
+    const pixelLen = paddedPixel.length
+
+    // Explicit little-endian OB tag for 7FE0,0010:
+    //   2 bytes group (E0 7F)  +  2 bytes element (10 00)
+    //   2 bytes VR  (4F 42 = "OB")
+    //   2 bytes reserved (00 00)
+    //   4 bytes length (uint32 LE)
+    //   N bytes pixel data
+    const tagHeader = new Uint8Array(12)
+    tagHeader[0] = 0xe0
+    tagHeader[1] = 0x7f // group 7FE0 LE
+    tagHeader[2] = 0x10
+    tagHeader[3] = 0x00 // element 0010 LE
+    tagHeader[4] = 0x4f
+    tagHeader[5] = 0x42 // VR = OB
+    tagHeader[6] = 0x00
+    tagHeader[7] = 0x00 // reserved
+    new DataView(tagHeader.buffer).setUint32(8, pixelLen, true) // length LE
+
+    const out = new Uint8Array(headerBytes.length + tagHeader.length + pixelLen)
+    out.set(headerBytes, 0)
+    out.set(tagHeader, headerBytes.length)
+    out.set(paddedPixel, headerBytes.length + tagHeader.length)
+    return out
+  }
+
+  it('preserves original PixelData bytes when header changes are applied', async () => {
+    // Use a recognisable, even-length pixel payload so we can easily locate it
+    // in the output and verify it was not modified during curation.
+    const pixelBytes = new Uint8Array([
+      0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x11, 0x22,
+    ])
+    const dicomBytes = buildDicomWithPixelData(pixelBytes)
+
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([dicomBytes.buffer as ArrayBuffer], {
+        type: 'application/octet-stream',
+      }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: dicomBytes.length,
+    }
+
+    const result = await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: { curationSpec: pixelSpec, skipWrite: false },
+    })
+
+    // Curation ran (not an early skip)
+    expect(result.mappingRequired).toBe(true)
+
+    // The PatientName mapping was applied
+    expect(result.mappings).toBeDefined()
+    expect(Object.keys(result.mappings!)).toContain('PatientName')
+
+    // The output blob must exist and be at least as large as the input —
+    // it contains the rewritten header plus the original PixelData bytes.
+    expect(result.mappedBlob).toBeDefined()
+    const outputBytes = new Uint8Array(await result.mappedBlob!.arrayBuffer())
+    expect(outputBytes.length).toBeGreaterThan(0)
+
+    // The original pixel bytes must appear verbatim at the tail of the output.
+    // curateOne appends file.slice(pixelDataOffset) which is the PixelData tag
+    // header (12 bytes) followed immediately by the pixel data itself.
+    const tail = outputBytes.slice(outputBytes.length - pixelBytes.length)
+    expect(Array.from(tail)).toEqual(Array.from(pixelBytes))
+  })
+
+  it('does not double-append PixelData when the spec produces no header changes', async () => {
+    // When modifyDicomHeader returns {} and dicomPS315EOptions is Off,
+    // curateOne short-circuits to write() -> original file blob (byte-identical
+    // copy).  PixelData is included naturally via that path and must NOT be
+    // duplicated.
+    const noOpSpec: () => TCurationSpecification = () => ({
+      inputPathPattern:
+        'protocolNumber/activityProvider/centerSubjectId/timepoint/scan',
+      version: '3.0',
+      hostProps: {},
+      dicomPS315EOptions: 'Off',
+      modifyDicomHeader: () => ({}),
+      outputFilePathComponents: (parser) => [
+        parser.getFilePathComp('protocolNumber'),
+        parser.getFilePathComp('activityProvider'),
+        parser.getFilePathComp(parser.FILENAME),
+      ],
+      errors: () => [],
+    })
+
+    const pixelBytes = new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05, 0x06])
+    const dicomBytes = buildDicomWithPixelData(pixelBytes)
+
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([dicomBytes.buffer as ArrayBuffer], {
+        type: 'application/octet-stream',
+      }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: dicomBytes.length,
+    }
+
+    const result = await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+    })
+
+    expect(result.mappingRequired).toBe(true)
+
+    const outputBytes = new Uint8Array(await result.mappedBlob!.arrayBuffer())
+
+    // Output must be byte-identical to the input (no-op path preserves original)
+    expect(outputBytes.length).toBe(dicomBytes.length)
+    expect(Array.from(outputBytes)).toEqual(Array.from(dicomBytes))
+  })
+})
+
 describe('curateOne preExclude and postExclude', () => {
   const inputPath =
     'Sample_Protocol_Number/Sample_CRO/AB12-123/Visit 1/PET-Abdomen'
