@@ -260,24 +260,32 @@ export async function curateOne({
     dcmjs.log.setLevel(dcmjs.log.levels.ERROR)
     dcmjs.log.getLogger('validation.dcmjs').setLevel(dcmjs.log.levels.SILENT)
     let dicomData: dcmjs.data.DicomDict
+    // Byte offset within `file` where the PixelData tag (7FE0,0010) starts.
+    // When set, pixel data is appended to the re-serialised header as a
+    // zero-copy Blob slice rather than being loaded into memory.
     let pixelDataOffset = -1
     try {
       const reader = new dcmjs.async.AsyncDicomReader()
       const feedDone = reader.stream.fromAsyncStream(
         readableStreamToAsyncIterable(file.stream()),
       )
+      // Stop reading at the PixelData tag.  The fixed dcmjs read() loop breaks
+      // out of the scan when readTagHeader() returns {untilTag: true}, leaving
+      // stream.offset pointing at the byte immediately after the 4-byte tag
+      // (i.e. the VR field for explicit-LE).  Subtracting 4 gives the start of
+      // the PixelData tag, which is exactly the offset we need for the slice.
       await reader.readFile({
         ignoreErrors: true,
         noCopy: true,
         untilTag: '7FE00010',
       })
       await feedDone
-      // readTagHeader consumes the 4-byte tag identifier before detecting untilTag,
-      // so subtract 4 to recover the tag's start offset in the original file.
+
       const rawOffset = reader.stream.offset - 4
       if (rawOffset > 0 && rawOffset < file.size) {
         pixelDataOffset = rawOffset
       }
+
       dicomData = new dcmjs.data.DicomDict(reader.meta)
       dicomData.dict = reader.dict
     } catch (error) {
@@ -320,13 +328,12 @@ export async function curateOne({
       }
     } else if (pixelDataOffset >= 0) {
       // Append PixelData from the original file as a zero-copy Blob slice.
-      // dcmjs never saw the pixel data (untilTag stopped it), so its write()
-      // output is header-only; we append the original bytes from pixelDataOffset.
       const origWrite = mappedDicomData.write.bind(mappedDicomData)
+      const pixelBlob = file.slice(pixelDataOffset)
       mappedDicomData = {
         write: (options?: any) => {
           const headerBuf = origWrite(options) as ArrayBuffer
-          return new LazyCompositeBlob(headerBuf, file.slice(pixelDataOffset))
+          return new LazyCompositeBlob(headerBuf, pixelBlob)
         },
       }
     }
