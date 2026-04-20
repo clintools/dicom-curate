@@ -1,3 +1,10 @@
+# [0.35.0](https://github.com/clintools/dicom-curate/compare/v0.34.0...v0.35.0) (2026-04-20)
+
+
+### Features
+
+* implement preExclude and postExclude feature in specs ([54c2c1c](https://github.com/clintools/dicom-curate/commit/54c2c1c6f626824c64e49f28cd47c014c64f4184))
+
 # [0.34.0](https://github.com/clintools/dicom-curate/compare/v0.33.0...v0.34.0) (2026-04-10)
 
 
