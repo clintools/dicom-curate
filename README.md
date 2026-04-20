@@ -287,54 +287,62 @@ export function sampleBatchCurationSpecification(): TCurationSpecification {
 }
 ```
 
-## Filtering files with preFilter and postFilter
+## Excluding files with preExclude and postExclude
 
-The curation specification supports two optional filter functions that let you skip files at different stages of processing.
+The curation specification supports two optional exclusion functions that let you skip files at different stages of processing. Both return **`true` to exclude** the file; returning `false` (or omitting the function entirely) lets the file through.
 
-### preFilter — skip before mapping
+### preExclude — skip before mapping
 
-`preFilter` receives a `parser` with access to the **original, unmapped DICOM tags**. Return `false` to skip the file entirely — it will not be mapped, written, or uploaded.
-
-```ts
-export function myCurationSpec(): TCurationSpecification {
-  return {
-    // ... other fields ...
-
-    // Only process files whose PatientID matches the expected study format.
-    preFilter(parser) {
-      return /^AB\d{2}-\d{3}$/.test(parser.getDicom('PatientID'))
-    },
-  }
-}
-```
-
-### postFilter — skip after mapping
-
-`postFilter` receives the **final output file path** and a `parser` whose `getDicom()` returns **de-identified tag values** (PS315E de-identification has already run at this point). Return `false` to skip writing or uploading the mapped file.
+`preExclude` receives a `parser` with access to the **original, unmapped DICOM tags**. Return `true` to skip the file entirely — it will not be mapped, written, or uploaded.
 
 ```ts
 export function myCurationSpec(): TCurationSpecification {
   return {
     // ... other fields ...
 
-    // Skip structured reports and files routed to an 'exclude' output folder.
-    postFilter(outputFilePath, parser) {
-      if (parser.getDicom('Modality') === 'SR') return false
-      if (outputFilePath.includes('/exclude/')) return false
-      return true
+    // Exclude files whose PatientID doesn't match the expected study format.
+    preExclude(parser) {
+      return !/^AB\d{2}-\d{3}$/.test(parser.getDicom('PatientID'))
     },
   }
 }
 ```
+
+### postExclude — skip after mapping
+
+`postExclude` receives a `parser` whose `getDicom()` returns **de-identified tag values** (PS315E de-identification has already run at this point), and exposes the computed output path as `parser.outputFilePath`. Return `true` to skip writing or uploading the mapped file.
+
+Note: `parser.getFilePathComp()` still returns **input** path components inside `postExclude`, the same as in `preExclude`. Only `parser.outputFilePath` reflects the post-mapping location, as a full string.
+
+```ts
+export function myCurationSpec(): TCurationSpecification {
+  return {
+    // ... other fields ...
+
+    // Exclude structured reports and files routed to an 'exclude' output folder.
+    postExclude(parser) {
+      if (parser.getDicom('Modality') === 'SR') return true
+      if (parser.outputFilePath.includes('/exclude/')) return true
+      return false
+    },
+  }
+}
+```
+
+### Behaviour notes
+
+- **Exclusions are re-evaluated on every run.** When a `preExclude` or `postExclude` is configured, the "unchanged source bytes" short-circuit is disabled so an exclusion added in a later run takes effect even if the file itself didn't change.
+- **Composition across multiple specs is OR.** When `composeSpecs` merges specs that each define `preExclude` / `postExclude`, the composed function excludes a file if **any** spec's function returns `true`. Evaluation short-circuits on the first `true`.
+- **Exceptions are fail-safe.** If an exclusion function throws, the file is treated as **included** and the error message is appended to `mapResults.errors`.
 
 ### Result shape
 
-When a file is skipped by either filter, `curateOne` / `curateMany` still returns a result object for it. The `filtered` field indicates which filter excluded it:
+When a file is excluded, `curateOne` / `curateMany` still returns a result object for it. The `excluded` field indicates which function rejected it:
 
 ```ts
-// 'pre'  — excluded by preFilter (file was never mapped)
-// 'post' — excluded by postFilter (file was mapped but not written)
-result.filtered // => 'pre' | 'post' | undefined
+// 'pre'  — excluded by preExclude (file was never mapped)
+// 'post' — excluded by postExclude (file was mapped but not written)
+result.excluded // => 'pre' | 'post' | undefined
 ```
 
 ## DICOM Conformance Notes
