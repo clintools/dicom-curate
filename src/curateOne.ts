@@ -4,6 +4,7 @@ import createNestedDirectories from './createNestedDirectories'
 import curateDict from './curateDict'
 import { fetchWithRetry } from './fetchWithRetry'
 import { hash } from './hash'
+import { loadLibStorage } from './libStorage'
 import { loadS3Client } from './s3Client'
 import type {
   TFileInfo,
@@ -507,8 +508,9 @@ export async function curateOne({
         )
       }
     } else if (outputTarget?.s3) {
-      // Dynamically import AWS SDK S3 client
+      // Dynamically import AWS SDK S3 client and lib-storage Upload helper
       const s3 = await loadS3Client()
+      const libStorage = await loadLibStorage()
 
       const client = new s3.S3Client({
         region: outputTarget.s3.region,
@@ -525,8 +527,20 @@ export async function curateOne({
           : ''
         const key = prefix + clonedMapResults.outputFilePath!
 
-        const putResponse = await client.send(
-          new s3.PutObjectCommand({
+        // Always route through lib-storage. When `uploadPartSize` is set,
+        // bodies larger than that value are uploaded via multipart and S3
+        // assigns a composite `<md5>-<N>` ETag; smaller bodies go through
+        // a single PutObject internally and get a plain-MD5 ETag. When
+        // `uploadPartSize` is undefined, we pass MAX_SAFE_INTEGER so every
+        // body fits in "one part" and lib-storage always falls back to a
+        // single PutObject — behaviourally identical to sending
+        // `PutObjectCommand` directly, but keeps the upload path uniform.
+        const partSize =
+          outputTarget.s3.uploadPartSize ?? Number.MAX_SAFE_INTEGER
+
+        const upload = new libStorage.Upload({
+          client,
+          params: {
             Bucket: outputTarget.s3.bucketName,
             Key: key,
             // Use the ArrayBuffer directly — going through Blob.arrayBuffer()
@@ -541,15 +555,17 @@ export async function curateOne({
                 ? { 'source-file-post-mapped-hash': postMappedHash }
                 : {}),
             },
-          }),
-        )
+          },
+          partSize,
+        })
+        const uploadResponse = await upload.done()
 
         const uploadUrl = `s3://${outputTarget.s3.bucketName}/${key}`
         // attach upload info
         clonedMapResults.outputUpload = {
           url: uploadUrl,
           status: 200,
-          etag: putResponse.ETag ?? undefined,
+          etag: uploadResponse.ETag ?? undefined,
         }
       } catch (e) {
         console.error('S3 Upload error', e)

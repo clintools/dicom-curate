@@ -113,6 +113,31 @@ It is also possible to use S3-compatible buckets as input or output locations.
 Consult `OrganizeOptions` for further details. Please note that this feature is only
 available if you have the `@aws-sdk/client-s3` package installed.
 
+### Matching S3 ETags across uploaders
+
+When uploading to S3, you can set `uploadPartSize` on the output S3
+options to control the ETag S3 assigns to the written object:
+
+```ts
+const options: OrganizeOptions = {
+  // other options are skipped
+  outputEndpoint: {
+    bucketName: 'my-bucket',
+    region: 'us-east-1',
+    // Bodies <= 5 MB: single PUT, S3 returns a plain-MD5 ETag.
+    // Bodies  > 5 MB: multipart, S3 returns a composite "<md5>-<N>" ETag.
+    uploadPartSize: 5 * 1024 * 1024,
+  },
+}
+```
+
+This matches the ETag convention produced by any S3 client that uses
+`@aws-sdk/lib-storage` at the same `partSize`, making cross-bucket
+"equal bytes ⇒ equal ETag" comparisons well-defined.
+
+When `uploadPartSize` is omitted, all uploads go through a single PUT
+regardless of body size and S3 always returns a plain-MD5 ETag.
+
 This library can now automatically skip writing (or uploading) mapped files if the provided
 "previous" input file attributes match the record you pass in the `fileInfoIndex` property:
 

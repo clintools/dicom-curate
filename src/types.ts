@@ -123,6 +123,24 @@ export type TS3BucketOptions = {
   endpoint?: string
   // If true, will use path-style addressing for S3 objects
   forcePathStyle?: boolean
+  /**
+   * Part size in bytes for multipart uploads. When set, the library
+   * routes uploads through `@aws-sdk/lib-storage`'s `Upload` helper:
+   *   - Bodies <= uploadPartSize: single PUT, S3 returns a plain MD5 ETag.
+   *   - Bodies  > uploadPartSize: multipart, S3 returns a composite
+   *     `<md5>-<N>` ETag.
+   *
+   * This matches the ETag convention produced by any S3 client that uses
+   * lib-storage at the same `partSize`, making cross-bucket
+   * "equal bytes ⇒ equal ETag" comparisons well-defined.
+   *
+   * When unset (or undefined), uploads use a plain `PutObject` regardless
+   * of body size. S3 always returns a plain MD5 ETag in that case.
+   *
+   * Invalid part sizes are rejected by S3 at upload time; the error
+   * surfaces via `uploadErrors` like any other S3 failure.
+   */
+  uploadPartSize?: number
 }
 
 /** Output target for curation -- at most one of http, directory, or s3. */
