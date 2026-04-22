@@ -49,6 +49,7 @@ export default [
         path: 'path',
         worker_threads: 'worker_threads',
         '@aws-sdk/client-s3': 'AwsSdkClientS3',
+        '@aws-sdk/lib-storage': 'AwsSdkLibStorage',
       },
     },
     external: [
@@ -57,6 +58,7 @@ export default [
       'path',
       'worker_threads',
       '@aws-sdk/client-s3',
+      '@aws-sdk/lib-storage',
     ],
     plugins: umdPlugins,
   },
@@ -75,6 +77,7 @@ export default [
         path: 'path',
         worker_threads: 'worker_threads',
         '@aws-sdk/client-s3': 'AwsSdkClientS3',
+        '@aws-sdk/lib-storage': 'AwsSdkLibStorage',
       },
     },
     external: [
@@ -83,6 +86,7 @@ export default [
       'path',
       'worker_threads',
       '@aws-sdk/client-s3',
+      '@aws-sdk/lib-storage',
     ],
     treeshake: true,
     plugins: [...umdPlugins, terser()],

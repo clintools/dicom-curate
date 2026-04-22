@@ -630,3 +630,181 @@ describe('curateOne upload ETag capture', () => {
     }
   })
 })
+
+describe('curateOne S3 output upload strategy', () => {
+  const noOpSpec: () => TCurationSpecification = () => ({
+    inputPathPattern:
+      'protocolNumber/activityProvider/centerSubjectId/timepoint/scan',
+    version: '3.0',
+    hostProps: {},
+    dicomPS315EOptions: 'Off',
+    modifyDicomHeader: () => ({}),
+    outputFilePathComponents: (parser) => [
+      parser.getFilePathComp('protocolNumber'),
+      parser.getFilePathComp('activityProvider'),
+      parser.getFilePathComp(parser.FILENAME),
+    ],
+    errors: () => [],
+  })
+
+  const inputPath =
+    'Sample_Protocol_Number/Sample_CRO/AB12-123/Visit 1/PET-Abdomen'
+
+  function buildDicomBuffer() {
+    const dataset = {
+      PatientName: 'Test',
+      PatientID: 'P001',
+      Modality: 'CT',
+      SOPClassUID: '1.2.840.10008.5.1.4.1.1.2',
+      SOPInstanceUID: '1.2.3.4.5.6.7.8.9',
+      SeriesInstanceUID: '1.2.3.4.5.6.7.8',
+      StudyInstanceUID: '1.2.3.4.5.6.7',
+      SeriesNumber: '1',
+    }
+    const dicomDict = new dcmjs.data.DicomDict({
+      '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2.1'] },
+      '00020002': { vr: 'UI', Value: [dataset.SOPClassUID] },
+      '00020003': { vr: 'UI', Value: [dataset.SOPInstanceUID] },
+    })
+    dicomDict.dict = dcmjs.data.DicomMetaDictionary.denaturalizeDataset(dataset)
+    return dicomDict.write({ allowInvalidVRLength: true })
+  }
+
+  let mockUploadDone: ReturnType<typeof vi.fn>
+  let mockUploadConstructor: ReturnType<typeof vi.fn>
+  let curateOneFn: typeof curateOne
+
+  beforeEach(async () => {
+    vi.resetModules()
+    vi.clearAllMocks()
+
+    mockUploadDone = vi.fn()
+    // Capture the constructor args so the test can assert partSize was
+    // forwarded to lib-storage's Upload helper.
+    mockUploadConstructor = vi.fn(() => ({ done: mockUploadDone }))
+
+    vi.doMock('./s3Client', () => ({
+      loadS3Client: vi.fn(async () => ({
+        S3Client: vi.fn(() => ({ send: vi.fn() })),
+        PutObjectCommand: vi.fn(),
+      })),
+    }))
+
+    vi.doMock('./libStorage', () => ({
+      loadLibStorage: vi.fn(async () => ({
+        Upload: mockUploadConstructor,
+      })),
+    }))
+
+    ;({ curateOne: curateOneFn } = await import('./curateOne'))
+  })
+
+  it('uses lib-storage with MAX_SAFE_INTEGER partSize when uploadPartSize is undefined', async () => {
+    const buffer = buildDicomBuffer()
+    mockUploadDone.mockResolvedValue({ ETag: '"plain-md5-etag"' })
+
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const result = await curateOneFn({
+      fileInfo,
+      outputTarget: {
+        s3: {
+          bucketName: 'my-bucket',
+          region: 'us-east-1',
+        },
+      },
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+      hashMethod: 'md5',
+    })
+
+    expect(mockUploadConstructor).toHaveBeenCalledTimes(1)
+    const constructorArgs = mockUploadConstructor.mock.calls[0]![0]
+    // MAX_SAFE_INTEGER is the internal sentinel: lib-storage will fall back
+    // to a single PutObject because no real file exceeds 2^53 - 1 bytes,
+    // so S3 returns a plain-MD5 ETag.
+    expect(constructorArgs.partSize).toBe(Number.MAX_SAFE_INTEGER)
+    expect(constructorArgs.params.Bucket).toBe('my-bucket')
+    expect(constructorArgs.params.Key).toBe(
+      'Sample_Protocol_Number/Sample_CRO/CT_1.2.3.4.5.6.7.8.9.dcm',
+    )
+    expect(result.outputUpload).toBeDefined()
+    expect(result.outputUpload!.etag).toBe('"plain-md5-etag"')
+    expect(result.outputUpload!.url).toBe(
+      's3://my-bucket/Sample_Protocol_Number/Sample_CRO/CT_1.2.3.4.5.6.7.8.9.dcm',
+    )
+  })
+
+  it('uses lib-storage Upload with the given partSize when uploadPartSize is set', async () => {
+    const buffer = buildDicomBuffer()
+    mockUploadDone.mockResolvedValue({ ETag: '"multipart-composite-etag-2"' })
+
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const result = await curateOneFn({
+      fileInfo,
+      outputTarget: {
+        s3: {
+          bucketName: 'my-bucket',
+          region: 'us-east-1',
+          uploadPartSize: 5 * 1024 * 1024,
+        },
+      },
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+      hashMethod: 'md5',
+    })
+
+    expect(mockUploadConstructor).toHaveBeenCalledTimes(1)
+    const constructorArgs = mockUploadConstructor.mock.calls[0]![0]
+    expect(constructorArgs.partSize).toBe(5 * 1024 * 1024)
+    expect(constructorArgs.params.Bucket).toBe('my-bucket')
+    expect(constructorArgs.params.Key).toBe(
+      'Sample_Protocol_Number/Sample_CRO/CT_1.2.3.4.5.6.7.8.9.dcm',
+    )
+    expect(mockUploadDone).toHaveBeenCalledTimes(1)
+    expect(result.outputUpload).toBeDefined()
+    expect(result.outputUpload!.etag).toBe('"multipart-composite-etag-2"')
+  })
+
+  it('records a lib-storage Upload failure in uploadErrors', async () => {
+    const buffer = buildDicomBuffer()
+    mockUploadDone.mockRejectedValue(new Error('network blew up'))
+
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+
+    const result = await curateOneFn({
+      fileInfo,
+      outputTarget: {
+        s3: {
+          bucketName: 'my-bucket',
+          region: 'us-east-1',
+          uploadPartSize: 5 * 1024 * 1024,
+        },
+      },
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+      hashMethod: 'md5',
+    })
+
+    expect(result.outputUpload).toBeUndefined()
+    expect(result.uploadErrors).toBeDefined()
+    expect(result.uploadErrors!.length).toBeGreaterThan(0)
+    expect(result.uploadErrors![0]).toContain('network blew up')
+  })
+})
