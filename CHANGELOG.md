@@ -1,3 +1,10 @@
+# [0.36.0](https://github.com/clintools/dicom-curate/compare/v0.35.0...v0.36.0) (2026-04-22)
+
+
+### Features
+
+* **s3:** add uploadPartSize option for multipart output uploads ([1bac335](https://github.com/clintools/dicom-curate/commit/1bac3351bac2b71d8eed1a132c1446336fa27364))
+
 # [0.35.0](https://github.com/clintools/dicom-curate/compare/v0.34.0...v0.35.0) (2026-04-20)
 
 
