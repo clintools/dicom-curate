@@ -28,12 +28,24 @@ export type LookupResponse = {
   postMappedHash?: string
 }
 
+/** Response sent from the main thread when a custom upload succeeds. */
+export type UploadResult = {
+  response: 'uploadResult'
+  etag?: string
+}
+
+/** Response sent from the main thread when a custom upload fails. */
+export type UploadError = {
+  response: 'uploadError'
+  error: string
+}
+
 /**
  * Safely serialize an error for postMessage to avoid DataCloneError.
  * Some error objects contain non-cloneable properties (circular references,
  * native handles, etc.) that cause postMessage to throw.
  */
-function safeSerializeError(error: unknown): string {
+export function safeSerializeError(error: unknown): string {
   if (error instanceof Error) {
     return `${error.name}: ${error.message}`
   }
@@ -95,11 +107,53 @@ function lookupMappedFileInfo(
   })
 }
 
+// Pending resolve/reject for an in-flight custom upload round-trip.
+// Safe as singletons because the pool dispatches at most one file per worker
+// at a time, so only one upload is ever in flight per worker instance.
+let pendingUploadResolve: ((r: { etag?: string }) => void) | null = null
+let pendingUploadReject: ((e: unknown) => void) | null = null
+
+/**
+ * Proxy a custom upload through the main thread. Transfers the ReadableStream
+ * directly (zero-copy, no materialisation) so the main thread can hand it
+ * as-is to the user-supplied TCustomUploader.
+ */
+function uploadViaMain(args: {
+  key: string
+  stream: ReadableStream<Uint8Array>
+  size: number
+  contentType?: string
+  headers?: Record<string, string>
+}): Promise<{ etag?: string }> {
+  return new Promise((resolve, reject) => {
+    pendingUploadResolve = resolve
+    pendingUploadReject = reject
+    // Cast to any: in a worker context postMessage accepts a transfer list as
+    // the second argument, but TypeScript's lib.dom.d.ts types globalThis
+    // postMessage with Window's signature which doesn't allow that form.
+    globalThis.postMessage(
+      {
+        response: 'upload',
+        key: args.key,
+        stream: args.stream,
+        size: args.size,
+        contentType: args.contentType,
+        headers: args.headers,
+      },
+      [args.stream] as any,
+    )
+  })
+}
+
 fixupNodeWorkerEnvironment()
   .then(() => {
     globalThis.addEventListener(
       'message',
-      (event: MessageEvent<MappingRequest | LookupResponse>) => {
+      (
+        event: MessageEvent<
+          MappingRequest | LookupResponse | UploadResult | UploadError
+        >,
+      ) => {
         // Handle lookup response from main thread
         if (
           'response' in event.data &&
@@ -111,6 +165,25 @@ fixupNodeWorkerEnvironment()
             const hash = (event.data as LookupResponse).postMappedHash
             resolve(hash ? { postMappedHash: hash } : undefined)
           }
+          return
+        }
+
+        // Handle custom upload result/error from main thread
+        if (
+          'response' in event.data &&
+          event.data.response === 'uploadResult'
+        ) {
+          const resolve = pendingUploadResolve
+          pendingUploadResolve = null
+          pendingUploadReject = null
+          resolve?.({ etag: event.data.etag })
+          return
+        }
+        if ('response' in event.data && event.data.response === 'uploadError') {
+          const reject = pendingUploadReject
+          pendingUploadResolve = null
+          pendingUploadReject = null
+          reject?.(new Error(event.data.error))
           return
         }
 
@@ -137,6 +210,9 @@ fixupNodeWorkerEnvironment()
             mappingOptions,
             previousSourceFileInfo: data.previousFileInfo,
             previousMappedFileInfo: lookupMappedFileInfo,
+            // We execute the custom uploader on the main thread.
+            // The "custom" flag is just an indicator that the uploader function is provided.
+            uploader: data.outputTarget?.custom ? uploadViaMain : undefined,
           })
             .then((mapResults) => {
               // Send finished message for completion

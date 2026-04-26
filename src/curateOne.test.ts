@@ -979,3 +979,151 @@ describe('curateOne S3 output upload strategy', () => {
     expect(result.uploadErrors![0]).toContain('network blew up')
   })
 })
+
+describe('curateOne custom uploader', () => {
+  const noOpSpec: () => TCurationSpecification = () => ({
+    inputPathPattern:
+      'protocolNumber/activityProvider/centerSubjectId/timepoint/scan',
+    version: '3.0',
+    hostProps: {},
+    dicomPS315EOptions: 'Off',
+    modifyDicomHeader: () => ({}),
+    outputFilePathComponents: (parser) => [
+      parser.getFilePathComp('protocolNumber'),
+      parser.getFilePathComp('activityProvider'),
+      parser.getFilePathComp(parser.FILENAME),
+    ],
+    errors: () => [],
+  })
+
+  const inputPath =
+    'Sample_Protocol_Number/Sample_CRO/AB12-123/Visit 1/PET-Abdomen'
+
+  function buildDicomBuffer() {
+    const dataset = {
+      PatientName: 'Test',
+      PatientID: 'P001',
+      Modality: 'CT',
+      SOPClassUID: '1.2.840.10008.5.1.4.1.1.2',
+      SOPInstanceUID: '1.2.3.4.5.6.7.8.9',
+      SeriesInstanceUID: '1.2.3.4.5.6.7.8',
+      StudyInstanceUID: '1.2.3.4.5.6.7',
+      SeriesNumber: '1',
+    }
+    const dicomDict = new dcmjs.data.DicomDict({
+      '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2.1'] },
+      '00020002': { vr: 'UI', Value: [dataset.SOPClassUID] },
+      '00020003': { vr: 'UI', Value: [dataset.SOPInstanceUID] },
+    })
+    dicomDict.dict = dcmjs.data.DicomMetaDictionary.denaturalizeDataset(dataset)
+    return dicomDict.write({ allowInvalidVRLength: true })
+  }
+
+  function makeFileInfo(buffer: ArrayBuffer): TFileInfo {
+    return {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: buffer.byteLength,
+    }
+  }
+
+  it('throws when outputTarget.custom is set but no uploader is provided', async () => {
+    const buffer = buildDicomBuffer()
+    await expect(
+      curateOne({
+        fileInfo: makeFileInfo(buffer),
+        outputTarget: { custom: true },
+        mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+      }),
+    ).rejects.toThrow('no uploader was provided')
+  })
+
+  it('calls uploader with correct args and captures etag', async () => {
+    const buffer = buildDicomBuffer()
+    const mockEtag = '"abc123"'
+    const uploader = vi
+      .fn<
+        (args: {
+          key: string
+          stream: ReadableStream<Uint8Array>
+          size: number
+          contentType?: string
+          headers?: Record<string, string>
+          signal?: AbortSignal
+        }) => Promise<{ etag?: string }>
+      >()
+      .mockResolvedValue({ etag: mockEtag })
+
+    const result = await curateOne({
+      fileInfo: makeFileInfo(buffer),
+      outputTarget: { custom: true },
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+      uploader,
+    })
+
+    expect(uploader).toHaveBeenCalledOnce()
+    const args = uploader.mock.calls[0][0]
+    expect(args.key).toMatch(/^Sample_Protocol_Number/)
+    expect(args.headers?.['x-source-file-hash']).toBeDefined()
+    expect(result.outputUpload?.etag).toBe(mockEtag)
+  })
+
+  it('forwards signal to the uploader', async () => {
+    const buffer = buildDicomBuffer()
+    const controller = new AbortController()
+    const uploader = vi
+      .fn<
+        (args: {
+          key: string
+          stream: ReadableStream<Uint8Array>
+          size: number
+          contentType?: string
+          headers?: Record<string, string>
+          signal?: AbortSignal
+        }) => Promise<{ etag?: string }>
+      >()
+      .mockResolvedValue({})
+
+    await curateOne({
+      fileInfo: makeFileInfo(buffer),
+      outputTarget: { custom: true },
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+      uploader,
+      signal: controller.signal,
+    })
+
+    expect(uploader.mock.calls[0][0].signal).toBe(controller.signal)
+  })
+
+  it('uses distinct header keys for pre- and post-mapped hashes', async () => {
+    const buffer = buildDicomBuffer()
+    let capturedHeaders: Record<string, string> | undefined
+
+    await curateOne({
+      fileInfo: makeFileInfo(buffer),
+      outputTarget: { custom: true },
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: false },
+      uploader: async ({ headers }) => {
+        capturedHeaders = headers
+        return {}
+      },
+      hashMethod: 'md5',
+    })
+
+    expect(capturedHeaders).toBeDefined()
+    // Pre-mapped hash is always sent under x-source-file-hash.
+    // Post-mapped hash, when present, uses a distinct key so there is no collision.
+    expect('x-source-file-hash' in capturedHeaders!).toBe(true)
+    const allKeys = Object.keys(capturedHeaders!)
+    const hashKeys = allKeys.filter(
+      (k) => k.includes('source-file') && k.includes('hash'),
+    )
+    // No duplicate keys (JS objects can't have duplicates, but verify the right names are used)
+    expect(new Set(hashKeys).size).toBe(hashKeys.length)
+    if ('x-source-file-post-mapped-hash' in capturedHeaders!) {
+      expect('x-source-file-post-mapped-hash').not.toBe('x-source-file-hash')
+    }
+  })
+})

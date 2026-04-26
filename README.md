@@ -113,6 +113,49 @@ It is also possible to use S3-compatible buckets as input or output locations.
 Consult `OrganizeOptions` for further details. Please note that this feature is only
 available if you have the `@aws-sdk/client-s3` package installed.
 
+### Custom uploader
+
+For use cases that require resumable, chunked, or otherwise non-standard uploads, you can supply your own uploader via `outputUploader`. This is mutually exclusive with `outputEndpoint`.
+
+The uploader runs on the **main thread**. When using `curateMany()`, the mapped file's `ReadableStream` is transferred directly from the worker to the main thread (zero-copy) and handed as-is to the uploader.
+
+```ts
+import { curateMany, OrganizeOptions, TCustomUploader } from 'dicom-curate'
+
+const myUploader: TCustomUploader = {
+  async upload({ key, stream, size, contentType, headers, signal }) {
+    // key      – output path relative to the root (URL-encoded path segments)
+    // stream   – ReadableStream<Uint8Array> of the mapped DICOM bytes; consume once
+    // size     – total byte length of the file
+    // headers  – derived metadata headers (X-File-*, x-source-file-hash, …)
+    // signal   – AbortSignal forwarded from OrganizeOptions.signal
+
+    const response = await fetch(`https://my-server.example.com/upload/${key}`, {
+      method: 'PUT',
+      body: stream,
+      headers: { 'Content-Length': String(size), ...headers },
+      signal,
+      // @ts-expect-error – duplex required by some runtimes for streaming bodies
+      duplex: 'half',
+    })
+
+    const etag = response.headers.get('ETag') ?? undefined
+    return { etag }
+  },
+}
+
+const options: OrganizeOptions = {
+  inputType: 'path',
+  inputDirectory: '/home/user/files',
+  outputUploader: myUploader,
+  curationSpec,
+}
+
+await curateMany(files, options)
+```
+
+The value returned by `upload()` is passed back through the `CurateResult` for each file, so you can store server-assigned identifiers (e.g. ETags, upload IDs) alongside the normal curation results.
+
 ### Matching S3 ETags across uploaders
 
 When uploading to S3, you can set `uploadPartSize` on the output S3
@@ -191,6 +234,29 @@ const columnMappings = extractColumnMappings([
 curateOne({
   fileInfo, // path, name, size, kind, blob
   mappingOptions: { curationSpec, columnMappings },
+})
+```
+
+To use a custom uploader with `curateOne`, set `outputTarget.custom: true` and provide an `uploader` function directly on the call arguments:
+
+```ts
+import { curateOne } from 'dicom-curate'
+
+const result = await curateOne({
+  fileInfo,
+  mappingOptions: { curationSpec },
+  outputTarget: { custom: true },
+  uploader: async ({ key, stream, size, headers, signal }) => {
+    const response = await fetch(`https://my-server.example.com/upload/${key}`, {
+      method: 'PUT',
+      body: stream,
+      headers: { 'Content-Length': String(size), ...headers },
+      signal,
+      // @ts-expect-error – duplex required by some runtimes for streaming bodies
+      duplex: 'half',
+    })
+    return { etag: response.headers.get('ETag') ?? undefined }
+  },
 })
 ```
 

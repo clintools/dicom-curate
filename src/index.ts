@@ -13,6 +13,8 @@ import {
   markScanPaused,
   type ProgressCallback,
   scanAnomalies,
+  setAbortSignal,
+  setCustomUploader,
   setDirectoryScanFinished,
   setMappingWorkerOptions,
   setScanResumeCallback,
@@ -43,6 +45,7 @@ export type { ProgressCallback } from './mappingWorkerPool'
 export type {
   OrganizeOptions,
   TCurationSpecification,
+  TCustomUploader,
   TMapResults,
   TProgressMessage,
   TPs315Options,
@@ -163,8 +166,16 @@ async function collectMappingOptions(
   // first, get the folder mappings and set output directory
   //
 
+  if (organizeOptions.outputUploader && organizeOptions.outputEndpoint) {
+    throw new Error(
+      'outputUploader and outputEndpoint are mutually exclusive — provide one or the other.',
+    )
+  }
+
   const outputTarget: TMappingWorkerOptions['outputTarget'] = {}
-  if (organizeOptions.outputEndpoint) {
+  if (organizeOptions.outputUploader) {
+    outputTarget.custom = true
+  } else if (organizeOptions.outputEndpoint) {
     if ('bucketName' in organizeOptions.outputEndpoint) {
       outputTarget.s3 = organizeOptions.outputEndpoint
     } else {
@@ -385,6 +396,8 @@ async function curateMany(
             organizeOptions,
           )) as TMappingWorkerOptions,
         )
+        setCustomUploader(organizeOptions.outputUploader)
+        setAbortSignal(organizeOptions.signal)
 
         //
         // If the request provides a directory, then use the worker
