@@ -1,16 +1,16 @@
 import * as dcmjs from 'dcmjs'
-import { composeSpecs } from './composeSpecs'
 import {
   cancellableReadableStreamIterable,
   LazyCompositeBlob,
   LazyFileBlob,
   readableStreamToAsyncIterable,
 } from './blobUtil'
+import { composeSpecs } from './composeSpecs'
 import createNestedDirectories from './createNestedDirectories'
 import curateDict from './curateDict'
 import { fetchWithRetry } from './fetchWithRetry'
-import { loadLibStorage } from './libStorage'
 import { hash, hashStream } from './hash'
+import { loadLibStorage } from './libStorage'
 import { loadS3Client } from './s3Client'
 import type {
   TFileInfo,
@@ -47,6 +47,22 @@ export type TCurateOneArgs = {
       }
     | undefined
   >
+  /**
+   * Custom upload handler. When outputTarget.custom is set this must be
+   * provided. Receives the mapped file as a ReadableStream; consume it exactly
+   * once. The worker-side adapter (uploadViaMain) transfers the ReadableStream
+   * directly to the main thread as a transferable object.
+   */
+  uploader?: (args: {
+    key: string
+    stream: ReadableStream<Uint8Array>
+    size: number
+    contentType?: string
+    headers?: Record<string, string>
+    signal?: AbortSignal
+  }) => Promise<{ etag?: string }>
+  /** AbortSignal forwarded to the custom uploader so it can cancel in-flight requests. */
+  signal?: AbortSignal
 }
 
 function specHasFilter(mappingOptions: TMappingOptions): boolean {
@@ -63,6 +79,8 @@ export async function curateOne({
   hashPartSize,
   previousSourceFileInfo,
   previousMappedFileInfo,
+  uploader,
+  signal,
 }: TCurateOneArgs): Promise<
   // anomalies is minimally present.
   Omit<Partial<TMapResults>, 'anomalies'> & {
@@ -483,12 +501,16 @@ export async function curateOne({
         ),
         createWriteStream(fullFilePath),
       )
-    } else if (!outputTarget?.http && !outputTarget?.s3) {
+    } else if (
+      !outputTarget?.http &&
+      !outputTarget?.s3 &&
+      !outputTarget?.custom
+    ) {
       // Only create mappedBlob when there is no output target at all (no
-      // directory, no HTTP endpoint, no S3 bucket). When an upload target is
-      // present the blob has already been consumed and keeping it around
-      // retains the full file content in memory for every processed file,
-      // causing OOM crashes at scale.
+      // directory, no HTTP endpoint, no S3 bucket, no custom uploader). When
+      // an upload target is present the blob has already been consumed and
+      // keeping it around retains the full file content in memory for every
+      // processed file, causing OOM crashes at scale.
       clonedMapResults.mappedBlob = modifiedBlob
     }
 
@@ -616,6 +638,49 @@ export async function curateOne({
         clonedMapResults.uploadErrors = clonedMapResults.uploadErrors ?? []
         clonedMapResults.uploadErrors.push(
           `S3 Upload error: ${e instanceof Error ? e.message : String(e)}`,
+        )
+      }
+    } else if (outputTarget?.custom && !uploader) {
+      throw new Error(
+        'outputTarget.custom is set but no uploader was provided to curateOne',
+      )
+    } else if (outputTarget?.custom && uploader) {
+      try {
+        const key = clonedMapResults
+          .outputFilePath!.split('/')
+          .map(encodeURIComponent)
+          .join('/')
+
+        const headers: Record<string, string> = {
+          'Content-Type': modifiedBlob.type || 'application/octet-stream',
+          'X-File-Name': fileName,
+          'X-File-Size': String(modifiedBlob.size),
+          'X-Source-File-Size': String(clonedMapResults.fileInfo?.size ?? ''),
+          'X-Source-File-Modified-Time': mtime ?? '',
+          'x-source-file-hash': preMappedHash ?? '',
+        }
+        if (postMappedHash)
+          headers['x-source-file-post-mapped-hash'] = postMappedHash
+
+        const result = await uploader({
+          key,
+          stream: modifiedBlob.stream() as ReadableStream<Uint8Array>,
+          size: modifiedBlob.size,
+          contentType: modifiedBlob.type || 'application/octet-stream',
+          headers,
+          signal,
+        })
+
+        clonedMapResults.outputUpload = {
+          url: key,
+          status: 200,
+          etag: result.etag,
+        }
+      } catch (e) {
+        console.error('Custom upload error', e)
+        clonedMapResults.uploadErrors = clonedMapResults.uploadErrors ?? []
+        clonedMapResults.uploadErrors.push(
+          `Custom upload error: ${e instanceof Error ? e.message : String(e)}`,
         )
       }
     }

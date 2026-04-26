@@ -64,6 +64,14 @@ export type OrganizeOptions = {
   // Defaults to the platform's hardware concurrency (capped at 8).
   // Reducing this limits peak memory usage at the cost of slower throughput.
   workerCount?: number
+  /**
+   * Custom uploader for resumable / chunked uploads.
+   * Mutually exclusive with outputEndpoint.
+   * The uploader runs on the main thread; when curateMany() is used, the
+   * mapped file's ReadableStream is transferred zero-copy from the worker
+   * and handed directly to the uploader.
+   */
+  outputUploader?: TCustomUploader
   // Optional AbortSignal to cancel processing. When aborted, all workers are
   // hard-terminated and curateMany rejects with a DOMException (name: 'AbortError').
   // Equivalent to reloading the page — partially written files are detected and
@@ -143,11 +151,33 @@ export type TS3BucketOptions = {
   uploadPartSize?: number
 }
 
-/** Output target for curation -- at most one of http, directory, or s3. */
+/**
+ * Interface for a user-supplied custom uploader. Receives a ReadableStream so
+ * the implementation can perform chunked / resumable uploads without the
+ * library dictating a specific server API.
+ */
+export interface TCustomUploader {
+  upload(args: {
+    /** Output path relative to the root (URL-encoded path segments). */
+    key: string
+    /** Stream of the mapped DICOM file bytes. Consume exactly once. */
+    stream: ReadableStream<Uint8Array>
+    /** Total byte length of the file. */
+    size: number
+    contentType?: string
+    /** Derived metadata headers (X-File-*, x-source-file-hash, etc.). */
+    headers?: Record<string, string>
+    signal?: AbortSignal
+  }): Promise<{ etag?: string } & Record<string, unknown>>
+}
+
+/** Output target for curation -- at most one of http, directory, s3, or custom. */
 export type TOutputTarget = {
   http?: THTTPOptions
   directory?: FileSystemDirectoryHandle | string
   s3?: TS3BucketOptions
+  /** Tells the worker to proxy uploads to the main thread, because a custom uploader was requested. */
+  custom?: boolean
 }
 
 export type TMappingOptions = {
@@ -226,7 +256,8 @@ export type TMapResults = {
     collectByValue: [...TMappingTwoPassCollect, string | number][]
   }
   mappedBlob?: Blob
-  // Optional info when the mapped output was uploaded to a remote target
+  // Optional info when the mapped output was uploaded to a remote target.
+  // For custom uploaders, `url` holds the URL-encoded output key (not a resolvable URL).
   outputUpload?: { url: string; status: number; etag?: string }
   // If true, mapping was skipped because the file appears unchanged from previous run
   // New semantics: mappingRequired indicates that mapping must be applied.

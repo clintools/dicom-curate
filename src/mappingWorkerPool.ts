@@ -6,10 +6,16 @@
  * the stall watchdog. Extracted from index.ts for maintainability.
  */
 
-import type { MappingRequest } from './applyMappingsWorker'
+import type {
+  MappingRequest,
+  UploadError,
+  UploadResult,
+} from './applyMappingsWorker'
+import { safeSerializeError } from './applyMappingsWorker'
 import { getHttpInputHeaders, getHttpOutputHeaders } from './httpHeaders'
 import { serializeMappingOptions } from './serializeMappingOptions'
 import type {
+  TCustomUploader,
   TFileInfo,
   TFileInfoIndex,
   THashMethod,
@@ -70,6 +76,12 @@ let aborted = false
 // responses when workers query for previousMappedFileInfo.
 let currentFileInfoIndex: TFileInfoIndex | undefined
 
+// User-supplied custom uploader, set via setCustomUploader().
+let currentUploader: TCustomUploader | undefined
+
+// AbortSignal from curateMany, forwarded to currentUploader.upload() calls.
+let currentSignal: AbortSignal | undefined
+
 // Shared state accessed by both scan worker (in index.ts) and dispatch (here).
 // Exported so index.ts can push items and set the scan-finished flag.
 export let filesToProcess: {
@@ -112,6 +124,14 @@ const LOW_WATER_MARK = 50
 
 export function setMappingWorkerOptions(opts: TMappingWorkerOptions): void {
   mappingWorkerOptions = opts
+}
+
+export function setCustomUploader(uploader: TCustomUploader | undefined): void {
+  currentUploader = uploader
+}
+
+export function setAbortSignal(signal: AbortSignal | undefined): void {
+  currentSignal = signal
 }
 
 /**
@@ -198,6 +218,7 @@ export async function initializeMappingWorkers(
   workerCurrentFile.clear()
   lastWorkerProgressTime = Date.now()
   currentFileInfoIndex = fileInfoIndex
+  currentUploader = undefined
   filesToProcess = []
   directoryScanFinished = false
   scanAnomalies = []
@@ -448,6 +469,46 @@ async function createMappingWorker(): Promise<Worker> {
         response: 'lookupResult',
         postMappedHash: entry?.postMappedHash,
       })
+      return
+    }
+
+    if (event.data.response === 'upload') {
+      const msg = event.data as {
+        response: 'upload'
+        key: string
+        stream: ReadableStream<Uint8Array>
+        size: number
+        contentType?: string
+        headers?: Record<string, string>
+      }
+      if (!currentUploader) {
+        mappingWorker.postMessage({
+          response: 'uploadError',
+          error: 'No custom uploader configured',
+        } satisfies UploadError)
+        return
+      }
+      currentUploader
+        .upload({
+          key: msg.key,
+          stream: msg.stream,
+          size: msg.size,
+          contentType: msg.contentType,
+          headers: msg.headers,
+          signal: currentSignal,
+        })
+        .then((result) => {
+          mappingWorker.postMessage({
+            response: 'uploadResult',
+            etag: result.etag,
+          } satisfies UploadResult)
+        })
+        .catch((e: unknown) => {
+          mappingWorker.postMessage({
+            response: 'uploadError',
+            error: safeSerializeError(e),
+          } satisfies UploadError)
+        })
       return
     }
 
