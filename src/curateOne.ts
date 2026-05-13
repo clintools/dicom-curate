@@ -1,6 +1,7 @@
 import * as dcmjs from 'dcmjs'
 import { composeSpecs } from './composeSpecs'
 import {
+  cancellableReadableStreamIterable,
   LazyCompositeBlob,
   LazyFileBlob,
   readableStreamToAsyncIterable,
@@ -266,20 +267,28 @@ export async function curateOne({
     let pixelDataOffset = -1
     try {
       const reader = new dcmjs.async.AsyncDicomReader()
-      const feedDone = reader.stream.fromAsyncStream(
-        readableStreamToAsyncIterable(file.stream()),
-      )
+      const parseFeed = cancellableReadableStreamIterable(file.stream())
+      const feedDone = reader.stream.fromAsyncStream(parseFeed.iterable)
       // Stop reading at the PixelData tag.  The fixed dcmjs read() loop breaks
       // out of the scan when readTagHeader() returns {untilTag: true}, leaving
       // stream.offset pointing at the byte immediately after the 4-byte tag
       // (i.e. the VR field for explicit-LE).  Subtracting 4 gives the start of
       // the PixelData tag, which is exactly the offset we need for the slice.
-      await reader.readFile({
-        ignoreErrors: true,
-        noCopy: true,
-        untilTag: '7FE00010',
-      })
-      await feedDone
+      try {
+        await reader.readFile({
+          ignoreErrors: true,
+          noCopy: true,
+          untilTag: '7FE00010',
+        })
+      } finally {
+        // Do not await feedDone without cancelling first: dcmjs fromAsyncStream
+        // appends every chunk to an internal buffer until the source ends.
+        await parseFeed.cancel()
+        await feedDone.catch(() => {})
+        if (typeof reader.stream.consume === 'function') {
+          reader.stream.consume()
+        }
+      }
 
       const rawOffset = reader.stream.offset - 4
       if (rawOffset > 0 && rawOffset < file.size) {
@@ -465,7 +474,15 @@ export async function curateOne({
       }
 
       const fullFilePath = path.join(fullDirPath, fileName)
-      await fs.writeFile(fullFilePath, modifiedBlob.stream() as any)
+      const { createWriteStream } = await import('node:fs')
+      const { pipeline } = await import('node:stream/promises')
+      const { Readable } = await import('node:stream')
+      await pipeline(
+        Readable.fromWeb(
+          modifiedBlob.stream() as import('stream/web').ReadableStream,
+        ),
+        createWriteStream(fullFilePath),
+      )
     } else if (!outputTarget?.http && !outputTarget?.s3) {
       // Only create mappedBlob when there is no output target at all (no
       // directory, no HTTP endpoint, no S3 bucket). When an upload target is
