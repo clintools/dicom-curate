@@ -165,3 +165,38 @@ export async function* readableStreamToAsyncIterable(
     reader.releaseLock()
   }
 }
+
+/**
+ * Wraps a ReadableStream as an async iterable with an explicit cancel hook.
+ * Used to stop feeding dcmjs once header parsing finishes; otherwise
+ * `fromAsyncStream` would buffer the entire file (including PixelData).
+ */
+export function cancellableReadableStreamIterable(
+  stream: ReadableStream<Uint8Array>,
+): {
+  iterable: AsyncIterable<Uint8Array>
+  cancel: () => Promise<void>
+} {
+  const reader = stream.getReader()
+  let cancelled = false
+
+  const iterable = (async function* () {
+    try {
+      while (!cancelled) {
+        const { done, value } = await reader.read()
+        if (done) break
+        yield value
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  })()
+
+  return {
+    iterable,
+    cancel: async () => {
+      cancelled = true
+      await reader.cancel().catch(() => {})
+    },
+  }
+}

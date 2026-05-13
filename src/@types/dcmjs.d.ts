@@ -138,6 +138,7 @@ declare module 'dcmjs' {
   export namespace async {
     interface StreamBuffer {
       fromAsyncStream(stream: AsyncIterable<Uint8Array>): Promise<void>
+      consume?(offset?: number): void
     }
 
     class AsyncDicomReader {
