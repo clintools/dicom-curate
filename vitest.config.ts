@@ -21,6 +21,10 @@ export default defineConfig({
         'src/**/*.integration.test.ts',
         'src/**/*.spec.ts',
         'src/**/*.d.ts',
+        // Exercised via dist/esm bundles in worker_threads; Vitest v8 does not
+        // attribute child-worker execution back to these entry files.
+        'src/scanDirectoryWorker.ts',
+        'src/applyMappingsWorker.ts',
       ],
     },
   },
