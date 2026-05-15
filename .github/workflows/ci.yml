@@ -54,6 +54,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: E2E smoke
+        run: pnpm exec vitest run --config vitest.e2e.config.ts --pool=forks
+
       - name: Semantic Release Dry Run
         run: npx semantic-release --dry-run
         env:
