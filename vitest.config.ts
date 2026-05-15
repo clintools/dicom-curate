@@ -11,6 +11,7 @@ export default defineConfig({
         inline: ['@noble/hashes'],
       },
     },
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'html'],
