@@ -64,3 +64,43 @@ describe('serializeMappingOptions with none specification', () => {
     expect(serialized.curationSpecStr).toContain('=>')
   })
 })
+
+describe('function specification deserialization', () => {
+  it('deserializes and invokes a function curation spec', () => {
+    const serialized = serializeMappingOptions({
+      curationSpec: () => [],
+    })
+
+    const { curationSpec } = deserializeMappingOptions(serialized)
+
+    expect(typeof curationSpec).toBe('function')
+    if (typeof curationSpec !== 'function') {
+      throw new Error('expected function curation spec')
+    }
+    expect(curationSpec()).toEqual([])
+  })
+
+  it('round-trips skip flags with a function curation spec', () => {
+    const original: TMappingOptions = {
+      curationSpec: () => [],
+      skipWrite: true,
+      skipModifications: false,
+      skipValidation: true,
+      dateOffset: 'P1D',
+    }
+
+    const roundTripped = deserializeMappingOptions(
+      serializeMappingOptions(original),
+    )
+
+    expect(roundTripped.skipWrite).toBe(true)
+    expect(roundTripped.skipModifications).toBe(false)
+    expect(roundTripped.skipValidation).toBe(true)
+    expect(roundTripped.dateOffset).toBe('P1D')
+    const { curationSpec: roundTrippedSpec } = roundTripped
+    if (typeof roundTrippedSpec !== 'function') {
+      throw new Error('expected function curation spec')
+    }
+    expect(roundTrippedSpec()).toEqual([])
+  })
+})
