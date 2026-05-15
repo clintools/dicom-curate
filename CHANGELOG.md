@@ -1,3 +1,17 @@
+# [0.37.0](https://github.com/clintools/dicom-curate/compare/v0.36.0...v0.37.0) (2026-05-15)
+
+
+### Bug Fixes
+
+* stop buffering full file in dcmjs fromAsyncStream after PixelData tag ([eaf2739](https://github.com/clintools/dicom-curate/commit/eaf273936e9ed594fb680aa4d1c48fce3103d7ff))
+
+
+### Features
+
+* add memory optimizations to Node.js codepath ([34dc80f](https://github.com/clintools/dicom-curate/commit/34dc80f175a0f12570dc286770a9a77bd06eb7ef))
+* adjust pixel data handling ([d9d91d1](https://github.com/clintools/dicom-curate/commit/d9d91d127210cd8b9e22346d98334d4da35f95fd))
+* optimize memory usage w/ streaming & pixeldata handling ([b0dedd9](https://github.com/clintools/dicom-curate/commit/b0dedd934d45f1dd11ac0b8a84ee1111393614d1))
+
 # [0.36.0](https://github.com/clintools/dicom-curate/compare/v0.35.0...v0.36.0) (2026-04-22)
 
 
