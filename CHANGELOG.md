@@ -1,3 +1,15 @@
+# [0.38.0](https://github.com/clintools/dicom-curate/compare/v0.37.0...v0.38.0) (2026-05-18)
+
+
+### Bug Fixes
+
+* biome errors ([2f33f5c](https://github.com/clintools/dicom-curate/commit/2f33f5c50ebf8f3c32124943fc98febd7a446228))
+
+
+### Features
+
+* custom uploader interface support ([d632f75](https://github.com/clintools/dicom-curate/commit/d632f75adc65457d1a9f9c07c96aa4cd52fb0357))
+
 # [0.37.0](https://github.com/clintools/dicom-curate/compare/v0.36.0...v0.37.0) (2026-05-15)
 
 
