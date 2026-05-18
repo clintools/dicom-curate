@@ -1,6 +1,11 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { writeMinimalDicomFile } from '../testutils/minimalDicom'
+import {
+  createMappingWorker,
+  runMappingWorker,
+} from '../testutils/workerTestHelpers'
 import {
   extractCsvMappings,
   type Row,
@@ -9,8 +14,6 @@ import {
 } from './csvMapping'
 import { serializeMappingOptions } from './serializeMappingOptions'
 import type { TFileInfo, TSerializedMappingOptions } from './types'
-import { writeMinimalDicomFile } from '../testutils/minimalDicom'
-import { runMappingWorker } from '../testutils/workerTestHelpers'
 
 const testCsvMapping: TMappedValues = {
   centerSubjectId: {
@@ -66,11 +69,7 @@ function serializedNoneOptions(): TSerializedMappingOptions {
   })
 }
 
-function pathFileInfo(
-  fullPath: string,
-  path: string,
-  name: string,
-): TFileInfo {
+function pathFileInfo(fullPath: string, path: string, name: string): TFileInfo {
   const buf = readFileSync(fullPath)
   return {
     kind: 'path',
@@ -109,7 +108,7 @@ describe('applyMappingsWorker', () => {
     expect(finished?.kind).toBe('finished')
     if (finished?.kind === 'finished') {
       expect(finished.mapResults.errors).toEqual([])
-      expect(finished.mapResults.mappings?.PatientID).toBeDefined()
+      expect(finished.mapResults.mappings?.PatientID?.[3]).toBe('NEW-ID')
     }
   })
 
@@ -176,7 +175,7 @@ describe('applyMappingsWorker', () => {
     expect(err?.kind).toBe('error')
   })
 
-  it('errors on unexpected path identifiers when pattern does not match', async () => {
+  it('surfaces errors() callback failures when a path segment does not match', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'map-path-'))
     dirs.push(dir)
     const dcmPath = join(dir, 'only', 'one', 'segment.dcm')
@@ -329,9 +328,10 @@ describe('applyMappingsWorker', () => {
       hashMethod: 'md5',
     })
     const firstFinished = first.find((r) => r.kind === 'finished')
-    const knownHash = firstFinished?.kind === 'finished'
-      ? firstFinished.mapResults.fileInfo?.postMappedHash
-      : undefined
+    const knownHash =
+      firstFinished?.kind === 'finished'
+        ? firstFinished.mapResults.fileInfo?.postMappedHash
+        : undefined
     expect(knownHash).toBeDefined()
 
     const results = await runMappingWorker(
@@ -367,22 +367,61 @@ describe('applyMappingsWorker', () => {
   })
 
   it('ignores unknown request types without crashing', async () => {
-    const worker = await import('./worker').then((m) =>
-      m.createWorker(
-        new URL('../dist/esm/applyMappingsWorker.js', import.meta.url),
-        { type: 'module' },
-      ),
-    )
+    const dir = mkdtempSync(join(tmpdir(), 'map-unknown-req-'))
+    dirs.push(dir)
+    const dcmPath = join(dir, 'study', 'subject', 'file.dcm')
+    writeMinimalDicomFile(dcmPath)
 
-    await new Promise<void>((resolve) => {
-      const t = setTimeout(() => {
-        worker.terminate()
-        resolve()
-      }, 2000)
-      worker.addEventListener('message', () => {})
-      worker.postMessage({ request: 'unknown-op' })
+    const worker = await createMappingWorker()
+    let workerCrashed = false
+    worker.addEventListener('error', () => {
+      workerCrashed = true
     })
 
-    expect(true).toBe(true)
+    worker.postMessage({ request: 'unknown-op' })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    expect(workerCrashed).toBe(false)
+
+    const followUp = await new Promise<{ errors: string[] }>(
+      (resolve, reject) => {
+        const timeout = setTimeout(() => {
+          worker.terminate()
+          reject(new Error('follow-up apply request timed out'))
+        }, 30_000)
+
+        worker.addEventListener(
+          'message',
+          (event: {
+            data: {
+              response?: string
+              mapResults?: { errors: string[] }
+              error?: string
+            }
+          }) => {
+            const msg = event.data
+            if (msg.response === 'finished') {
+              clearTimeout(timeout)
+              worker.terminate()
+              resolve({ errors: msg.mapResults?.errors ?? [] })
+            }
+            if (msg.response === 'error') {
+              clearTimeout(timeout)
+              worker.terminate()
+              reject(new Error(String(msg.error)))
+            }
+          },
+        )
+
+        worker.postMessage({
+          request: 'apply',
+          fileInfo: pathFileInfo(dcmPath, 'study/subject', 'file.dcm'),
+          serializedMappingOptions: serializedNoneOptions(),
+        })
+      },
+    )
+
+    expect(workerCrashed).toBe(false)
+    expect(followUp.errors).toEqual([])
   })
 })
