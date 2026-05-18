@@ -54,14 +54,20 @@ describe('serializeMappingOptions with none specification', () => {
     expect(roundTripped).toEqual(original)
   })
 
-  it('serializes function specs as source strings', () => {
-    const mappingOptions: TMappingOptions = {
+  it('round-trips function curation specs through serialize and deserialize', () => {
+    const original: TMappingOptions = {
       curationSpec: () => [],
     }
 
-    const serialized = serializeMappingOptions(mappingOptions)
+    const { curationSpec } = deserializeMappingOptions(
+      serializeMappingOptions(original),
+    )
 
-    expect(serialized.curationSpecStr).toContain('=>')
+    expect(typeof curationSpec).toBe('function')
+    if (typeof curationSpec !== 'function') {
+      throw new Error('expected function curation spec')
+    }
+    expect(curationSpec()).toEqual([])
   })
 })
 
