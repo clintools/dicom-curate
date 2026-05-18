@@ -1,22 +1,26 @@
-import { createWorker } from '../src/worker'
+import type { MappingRequest } from '../src/applyMappingsWorker'
 import type { FileScanMsg } from '../src/scanDirectoryWorker'
+import type { TMapResults } from '../src/types'
+import { createWorker } from '../src/worker'
 
 export type FileScanFileMsg = Extract<FileScanMsg, { response: 'file' }>
 export type FileScanAnomalyMsg = Extract<
   FileScanMsg,
   { response: 'scanAnomalies' }
 >
-import type { MappingRequest } from '../src/applyMappingsWorker'
-import type { TMapResults } from '../src/types'
 
-const scanWorkerUrl = new URL(
+export const scanWorkerUrl = new URL(
   '../dist/esm/scanDirectoryWorker.js',
   import.meta.url,
 )
-const mappingWorkerUrl = new URL(
+export const mappingWorkerUrl = new URL(
   '../dist/esm/applyMappingsWorker.js',
   import.meta.url,
 )
+
+export function createMappingWorker() {
+  return createWorker(mappingWorkerUrl, { type: 'module' })
+}
 
 export type ScanCollectResult = {
   files: FileScanFileMsg[]
@@ -92,7 +96,7 @@ export async function runMappingWorker(
     timeoutMs?: number
   },
 ): Promise<MappingWorkerResult[]> {
-  const worker = await createWorker(mappingWorkerUrl, { type: 'module' })
+  const worker = await createMappingWorker()
   const results: MappingWorkerResult[] = []
   const timeoutMs = options?.timeoutMs ?? 30_000
 
