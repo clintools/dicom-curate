@@ -8,7 +8,7 @@ Minimal system-level checks for Dicom Curate: temp input/output dirs, real scan 
 pnpm test:e2e
 ```
 
-This runs `pnpm build:esm` first, then Vitest with `vitest.e2e.config.ts`. Unit/integration tests under `src/` are excluded from the default `pnpm test` run via `e2e/**` in the main Vitest config.
+This runs `pnpm build:esm` first, then Vitest with `vitest.e2e.config.ts`. The default `pnpm test` run excludes `e2e/**` via the main Vitest config; unit and integration tests live under `src/`.
 
 ## Scenarios
 
@@ -29,4 +29,4 @@ This runs `pnpm build:esm` first, then Vitest with `vitest.e2e.config.ts`. Unit/
 
 ## CI
 
-After `pnpm build`, run `pnpm exec vitest run --config vitest.e2e.config.ts --pool=forks` (build already produced `dist/esm/` workers).
+Run `pnpm test:e2e` (runs `build:esm` then Vitest against `dist/esm/` workers).
