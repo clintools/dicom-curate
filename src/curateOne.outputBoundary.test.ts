@@ -10,9 +10,9 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { writeMinimalDicomFile } from '../testutils/minimalDicom'
 import { curateOne } from './curateOne'
 import type { TCurationSpecification, TFileInfo } from './types'
-import { writeMinimalDicomFile } from '../testutils/minimalDicom'
 
 function modifyingSpec(newPatientId: string): () => TCurationSpecification {
   return () => ({
@@ -128,9 +128,9 @@ describe('curateOne output boundary', () => {
     writeMinimalDicomFile(srcPath)
 
     const originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn<typeof fetch>().mockRejectedValue(
-      new Error('connection refused'),
-    )
+    globalThis.fetch = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new Error('connection refused'))
 
     try {
       const result = await curateOne({
@@ -224,11 +224,7 @@ describe('curateOne output boundary', () => {
           hostProps: {},
           dicomPS315EOptions: 'Off',
           modifyDicomHeader: () => ({}),
-          outputFilePathComponents: () => [
-            'mapped',
-            'input',
-            'scan.dcm',
-          ],
+          outputFilePathComponents: () => ['mapped', 'input', 'scan.dcm'],
           errors: () => [],
         }),
         skipWrite: false,

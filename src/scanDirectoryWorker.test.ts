@@ -1,9 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  createTestDicomDir,
-} from '../testutils/dicomFixtures'
+import { createTestDicomDir } from '../testutils/dicomFixtures'
 import {
   writeFakeDicomSignatureFile,
   writeMinimalDicomFile,
@@ -104,7 +102,11 @@ describe('scanDirectoryWorker (Node path scan)', () => {
     const root = createTestDicomDir(80, { subdirName: 'BULK' })
     trees.push(root)
 
-    const { files, counts, done } = await collectScanMessages(root, undefined, 60_000)
+    const { files, counts, done } = await collectScanMessages(
+      root,
+      undefined,
+      60_000,
+    )
     expect(done).toBe(true)
     expect(files.length).toBe(80)
     if (counts.length > 0) {
