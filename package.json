@@ -47,6 +47,7 @@
     "build:esm": "node esbuild.config.js",
     "build:types": "tsc --emitDeclarationOnly --outDir dist/types -p tsconfig.build.json",
     "watch": "node esbuild.config.js --watch",
+    "pretest": "pnpm build:esm",
     "test": "vitest run --pool=forks",
     "test:coverage": "vitest run --pool=forks --coverage",
     "test:watch": "vitest",
