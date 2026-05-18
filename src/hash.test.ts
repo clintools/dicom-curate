@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import md5 from 'md5'
 import { hash } from './hash'
 
 function textBuffer(text: string): ArrayBuffer {
@@ -9,8 +8,10 @@ function textBuffer(text: string): ArrayBuffer {
 describe('hash', () => {
   const hello = textBuffer('hello')
 
-  it('computes md5 hex matching the md5 package', async () => {
-    expect(await hash(hello, 'md5')).toBe(md5(new Uint8Array(hello)))
+  it('computes md5 hex matching node crypto', async () => {
+    const expected = createHash('md5').update(Buffer.from(hello)).digest('hex')
+
+    expect(await hash(hello, 'md5')).toBe(expected)
   })
 
   it('defaults unknown methods to md5', async () => {
