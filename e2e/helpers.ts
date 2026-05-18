@@ -8,7 +8,7 @@ import {
   rmSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative, resolve } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import type { OrganizeOptions, TCurationSpecification } from '../src/types'
 
 /** Fail fast when input and output trees could collide. */
@@ -20,8 +20,8 @@ export function assertInputOutputDisjoint(
   const output = resolve(outputDir)
   if (
     input === output ||
-    input.startsWith(`${output}/`) ||
-    output.startsWith(`${input}/`)
+    input.startsWith(output + sep) ||
+    output.startsWith(input + sep)
   ) {
     throw new Error(
       `Input and output directories must not overlap (input=${input}, output=${output})`,
@@ -143,6 +143,7 @@ export function flatSmokeSpec(): () => TCurationSpecification {
     dicomPS315EOptions: 'Off',
     modifyDicomHeader: () => ({}),
     outputFilePathComponents: (parser) => {
+      // Uses filename only; batch fixtures must have unique basenames (no subdirs).
       const parent = parser.getFilePathComp(-2)
       return [parent || 'files', parser.getFilePathComp(parser.FILENAME)]
     },

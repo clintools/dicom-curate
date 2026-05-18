@@ -6,7 +6,7 @@ const repoRoot = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
   resolve: {
-    // USe the built ESM entry
+    // Use the built ESM entry
     alias: {
       'dicom-curate': resolve(repoRoot, 'dist/esm/index.js'),
     },
