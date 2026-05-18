@@ -34,10 +34,11 @@ describe('hash', () => {
     expect(digest).toBe(await hash(hello, 'crc32'))
   })
 
-  it('computes crc64 as a stable hex string', async () => {
+  it('computes crc64 as a stable 16-character lowercase hex string', async () => {
     const digest = await hash(hello, 'crc64')
 
-    expect(digest).toMatch(/^[0-9a-f]+$/)
+    expect(digest).toMatch(/^[0-9a-f]{16}$/)
+    expect(digest).toBe('3377857006524257')
     expect(digest).toBe(await hash(hello, 'crc64'))
   })
 
@@ -50,6 +51,19 @@ describe('hash', () => {
     )
   })
 
+  it('uses plain md5 for aws-s3-etag when byteLength equals part size', async () => {
+    const partSize = 3
+    const exact = new Uint8Array(partSize)
+    exact.fill(0xab)
+
+    expect(await hash(exact.buffer, 'aws-s3-etag-2025', partSize)).toBe(
+      await hash(exact.buffer, 'md5'),
+    )
+    expect(await hash(exact.buffer, 'aws-s3-etag-2025', partSize)).not.toMatch(
+      /-\d+$/,
+    )
+  })
+
   it('uses composite multipart etag when the buffer exceeds part size', async () => {
     const data = new Uint8Array(10)
     data.fill(0xab)
@@ -58,7 +72,7 @@ describe('hash', () => {
     const etag = await hash(data.buffer, 'aws-s3-etag-2025', partSize)
     const plainMd5 = await hash(data.buffer, 'md5')
 
-    expect(etag).toMatch(/^[0-9a-f]{32}-\d+$/)
+    expect(etag).toMatch(/^[0-9a-f]{32}-4$/)
     expect(etag).not.toBe(plainMd5)
     expect(etag).toBe(await hash(data.buffer, 'aws-s3-etag-2025', partSize))
   })
