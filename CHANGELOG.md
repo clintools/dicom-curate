@@ -1,3 +1,10 @@
+## [0.38.1](https://github.com/clintools/dicom-curate/compare/v0.38.0...v0.38.1) (2026-05-19)
+
+
+### Bug Fixes
+
+* cross-platform paths and defensive assertions ([82cbc9a](https://github.com/clintools/dicom-curate/commit/82cbc9ae6b35af7bd8256e59fb51effcb4a78bfd))
+
 # [0.38.0](https://github.com/clintools/dicom-curate/compare/v0.37.0...v0.38.0) (2026-05-18)
 
 
