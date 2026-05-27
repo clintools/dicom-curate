@@ -42,6 +42,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install dciodvfy
+        run: sudo apt-get update && sudo apt-get install -y dicom3tools
+
       - name: Type Check
         run: pnpm tsc --noEmit
 
@@ -56,6 +59,9 @@ jobs:
 
       - name: E2E smoke
         run: pnpm test:e2e
+
+      - name: Conformance tests
+        run: pnpm test:conformance
 
       - name: Semantic Release Dry Run
         run: npx semantic-release --dry-run
