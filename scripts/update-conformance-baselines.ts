@@ -49,19 +49,20 @@ function publicBaselinePath(caseId: string): string {
   )
 }
 
-const syntheticDir = mkdtempSync(join(tmpdir(), 'dc-baseline-synth-'))
-writeSyntheticFixturesToDir(syntheticDir)
-
-const syntheticTargets = SYNTHETIC_FIXTURES.map(
-  ({ filename }: (typeof SYNTHETIC_FIXTURES)[number]) => {
-    const id = filename.replace(/\.dcm$/, '')
-    return {
-      label: filename,
-      dicomPath: join(syntheticDir, filename),
-      baselinePath: syntheticBaselinePath(id),
-    }
-  },
-)
+function buildSyntheticTargets() {
+  const syntheticDir = mkdtempSync(join(tmpdir(), 'dc-baseline-synth-'))
+  writeSyntheticFixturesToDir(syntheticDir)
+  return SYNTHETIC_FIXTURES.map(
+    ({ filename }: (typeof SYNTHETIC_FIXTURES)[number]) => {
+      const id = filename.replace(/\.dcm$/, '')
+      return {
+        label: filename,
+        dicomPath: join(syntheticDir, filename),
+        baselinePath: syntheticBaselinePath(id),
+      }
+    },
+  )
+}
 
 function writeBaseline(path: string, baseline: ConformanceBaseline) {
   mkdirSync(dirname(path), { recursive: true })
@@ -81,6 +82,8 @@ async function main() {
     )
     process.exit(1)
   }
+
+  const syntheticTargets = buildSyntheticTargets()
 
   for (const t of syntheticTargets) {
     const violations = [...violationSet(runDciodvfy(t.dicomPath, bin))].sort()
