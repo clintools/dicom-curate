@@ -8,6 +8,8 @@
 
 # testing
 /coverage
+.cache-dciodvfy/
+.cache/conformance-baselines/
 
 # production
 /dist
