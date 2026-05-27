@@ -27,8 +27,8 @@ import {
 } from 'dicom-synth'
 import type { ConformanceBaseline } from '../conformance/baseline'
 import { runDciodvfy, violationSet } from '../conformance/dciodvfy'
-import { resolveConformanceBin } from '../conformance/helpers'
 import { resolveLocalConformanceCases } from '../conformance/localFixtures'
+import { resolveConformanceBin } from '../conformance/resolveBin'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const conformanceRoot = join(repoRoot, 'conformance')

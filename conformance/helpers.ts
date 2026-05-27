@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -10,7 +10,8 @@ import {
 } from 'dicom-synth'
 import { curateOne } from '../src/curateOne'
 import type { TCurationSpecification, TMappingOptions } from '../src/types'
-import { resolveDciodvfyBinary } from './dciodvfy'
+
+export { resolveConformanceBin } from './resolveBin'
 
 const conformanceRoot = dirname(fileURLToPath(import.meta.url))
 
@@ -34,18 +35,6 @@ export function getSyntheticFixturesDir(): string {
     writeSyntheticFixturesToDir(syntheticFixturesDirCache)
   }
   return syntheticFixturesDirCache
-}
-
-export const localDciodvfy = join(
-  repoRoot,
-  '.cache-dciodvfy/extracted/usr/bin/dciodvfy',
-)
-
-export function resolveConformanceBin(): string | undefined {
-  return (
-    resolveDciodvfyBinary() ??
-    (existsSync(localDciodvfy) ? localDciodvfy : undefined)
-  )
 }
 
 export function syntheticBaselinePath(fixtureId: string): string {
