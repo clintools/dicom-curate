@@ -436,6 +436,27 @@ When a file is excluded, `curateOne` / `curateMany` still returns a result objec
 result.excluded // => 'pre' | 'post' | undefined
 ```
 
+## Testing
+
+Vitest is split into three projects in `vitest.config.ts`:
+
+| Command | Project | Location | Purpose |
+|---------|---------|----------|---------|
+| `pnpm test` | `unit` | `src/**/*.test.ts` | Unit and integration tests co-located with source |
+| `pnpm test:e2e` | `e2e` | `e2e/` | Pipeline smoke tests (runs `build:esm` first; uses `dist/`) |
+| `pnpm test:conformance` | `conformance` | `conformance/` | `dciodvfy` regression (synthetic; optional public/local via env) |
+
+Other scripts:
+
+| Script | Purpose |
+|--------|---------|
+| `pnpm test:coverage` | Unit project with coverage |
+| `pnpm update:conformance-baselines` | Regenerate committed `dciodvfy` baseline JSON |
+
+Conformance tests require the external `dciodvfy` binary from [dicom3tools](https://www.dclunie.com/dicom3tools.html). See [conformance/README.md](conformance/README.md) for install, CI behaviour, baseline refresh, and optional `RUN_PUBLIC_CONFORMANCE` / `CONFORMANCE_LOCAL_*` env vars.
+
+Shared test helpers: `testutils/` (minimal DICOM files, worker mocks). Fixture generation and public-case fetch: devDependency [`dicom-synth`](https://github.com/clintools/dicom-synth).
+
 ## DICOM Conformance Notes
 
 dicom-curate
