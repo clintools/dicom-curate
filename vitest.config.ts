@@ -1,17 +1,20 @@
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
+const repoRoot = fileURLToPath(new URL('.', import.meta.url))
+
 export default defineConfig({
+  resolve: {
+    alias: {
+      'dicom-curate': resolve(repoRoot, 'dist/esm/index.js'),
+    },
+  },
   test: {
     pool: 'forks',
     environment: 'node',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-    server: {
-      deps: {
-        inline: ['@noble/hashes'],
-      },
-    },
-    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'html'],
@@ -30,9 +33,55 @@ export default defineConfig({
         'src/scanDirectoryWorker.ts',
         'src/applyMappingsWorker.ts',
       ],
-      // Thresholds are intentionally omitted: worker entry files above are
-      // covered out-of-band; set per-file thresholds here once v8 attributes
-      // worker_threads execution or those files are tested in-process.
     },
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          include: ['src/**/*.test.ts'],
+          exclude: [
+            '**/node_modules/**',
+            '**/dist/**',
+            'e2e/**',
+            'conformance/**',
+          ],
+          server: {
+            deps: {
+              inline: ['@noble/hashes'],
+            },
+          },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'e2e',
+          include: ['e2e/**/*.test.ts'],
+          exclude: ['**/node_modules/**', '**/dist/**'],
+          testTimeout: 120_000,
+          hookTimeout: 30_000,
+          server: {
+            deps: {
+              inline: ['@noble/hashes'],
+            },
+          },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'conformance',
+          include: ['conformance/**/*.test.ts'],
+          exclude: ['**/node_modules/**', '**/dist/**'],
+          testTimeout: 120_000,
+          server: {
+            deps: {
+              inline: ['@noble/hashes', 'dcmjs', 'dicom-synth'],
+            },
+          },
+        },
+      },
+    ],
   },
 })
