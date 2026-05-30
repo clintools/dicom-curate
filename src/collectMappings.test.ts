@@ -199,6 +199,120 @@ describe('collectMappings postExclude', () => {
   })
 })
 
+describe('collectMappings listing', () => {
+  type ListingCollect = (parser: {
+    getDicom: (attrName: string) => any
+    getFilePathComp: (component: string | number | symbol) => string
+    getFrom: (source: string, identifier: string) => string | number
+  }) => {
+    lookups: { [lookupField: string]: string }
+    info: (
+      | [name: string, value: string]
+      | [name: string, value: string, mode: 'list']
+    )[]
+    collect: [value: string, format: RegExp | string[], lookupField: string][]
+  }
+
+  function listingSpec(collect: ListingCollect): () => TCurationSpecification {
+    return () =>
+      makeSpec({
+        additionalData: {
+          type: 'listing',
+          collect,
+        } as TCurationSpecification['additionalData'],
+      })()
+  }
+
+  it('emits the full lookups map on the listing', () => {
+    const mappingOptions: TMappingOptions = {
+      curationSpec: listingSpec(() => ({
+        lookups: { PerSeries: 'series-1', PerStudy: 'study-1' },
+        info: [['Label', 'value']],
+        collect: [],
+      })),
+    }
+
+    const [, mapResults] = collectMappings(
+      'study/subject/test.dcm',
+      sample,
+      mappingOptions,
+    )
+
+    expect(mapResults.listing).toBeDefined()
+    expect(mapResults.listing!.lookups).toEqual({
+      PerSeries: 'series-1',
+      PerStudy: 'study-1',
+    })
+  })
+
+  it('passes through the optional info aggregation mode marker', () => {
+    const mappingOptions: TMappingOptions = {
+      curationSpec: listingSpec(() => ({
+        lookups: { PerSeries: 'series-1' },
+        info: [
+          ['StudyInstanceUID', 'study-1'],
+          ['SOPInstanceUIDs', 'sop-1', 'list'],
+        ],
+        collect: [],
+      })),
+    }
+
+    const [, mapResults] = collectMappings(
+      'study/subject/test.dcm',
+      sample,
+      mappingOptions,
+    )
+
+    expect(mapResults.listing!.info).toEqual([
+      ['StudyInstanceUID', 'study-1'],
+      ['SOPInstanceUIDs', 'sop-1', 'list'],
+    ])
+  })
+
+  it('preserves the mode marker while flattening single-element PN values', () => {
+    const mappingOptions: TMappingOptions = {
+      curationSpec: listingSpec(() => ({
+        lookups: { PerSeries: 'series-1' },
+        info: [
+          // dcmjs single-element PN array of digits -> flattened to Alphabetic,
+          // while the 'list' marker is retained.
+          ['PatientID', [{ Alphabetic: '12345' }] as unknown as string, 'list'],
+        ],
+        collect: [],
+      })),
+    }
+
+    const [, mapResults] = collectMappings(
+      'study/subject/test.dcm',
+      sample,
+      mappingOptions,
+    )
+
+    expect(mapResults.listing!.info).toEqual([['PatientID', '12345', 'list']])
+  })
+
+  it('still resolves collectByValue lookup values', () => {
+    const mappingOptions: TMappingOptions = {
+      curationSpec: listingSpec(() => ({
+        lookups: { PerSeries: 'series-1' },
+        info: [],
+        collect: [['Comment', /.*/, 'PerSeries']],
+      })),
+    }
+
+    const [, mapResults] = collectMappings(
+      'study/subject/test.dcm',
+      sample,
+      mappingOptions,
+    )
+
+    // collectByValue appends lookups[lookupField] as the final tuple element.
+    expect(mapResults.listing!.collectByValue).toEqual([
+      ['Comment', /.*/, 'PerSeries', 'series-1'],
+    ])
+  })
+})
+
 describe('collectMappings filter error handling', () => {
   it('treats file as included and records error when preExclude throws', () => {
     const mappingOptions: TMappingOptions = {

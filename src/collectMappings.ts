@@ -80,7 +80,8 @@ export default function collectMappings(
       return [...item, lookupValue] as [...typeof item, typeof lookupValue]
     })
 
-    // FIXME: Bug in dcmjs
+    // FIXME: Bug in dcmjs. Flatten single-element PN arrays, preserving any
+    // optional aggregation mode marker (3rd tuple element) untouched.
     const cleanedInfo = info.map((item) => {
       if (
         Array.isArray(item[1]) &&
@@ -89,13 +90,17 @@ export default function collectMappings(
         'Alphabetic' in item[1][0] &&
         /^\d+$/.test(item[1][0].Alphabetic)
       ) {
-        return [item[0], item[1][0].Alphabetic] as typeof item
+        return (
+          item.length > 2
+            ? [item[0], item[1][0].Alphabetic, item[2]]
+            : [item[0], item[1][0].Alphabetic]
+        ) as typeof item
       } else {
         return item
       }
     })
 
-    mapResults.listing = { info: cleanedInfo, collectByValue }
+    mapResults.listing = { info: cleanedInfo, collectByValue, lookups }
   }
 
   if (!mappingOptions.skipModifications) {

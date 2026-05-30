@@ -254,6 +254,10 @@ export type TMapResults = {
   listing?: {
     info: TMappingTwoPassInfo[]
     collectByValue: [...TMappingTwoPassCollect, string | number][]
+    // Full lookups map for this file, so consumers can group rows by an
+    // arbitrary lookup key (including ones not referenced by any collect[]
+    // entry). Required for summary-table mode where collect may be empty.
+    lookups: { [lookupField: string]: string }
   }
   mappedBlob?: Blob
   // Optional info when the mapped output was uploaded to a remote target.
@@ -316,7 +320,14 @@ type TMappingInputDirect = {
   collect: Record<string, RegExp | string[]>
 }
 
-type TMappingTwoPassInfo = [name: string, value: string]
+// Optional aggregation marker on an info entry. When omitted, the value is
+// treated as first-wins within a summary row group. 'list' collects distinct
+// values across the group. The union is open for forward-compatible modes
+// (e.g. 'count', 'set', 'min', 'max') added later without breaking specs.
+type TMappingTwoPassInfoMode = 'list'
+type TMappingTwoPassInfo =
+  | [name: string, value: string]
+  | [name: string, value: string, mode: TMappingTwoPassInfoMode]
 type TMappingTwoPassCollect = [
   value: string,
   format: RegExp | string[],
@@ -332,6 +343,16 @@ type TMappingInputTwoPass = {
     lookups: { [lookupField: string]: string }
     info: TMappingTwoPassInfo[]
     collect: TMappingTwoPassCollect[]
+  }
+  // Optional summary output. When present (and `additionalData.mapping` is
+  // absent), consumers run a single pass and emit a CSV summary table instead
+  // of curated DICOMs. One CSV row per unique value of lookups[rowKey].
+  output?: {
+    // CSV path relative to the curation output root, e.g.
+    // 'reports/series_summary.csv'.
+    path: string
+    // A key of the `lookups` map returned by collect(). Defines the row group.
+    rowKey: string
   }
 }
 
@@ -356,7 +377,9 @@ export type TCurationSpecification<THost extends HostProps = HostProps> = {
   dicomPS315EOptions: TPs315Options | 'Off'
   inputPathPattern: string
   hostProps: THost
-  additionalData?: { mapping: TMappedValues } & (
+  // `mapping` is optional: it is required for the two-pass form / CSV-load
+  // flows, but omitted in summary-table mode (TMappingInputTwoPass.output set).
+  additionalData?: { mapping?: TMappedValues } & (
     | TMappingInputDirect
     | TMappingInputTwoPass
   )

@@ -203,7 +203,7 @@ async function collectMappingOptions(
   // The need for mapping can come from additionalData or from the
   // retainLongitudinalTemporalInformationOptions option
   let columnMappings: TColumnMappings | undefined
-  if (organizeOptions.table && additionalData) {
+  if (organizeOptions.table && additionalData?.mapping) {
     columnMappings = extractColumnMappings(
       organizeOptions.table,
       additionalData.mapping,
