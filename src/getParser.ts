@@ -76,16 +76,18 @@ export default function getParser(
   }
 
   const getMapping =
-    !additionalData || !columnMappings
+    !additionalData || !additionalData.mapping || !columnMappings
       ? undefined
       : // key: one of the keys defined in the `mapping` object
-        function getMapping(key: string) {
-          const { mapping } = additionalData
-          const { value: valueFn } = mapping[key]
-          const value = valueFn({ getDicom, getFilePathComp, getFrom })
+        (() => {
+          const mapping = additionalData.mapping
+          return function getMapping(key: string) {
+            const { value: valueFn } = mapping[key]
+            const value = valueFn({ getDicom, getFilePathComp, getFrom })
 
-          return getCsvMapping(columnMappings, mapping, key, value)
-        }
+            return getCsvMapping(columnMappings, mapping, key, value)
+          }
+        })()
 
   function missingDicom(attrName: string) {
     const value = getDicom(attrName)
