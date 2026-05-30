@@ -250,6 +250,11 @@ export async function dispatchMappingJobs(): Promise<void> {
     // if the worker crashes.
     workerCurrentFile.set(mappingWorker, fileInfo)
 
+    // Increment before the awaits below: a concurrent dispatchMappingJobs() call
+    // triggered by a finishing worker must see a non-zero count or it will emit
+    // 'done' prematurely while headers are still being resolved.
+    workersActive += 1
+
     const { outputTarget, hashMethod, hashPartSize, ...mappingOptions } =
       // Not partial anymore.
       mappingWorkerOptions as TMappingWorkerOptions
@@ -262,7 +267,6 @@ export async function dispatchMappingJobs(): Promise<void> {
       hashPartSize,
       serializedMappingOptions: serializeMappingOptions(mappingOptions),
     } satisfies MappingRequest)
-    workersActive += 1
   }
 
   // Backpressure: resume the scan worker when the queue drains below the
