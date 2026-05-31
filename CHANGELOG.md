@@ -1,3 +1,10 @@
+# [0.39.0](https://github.com/clintools/dicom-curate/compare/v0.38.1...v0.39.0) (2026-05-31)
+
+
+### Features
+
+* support summary-table listing specs ([b416419](https://github.com/clintools/dicom-curate/commit/b416419e6ee6ad397209204b919cf8e0431d0611))
+
 ## [0.38.1](https://github.com/clintools/dicom-curate/compare/v0.38.0...v0.38.1) (2026-05-19)
 
 
