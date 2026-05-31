@@ -216,6 +216,20 @@ async function collectMappingOptions(
   const hashMethod = organizeOptions.hashMethod
   const hashPartSize = organizeOptions.hashPartSize
 
+  // Summary-table mode (additionalData.output set) produces a CSV summary and
+  // no curated DICOMs, so it must run read-only. skipWrite is the option that
+  // actually prevents any file from being written/transferred (skipModifications
+  // only governs whether content is changed). Fail fast on misuse.
+  if (
+    additionalData?.type === 'listing' &&
+    additionalData.output &&
+    !skipWrite
+  ) {
+    throw new Error(
+      'additionalData.output (summary-table mode) requires skipWrite: true — summary specs produce a CSV summary and no curated output.',
+    )
+  }
+
   const dateOffset = organizeOptions.dateOffset
 
   if (requiresDateOffset(deIdOpts) && !dateOffset?.match(iso8601)) {
