@@ -318,6 +318,8 @@ type TMappingInputDirect = {
   // load: csv file
   type: 'load'
   collect: Record<string, RegExp | string[]>
+  // Direct (CSV-load) mapping. Required for this flow.
+  mapping: TMappedValues
 }
 
 // Optional aggregation marker on an info entry. When omitted, the value is
@@ -334,6 +336,17 @@ type TMappingTwoPassCollect = [
   lookupField: string,
 ]
 
+// Summary-table output. When set (curate variant omitted), consumers run a
+// single read-only pass and emit a CSV summary table instead of curated
+// DICOMs. One CSV row per unique value of lookups[rowKey].
+type TSummaryOutput = {
+  // CSV path relative to the curation output root, e.g.
+  // 'reports/series_summary.csv'.
+  path: string
+  // A key of the `lookups` map returned by collect(). Defines the row group.
+  rowKey: string
+}
+
 type TMappingInputTwoPass = {
   // two-pass: extract from listing.
   type: 'listing'
@@ -344,17 +357,19 @@ type TMappingInputTwoPass = {
     info: TMappingTwoPassInfo[]
     collect: TMappingTwoPassCollect[]
   }
-  // Optional summary output. When present (and `additionalData.mapping` is
-  // absent), consumers run a single pass and emit a CSV summary table instead
-  // of curated DICOMs. One CSV row per unique value of lookups[rowKey].
-  output?: {
-    // CSV path relative to the curation output root, e.g.
-    // 'reports/series_summary.csv'.
-    path: string
-    // A key of the `lookups` map returned by collect(). Defines the row group.
-    rowKey: string
-  }
-}
+} & (
+  | {
+      // Curate variant: two-pass form / mapping, writes curated DICOMs.
+      mapping: TMappedValues
+      output?: never
+    }
+  | {
+      // Summary variant: read-only pass, writes a CSV summary table.
+      // `mapping` is mutually exclusive with `output` (enforced by the type).
+      output: TSummaryOutput
+      mapping?: never
+    }
+)
 
 type HPPrimitive =
   | string
@@ -377,12 +392,11 @@ export type TCurationSpecification<THost extends HostProps = HostProps> = {
   dicomPS315EOptions: TPs315Options | 'Off'
   inputPathPattern: string
   hostProps: THost
-  // `mapping` is optional: it is required for the two-pass form / CSV-load
-  // flows, but omitted in summary-table mode (TMappingInputTwoPass.output set).
-  additionalData?: { mapping?: TMappedValues } & (
-    | TMappingInputDirect
-    | TMappingInputTwoPass
-  )
+  // Curation mapping input. `mapping` and the summary `output` are mutually
+  // exclusive: a 'load' or two-pass 'listing' spec carries `mapping` and
+  // writes curated DICOMs, while a summary 'listing' spec carries `output`
+  // and is read-only. Enforced at the type level by the member unions.
+  additionalData?: TMappingInputDirect | TMappingInputTwoPass
   excludedFiletypes?: string[]
   // Called with original (pre-mapping) DICOM tags. Return true to exclude (skip) the file.
   //

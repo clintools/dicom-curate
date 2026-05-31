@@ -139,6 +139,63 @@ describe('curateMany', () => {
     expect(mappingWorkerPool.dispatchMappingJobs).not.toHaveBeenCalled()
   })
 
+  it('rejects when a summary spec (additionalData.output) runs without skipWrite', async () => {
+    ;(
+      composeSpecsModule.composeSpecs as MockedFunction<
+        typeof composeSpecsModule.composeSpecs
+      >
+    ).mockReturnValueOnce({
+      dicomPS315EOptions: 'Off',
+      additionalData: {
+        type: 'listing',
+        collect: () => ({ lookups: {}, info: [], collect: [] }),
+        output: { path: 'reports/summary.csv', rowKey: 'PerSeries' },
+      },
+    } as any)
+
+    await expect(
+      curateMany({
+        inputType: 'http',
+        inputUrls: ['https://example.com/file.dcm'],
+        curationSpec: () => ({}),
+        // skipWrite omitted -> defaults to false -> must reject
+      } as any),
+    ).rejects.toThrow(
+      'additionalData.output (summary-table mode) requires skipWrite: true',
+    )
+
+    expect(mappingWorkerPool.setMappingWorkerOptions).not.toHaveBeenCalled()
+    expect(mappingWorkerPool.dispatchMappingJobs).not.toHaveBeenCalled()
+  })
+
+  it('accepts a summary spec (additionalData.output) when skipWrite is true', async () => {
+    ;(
+      composeSpecsModule.composeSpecs as MockedFunction<
+        typeof composeSpecsModule.composeSpecs
+      >
+    ).mockReturnValue({
+      dicomPS315EOptions: 'Off',
+      additionalData: {
+        type: 'listing',
+        collect: () => ({ lookups: {}, info: [], collect: [] }),
+        output: { path: 'reports/summary.csv', rowKey: 'PerSeries' },
+      },
+    } as any)
+
+    const promise = curateMany({
+      inputType: 'http',
+      inputUrls: ['https://example.com/file.dcm'],
+      curationSpec: () => ({}),
+      skipWrite: true,
+    } as any)
+
+    await flushAsyncSetup()
+    emitDone()
+    await expect(promise).resolves.toBeDefined()
+
+    expect(mappingWorkerPool.setMappingWorkerOptions).toHaveBeenCalled()
+  })
+
   it('rejects with AbortError if aborted while async setup is still in progress', async () => {
     let resolveInit!: () => void
     ;(

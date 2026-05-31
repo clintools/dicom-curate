@@ -1,7 +1,7 @@
 import { sample } from '../../testdata/sample'
 import collectMappings from '../collectMappings'
 import { composeSpecs } from '../composeSpecs'
-import type { TMappingOptions } from '../types'
+import type { TCurationSpecification, TMappingOptions } from '../types'
 import { sampleSummaryCurationSpecification } from './sampleSummaryCurationSpecification'
 
 describe('sampleSummaryCurationSpecification', () => {
@@ -79,5 +79,52 @@ describe('sampleSummaryCurationSpecification', () => {
     // SOPInstanceUIDs retains its 'list' aggregation marker downstream.
     const sop = mapResults.listing!.info.find((e) => e[0] === 'SOPInstanceUIDs')
     expect(sop?.[2]).toBe('list')
+  })
+
+  it('forbids a listing spec with both mapping and output (type-level)', () => {
+    const base = {
+      version: '3.0',
+      hostProps: {},
+      dicomPS315EOptions: 'Off',
+      inputPathPattern: 'any',
+      modifyDicomHeader: () => ({}),
+      outputFilePathComponents: () => [],
+      errors: () => [],
+    } as const
+
+    // Valid: summary variant (output, no mapping).
+    const summary: TCurationSpecification = {
+      ...base,
+      additionalData: {
+        type: 'listing',
+        collect: () => ({ lookups: {}, info: [], collect: [] }),
+        output: { path: 'reports/summary.csv', rowKey: 'PerSeries' },
+      },
+    }
+
+    // Valid: curate variant (mapping, no output).
+    const curate: TCurationSpecification = {
+      ...base,
+      additionalData: {
+        type: 'listing',
+        collect: () => ({ lookups: {}, info: [], collect: [] }),
+        mapping: {},
+      },
+    }
+
+    const illegal: TCurationSpecification = {
+      ...base,
+      additionalData: {
+        type: 'listing',
+        collect: () => ({ lookups: {}, info: [], collect: [] }),
+        mapping: {},
+        // @ts-expect-error mapping and output are mutually exclusive
+        output: { path: 'reports/summary.csv', rowKey: 'PerSeries' },
+      },
+    }
+
+    expect(summary.additionalData?.type).toBe('listing')
+    expect(curate.additionalData?.type).toBe('listing')
+    expect(illegal.additionalData?.type).toBe('listing')
   })
 })
