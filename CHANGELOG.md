@@ -1,3 +1,10 @@
+# [0.40.0](https://github.com/clintools/dicom-curate/compare/v0.39.1...v0.40.0) (2026-06-01)
+
+
+### Features
+
+* export hashStream ([d89f87c](https://github.com/clintools/dicom-curate/commit/d89f87c2dbe6a8b2a87d28f8be5b32678f2a3df3))
+
 ## [0.39.1](https://github.com/clintools/dicom-curate/compare/v0.39.0...v0.39.1) (2026-06-01)
 
 
