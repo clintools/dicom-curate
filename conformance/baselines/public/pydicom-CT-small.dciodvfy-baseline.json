@@ -1,0 +1,8 @@
+{
+  "label": "pydicom-CT-small",
+  "violations": [
+    "Warning::</Laterality(0020,0060)>::is only permitted to be empty when actually unknown; should be absent (not empty) if an unpaired body part, and have a value if a paired body part",
+    "Warning::</PatientWeight(0010,1030)[1]>::Value is zero"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}
