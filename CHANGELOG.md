@@ -1,3 +1,10 @@
+## [0.39.1](https://github.com/clintools/dicom-curate/compare/v0.39.0...v0.39.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* increment workersActive header resolution awaits ([4585bb8](https://github.com/clintools/dicom-curate/commit/4585bb8fe80d9f14bbb1aa7db81d9626bf1c4659))
+
 # [0.39.0](https://github.com/clintools/dicom-curate/compare/v0.38.1...v0.39.0) (2026-05-31)
 
 
