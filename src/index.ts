@@ -40,7 +40,7 @@ export { specVersion } from './config/specVersion'
 export type { Row } from './csvMapping'
 export { csvTextToRows } from './csvMapping'
 export { TCurateOneArgs } from './curateOne'
-export { hash } from './hash'
+export { hash, hashStream } from './hash'
 export type { ProgressCallback } from './mappingWorkerPool'
 export type {
   OrganizeOptions,
