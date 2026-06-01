@@ -17,7 +17,6 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import {
   defaultPublicCasesPath,
   fetchPublicCaseToCache,
@@ -27,27 +26,13 @@ import {
 } from 'dicom-synth'
 import type { ConformanceBaseline } from '../conformance/baseline'
 import { runDciodvfy, violationSet } from '../conformance/dciodvfy'
+import {
+  publicBaselinePath,
+  repoRoot,
+  syntheticBaselinePath,
+} from '../conformance/helpers'
 import { resolveLocalConformanceCases } from '../conformance/localFixtures'
 import { resolveConformanceBin } from '../conformance/resolveBin'
-
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
-const conformanceRoot = join(repoRoot, 'conformance')
-
-function syntheticBaselinePath(fixtureId: string): string {
-  return join(
-    conformanceRoot,
-    'baselines/synthetic',
-    `${fixtureId}.dciodvfy-baseline.json`,
-  )
-}
-
-function publicBaselinePath(caseId: string): string {
-  return join(
-    conformanceRoot,
-    'baselines/public',
-    `${caseId}.dciodvfy-baseline.json`,
-  )
-}
 
 function buildSyntheticTargets() {
   const syntheticDir = mkdtempSync(join(tmpdir(), 'dc-baseline-synth-'))
