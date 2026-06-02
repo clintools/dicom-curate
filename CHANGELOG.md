@@ -1,3 +1,11 @@
+## [0.40.1](https://github.com/clintools/dicom-curate/compare/v0.40.0...v0.40.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* harden baseline update script and remve redundant script ([12306df](https://github.com/clintools/dicom-curate/commit/12306df962dda294bb7c4cd83d16daa4ce44f929))
+* refresh baselines and fix baseline update script imports ([bc12be3](https://github.com/clintools/dicom-curate/commit/bc12be330c2eab76a29507c83be79a8e9cd9b55a))
+
 # [0.40.0](https://github.com/clintools/dicom-curate/compare/v0.39.1...v0.40.0) (2026-06-01)
 
 
