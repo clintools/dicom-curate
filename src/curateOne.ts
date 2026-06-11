@@ -321,10 +321,12 @@ export async function curateOne({
         error,
       )
       const mapResults = {
-        anomalies: [`Could not parse ${fileInfo.name} as DICOM data`],
-        errors: [
-          `File ${fileInfo.name} is not a valid DICOM file or is corrupted`,
-        ],
+        // PHI-safe strings: the raw filename is intentionally omitted because
+        // anomalies/errors are shared between the private (input) log and the
+        // server-bound (output) log. The raw name/path is carried only in
+        // fileInfo, keeping it in the private log. See #283.
+        anomalies: [`Could not parse file as DICOM data`],
+        errors: [`File is not a valid DICOM file or is corrupted`],
         sourceInstanceUID: `invalid_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
         fileInfo: {
           name: fileInfo.name,
