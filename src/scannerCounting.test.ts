@@ -276,3 +276,113 @@ describe('parallel counter + feeder', () => {
     expect(scanWorkerInstance?.terminated).toBe(true)
   })
 })
+
+describe('scan read-failures (getFile/stat) are non-fatal', () => {
+  let dir: string
+
+  beforeAll(() => {
+    dir = createTestDicomDir(20, {
+      studyDescription: 'Read Failure Test',
+      subdirName: 'RF-001',
+    })
+  })
+
+  afterAll(() => {
+    cleanupTestDicomDir(dir)
+  })
+
+  afterEach(() => {
+    scanWorkerInstance?.terminate()
+    resetMockWorkers()
+    resetParallelScanWorker()
+    scanWorkerInstance = undefined
+  })
+
+  it('does not abort the run; surfaces unreadable files as errors with no output path', async () => {
+    configureMockMappingWorkers(Array(WORKER_COUNT).fill('normal'))
+    configureParallelScanWorker({ readErrorCount: 3 })
+
+    const result = await curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: dir,
+        curationSpec: minimalSpec,
+        skipWrite: false,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    // The run completes (not rejected) despite 3 unreadable files.
+    expect(result.response).toBe('done')
+
+    const readErrorResults = result.mapResultsList!.filter(
+      (r) =>
+        r.sourceInstanceUID?.startsWith('scan_') &&
+        r.errors &&
+        r.errors.length > 0,
+    )
+    expect(readErrorResults).toHaveLength(3)
+
+    for (const r of readErrorResults) {
+      // PHI-safe error string, no filename.
+      expect(r.errors[0]).toContain('Unable to read file (filesystem error)')
+      // No output path: must not leak the raw input path to the server log.
+      expect(r.outputFilePath).toBeUndefined()
+      // fileInfo retained so the private (input) log can reference the path.
+      expect(r.fileInfo).toBeDefined()
+      expect(r.fileInfo?.name).toBeTruthy()
+    }
+  })
+
+  it('surfaces read-failures even during the first pass (skipWrite)', async () => {
+    configureMockMappingWorkers(Array(WORKER_COUNT).fill('normal'))
+    configureParallelScanWorker({ readErrorCount: 2 })
+
+    const result = await curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: dir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    expect(result.response).toBe('done')
+
+    const readErrorResults = result.mapResultsList!.filter(
+      (r) =>
+        r.sourceInstanceUID?.startsWith('scan_') &&
+        r.errors &&
+        r.errors.length > 0,
+    )
+    // Read-failures bypass the first-pass suppression that benign anomalies obey.
+    expect(readErrorResults).toHaveLength(2)
+  })
+
+  it('benign scan anomalies remain suppressed during the first pass', async () => {
+    configureMockMappingWorkers(Array(WORKER_COUNT).fill('normal'))
+    configureParallelScanWorker({ rejectCount: 3 })
+
+    const result = await curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: dir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    expect(result.response).toBe('done')
+
+    const anomalyResults = result.mapResultsList!.filter((r) =>
+      r.sourceInstanceUID?.startsWith('scan_'),
+    )
+    // Benign anomalies are not emitted on the first pass.
+    expect(anomalyResults).toHaveLength(0)
+  })
+})

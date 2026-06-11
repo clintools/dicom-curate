@@ -22,16 +22,22 @@ import { join } from 'path'
 // Module-level configuration
 // ---------------------------------------------------------------------------
 
-let nextOptions: { rejectCount?: number; emissionDelay?: number } = {}
+let nextOptions: {
+  rejectCount?: number
+  emissionDelay?: number
+  readErrorCount?: number
+} = {}
 
 /**
  * Configure options for the next ParallelScanWorker instance.
  * @param options.rejectCount Number of files the feeder will reject (correcting the count).
  * @param options.emissionDelay Delay in ms between feeder file emissions (default 0).
+ * @param options.readErrorCount Number of files that fail to read (emit scanAnomalies with `errors`).
  */
 export function configureParallelScanWorker(options: {
   rejectCount?: number
   emissionDelay?: number
+  readErrorCount?: number
 }): void {
   nextOptions = { ...options }
 }
@@ -60,6 +66,9 @@ export class ParallelScanWorker {
   /** Number of files the feeder will reject (simulating full-filter failures). */
   public rejectCount: number
 
+  /** Number of files the feeder will fail to read (read-error scanAnomalies). */
+  public readErrorCount: number
+
   /** Delay between feeder emissions (ms). */
   public emissionDelay: number
 
@@ -69,11 +78,13 @@ export class ParallelScanWorker {
   private totalDiscovered = 0
   private feederIndex = 0
   private rejectedSoFar = 0
+  private readErrorsSoFar = 0
   private paused = false
   private pendingTimeout: ReturnType<typeof setTimeout> | null = null
 
   constructor() {
     this.rejectCount = nextOptions.rejectCount ?? 0
+    this.readErrorCount = nextOptions.readErrorCount ?? 0
     this.emissionDelay = nextOptions.emissionDelay ?? 0
   }
 
@@ -108,6 +119,7 @@ export class ParallelScanWorker {
         this.totalDiscovered = 0
         this.feederIndex = 0
         this.rejectedSoFar = 0
+        this.readErrorsSoFar = 0
         this.paused = false
 
         // Counter: emit all 'count' messages immediately (synchronous).
@@ -174,9 +186,20 @@ export class ParallelScanWorker {
     const fileIndex = this.feederIndex
     this.feederIndex++
 
+    // Should this file fail to read entirely (read-error)?
+    const shouldReadError = this.readErrorsSoFar < this.readErrorCount
     // Should this file be rejected by the full filter?
-    const shouldReject = this.rejectedSoFar < this.rejectCount
-    if (shouldReject) {
+    const shouldReject =
+      !shouldReadError && this.rejectedSoFar < this.rejectCount
+    if (shouldReadError) {
+      this.readErrorsSoFar++
+      this.totalDiscovered--
+      this.emit({
+        response: 'count',
+        totalDiscovered: this.totalDiscovered,
+      })
+      this.emitReadErrorAtIndex(fileIndex)
+    } else if (shouldReject) {
       this.rejectedSoFar++
       this.totalDiscovered--
       this.emit({
@@ -232,6 +255,30 @@ export class ParallelScanWorker {
         size: stat.size,
       },
       anomalies: ['Skipped file without DICOM signature: ' + name],
+    })
+  }
+
+  private emitReadErrorAtIndex(fileIndex: number): void {
+    if (this.terminated) return
+
+    const relPath = this.files[fileIndex]
+    const parts = relPath.split('/')
+    const name = parts.pop()!
+    const path = parts.join('/')
+
+    // Read-error: the file could not be read at all, so size is unknown (0)
+    // and we surface a PHI-safe error string (no filename). The real worker
+    // does the same.
+    this.emit({
+      response: 'scanAnomalies',
+      fileInfo: {
+        kind: 'path',
+        path: join(this.scanDir, path),
+        name,
+        size: 0,
+      },
+      anomalies: [],
+      errors: ['Unable to read file (filesystem error): Error: EACCES'],
     })
   }
 
