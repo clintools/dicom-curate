@@ -1,3 +1,11 @@
+## [0.40.2](https://github.com/clintools/dicom-curate/compare/v0.40.1...v0.40.2) (2026-06-11)
+
+
+### Bug Fixes
+
+* drop raw filename from curateOne parse-failure anomaly/error strings ([1915c6b](https://github.com/clintools/dicom-curate/commit/1915c6b84880547de1f13c0d9924d7e60afe6b37)), closes [#283](https://github.com/clintools/dicom-curate/issues/283)
+* handle scan read failures gracefully instead of aborting the run ([9ece4ce](https://github.com/clintools/dicom-curate/commit/9ece4ce9deb13e4e32115c1c074f932bcc563ec4)), closes [#283](https://github.com/clintools/dicom-curate/issues/283)
+
 ## [0.40.1](https://github.com/clintools/dicom-curate/compare/v0.40.0...v0.40.1) (2026-06-02)
 
 
