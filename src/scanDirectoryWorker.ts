@@ -12,6 +12,19 @@ const DEFAULT_EXCLUDED_FILETYPES = [
   '.ds_store',
 ]
 
+/**
+ * Build a PHI-safe error message for a file that could not be read during
+ * scanning. Intentionally omits the filename/path so the string is safe to
+ * place in `errors` (which is shared between the private and server-bound
+ * logs). The raw path/name is carried separately in `fileInfo` so it appears
+ * only in the private (input) log.
+ */
+function safeReadErrorMessage(error: unknown): string {
+  const detail =
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+  return `Unable to read file (filesystem error): ${detail}`
+}
+
 export type FileScanMsg =
   | {
       response: 'file'
@@ -26,6 +39,15 @@ export type FileScanMsg =
       response: 'scanAnomalies'
       fileInfo: TFileInfo
       anomalies: string[]
+      /**
+       * Hard errors discovered during scanning (e.g. a file that cannot be
+       * read at all via the FileSystem API / fs.stat). Unlike `anomalies`
+       * (benign findings such as non-DICOM or too-small files), these are
+       * surfaced as errors so they are visible regardless of pass. The string
+       * MUST NOT contain the raw filename/path — that is carried only in
+       * `fileInfo` so it stays in the private (input) log.
+       */
+      errors?: string[]
       previousFileInfo?: {
         size?: number
         mtime?: string
@@ -554,9 +576,41 @@ async function scanDirectory(dir: FileSystemDirectoryHandle) {
       if (!keepScanning) return
 
       if (entry.kind === 'file') {
-        const file = await (entry as FileSystemFileHandle).getFile()
         const key = `${prefix}/${entry.name}`
         const prev = previousIndex ? previousIndex[key] : undefined
+
+        let file: File
+        try {
+          file = await (entry as FileSystemFileHandle).getFile()
+        } catch (readError) {
+          // A single file we cannot read (corrupted, locked, permission
+          // revoked via the Chromium FileSystem API) must NOT abort the whole
+          // scan. Report it as a hard error and continue. The error string is
+          // PHI-safe (no filename); the raw path/name lives only in fileInfo,
+          // which keeps it in the private (input) log.
+          if (cheapFilterNameOnly(entry.name, key)) {
+            totalDiscovered--
+            globalThis.postMessage({
+              response: 'count',
+              totalDiscovered,
+            } satisfies FileScanMsg)
+          }
+          globalThis.postMessage({
+            response: 'scanAnomalies',
+            fileInfo: {
+              path: prefix,
+              name: entry.name,
+              size: 0,
+              kind: 'handle',
+              fileHandle: entry as FileSystemFileHandle,
+            },
+            anomalies: [],
+            errors: [safeReadErrorMessage(readError)],
+            previousFileInfo: prev,
+          } satisfies FileScanMsg)
+          if (!(await waitIfPaused())) return
+          continue
+        }
 
         const fileAnomalies: string[] = []
         if (await shouldProcessFile(file, fileAnomalies, key)) {
@@ -685,9 +739,40 @@ async function scanDirectoryNode(dirPath: string) {
 
         if (entry.isFile()) {
           const filePath = path.join(currentPath, entry.name)
-          const stats = await fs.stat(filePath)
           const key = `${prefix}/${entry.name}`
           const prev = previousIndex ? previousIndex[key] : undefined
+
+          let stats: Awaited<ReturnType<typeof fs.stat>>
+          try {
+            stats = await fs.stat(filePath)
+          } catch (readError) {
+            // A single file we cannot stat (vanished, permission denied) must
+            // NOT abort the whole scan. Report it as a hard error and continue.
+            // The error string is PHI-safe (no path); the raw path lives only
+            // in fileInfo, keeping it in the private (input) log.
+            if (cheapFilterNameOnly(entry.name, key)) {
+              totalDiscovered--
+              globalThis.postMessage({
+                response: 'count',
+                totalDiscovered,
+              } satisfies FileScanMsg)
+            }
+            globalThis.postMessage({
+              response: 'scanAnomalies',
+              fileInfo: {
+                path: prefix,
+                name: entry.name,
+                size: 0,
+                kind: 'path',
+                fullPath: filePath,
+              },
+              anomalies: [],
+              errors: [safeReadErrorMessage(readError)],
+              previousFileInfo: prev,
+            } satisfies FileScanMsg)
+            if (!(await waitIfPaused())) return
+            continue
+          }
 
           const fileAnomalies: string[] = []
           if (

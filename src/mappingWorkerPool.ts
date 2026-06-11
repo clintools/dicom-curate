@@ -97,7 +97,11 @@ export function setDirectoryScanFinished(value: boolean): void {
 }
 
 // Track scan anomalies separately since they don't go through the processing pipeline
-export let scanAnomalies: { fileInfo: TFileInfo; anomalies: string[] }[] = []
+export let scanAnomalies: {
+  fileInfo: TFileInfo
+  anomalies: string[]
+  errors?: string[]
+}[] = []
 
 // Callbacks set by curateMany, stored here for use by the dispatch loop.
 let progressCallback: ProgressCallback = () => {}
@@ -297,10 +301,41 @@ export async function dispatchMappingJobs(): Promise<void> {
 
     if (!mapResultsList) mapResultsList = []
 
-    // Create individual mapResults entries for each scan anomaly
-    // Only do this during actual processing (not first pass)
-    if (!mappingWorkerOptions.skipWrite) {
-      scanAnomalies.forEach(({ fileInfo, anomalies }) => {
+    // Create individual mapResults entries for each scan finding.
+    //
+    // Two kinds of scan findings are surfaced differently:
+    //
+    //  - Benign anomalies (non-DICOM, too-small, excluded filetypes): noise
+    //    during the first pass (form generation), so only emitted on the
+    //    write pass (!skipWrite), and they carry the input path in
+    //    `outputFilePath` as before.
+    //
+    //  - Hard read errors (file could not be read at all): always surfaced,
+    //    in both passes, via `errors`. We deliberately OMIT `outputFilePath`
+    //    so the raw input path is not leaked into the server-bound log; the
+    //    raw path is retained in `fileInfo` for the private (input) log, and a
+    //    path-less trace is rendered in the server-bound log by the consumer.
+    scanAnomalies.forEach(({ fileInfo, anomalies, errors }) => {
+      const hasReadErrors = !!errors && errors.length > 0
+
+      if (hasReadErrors) {
+        const scanErrorResult: TMapResults = {
+          sourceInstanceUID: `scan_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+          // Intentionally no outputFilePath: an unread file has no
+          // de-identified output path, and we must not place the raw input
+          // path in the server-bound channel.
+          mappings: {},
+          anomalies: anomalies ?? [],
+          errors,
+          quarantine: {},
+          fileInfo,
+        }
+        mapResultsList!.push(scanErrorResult)
+        return
+      }
+
+      // Benign anomalies: only on the write pass.
+      if (!mappingWorkerOptions.skipWrite && anomalies.length > 0) {
         const scanAnomalyResult: TMapResults = {
           sourceInstanceUID: `scan_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
           outputFilePath: `${fileInfo.path}/${fileInfo.name}`, // Use the actual file path
@@ -309,11 +344,9 @@ export async function dispatchMappingJobs(): Promise<void> {
           errors: [],
           quarantine: {},
         }
-
-        // Add each scan anomaly result to the final results
         mapResultsList!.push(scanAnomalyResult)
-      })
-    }
+      }
+    })
 
     progressCallback({
       response: 'done',
