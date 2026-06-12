@@ -2,6 +2,7 @@
  * End-to-end smoke tests: real scan + mapping workers, disk I/O, no mocks.
  * Requires `pnpm build:esm` (see package.json `test:e2e`).
  */
+import { chmodSync, mkdirSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import { curateMany } from 'dicom-curate'
 import {
@@ -176,4 +177,64 @@ describe('E2E smoke: curateMany', () => {
     ).toHaveLength(1)
     expect(hashDirectoryFiles(inputDir)).toEqual(beforeInput)
   })
+
+  // Permission checks are bypassed for root (e.g. some CI containers), so the
+  // EACCES setup below cannot fail there.
+  it.skipIf(process.getuid?.() === 0)(
+    'continues past a real unreadable file and keeps its path out of errors and UID',
+    async () => {
+      const { inputDir, outputDir, cleanup } = createWorkspace()
+
+      writeMinimalDicomFile(join(inputDir, 'study', 'subject', 'valid.dcm'))
+
+      // A directory with read-but-no-execute permission: readdir can list the
+      // file (so the feeder sees it), but fs.stat fails with EACCES — a real
+      // filesystem read failure whose raw message contains the full path.
+      const lockedDir = join(inputDir, 'study', 'locked-subject')
+      mkdirSync(lockedDir, { recursive: true })
+      writeMinimalDicomFile(join(lockedDir, 'secret-patient.dcm'))
+      chmodSync(lockedDir, 0o666)
+      // Restore permissions before cleanup, even on assertion failure —
+      // rmSync cannot remove contents of a no-execute directory.
+      workspaces.push(() => {
+        chmodSync(lockedDir, 0o755)
+        cleanup()
+      })
+
+      const result = await curateMany(
+        baseCurateOptions(inputDir, outputDir, pathOrganizedSmokeSpec()),
+      )
+
+      // The run completes despite the unreadable file, and the readable file
+      // is fully processed.
+      expect(result.response).toBe('done')
+      const validResult = (result.mapResultsList ?? []).find((r) =>
+        r.outputFilePath?.includes('valid.dcm'),
+      )
+      expect(validResult?.errors ?? []).toEqual([])
+
+      const readErrorResults = (result.mapResultsList ?? []).filter(
+        (r) => r.sourceInstanceUID?.startsWith('scan_') && r.errors?.length,
+      )
+      expect(readErrorResults).toHaveLength(1)
+      const readError = readErrorResults[0]
+
+      // The error string carries the failure code but neither the filename
+      // nor any path segment — node fs errors embed the full path in
+      // error.message, which must never reach this server-bound field.
+      expect(readError.errors[0]).toBe(
+        'Unable to read file (filesystem error): EACCES',
+      )
+
+      // The synthetic UID must not encode the filename either.
+      expect(readError.sourceInstanceUID).not.toContain('secret')
+      expect(readError.sourceInstanceUID).toMatch(/^scan_[0-9a-f]{16}$/)
+
+      // No output path (nothing was written), but fileInfo retains the real
+      // name/path for the private (input) log.
+      expect(readError.outputFilePath).toBeUndefined()
+      expect(readError.fileInfo?.name).toBe('secret-patient.dcm')
+      expect(readError.fileInfo?.path).toContain('locked-subject')
+    },
+  )
 })
