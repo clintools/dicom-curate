@@ -9,7 +9,7 @@ import { composeSpecs } from './composeSpecs'
 import createNestedDirectories from './createNestedDirectories'
 import curateDict from './curateDict'
 import { fetchWithRetry } from './fetchWithRetry'
-import { hash, hashStream } from './hash'
+import { hash, hashStream, phiSafeToken } from './hash'
 import { loadLibStorage } from './libStorage'
 import { loadS3Client } from './s3Client'
 import type {
@@ -327,7 +327,7 @@ export async function curateOne({
         // fileInfo, keeping it in the private log. See #283.
         anomalies: [`Could not parse file as DICOM data`],
         errors: [`File is not a valid DICOM file or is corrupted`],
-        sourceInstanceUID: `invalid_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        sourceInstanceUID: `invalid_${phiSafeToken(`${fileInfo.path}/${fileInfo.name}`)}`,
         fileInfo: {
           name: fileInfo.name,
           size: fileInfo.size,

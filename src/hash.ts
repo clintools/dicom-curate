@@ -6,6 +6,17 @@ import type { THashMethod } from './types'
 
 const DEFAULT_HASH_PART_SIZE = 5 * 1024 * 1024 // 5 MB — matches @aws-sdk/lib-storage default
 
+/**
+ * Derive a short, stable, PHI-safe token from a string (e.g. a file path).
+ * Used to build synthetic sourceInstanceUIDs for files that failed to read or
+ * parse, where embedding the (sanitised) filename would leak PHI into the
+ * server-bound log. Same input always yields the same token, so results stay
+ * correlatable across passes and runs.
+ */
+export function phiSafeToken(input: string): string {
+  return bytesToHex(sha256(new TextEncoder().encode(input))).slice(0, 16)
+}
+
 export async function hash(
   buffer: ArrayBuffer,
   hashMethod: THashMethod,
