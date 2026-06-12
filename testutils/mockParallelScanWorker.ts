@@ -278,7 +278,7 @@ export class ParallelScanWorker {
         size: 0,
       },
       anomalies: [],
-      errors: ['Unable to read file (filesystem error): Error: EACCES'],
+      errors: ['Unable to read file (filesystem error): EACCES'],
     })
   }
 

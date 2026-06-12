@@ -14,14 +14,23 @@ const DEFAULT_EXCLUDED_FILETYPES = [
 
 /**
  * Build a PHI-safe error message for a file that could not be read during
- * scanning. Intentionally omits the filename/path so the string is safe to
- * place in `errors` (which is shared between the private and server-bound
- * logs). The raw path/name is carried separately in `fileInfo` so it appears
- * only in the private (input) log.
+ * scanning. Only the error code/name is included — never `error.message`,
+ * because node fs errors embed the full raw path in the message (e.g.
+ * "ENOENT: no such file or directory, stat '/path/to/file.dcm'") and this
+ * string goes into `errors`, which is shared between the private and
+ * server-bound logs. The raw path/name is carried separately in `fileInfo`
+ * so it appears only in the private (input) log.
  */
 function safeReadErrorMessage(error: unknown): string {
-  const detail =
-    error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+  let detail = 'unknown error'
+  if (error && typeof error === 'object') {
+    const { code, name } = error as { code?: unknown; name?: unknown }
+    if (typeof code === 'string' && code) {
+      detail = code
+    } else if (typeof name === 'string' && name) {
+      detail = name
+    }
+  }
   return `Unable to read file (filesystem error): ${detail}`
 }
 
