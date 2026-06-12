@@ -12,6 +12,7 @@ import type {
   UploadResult,
 } from './applyMappingsWorker'
 import { safeSerializeError } from './applyMappingsWorker'
+import { phiSafeToken } from './hash'
 import { getHttpInputHeaders, getHttpOutputHeaders } from './httpHeaders'
 import { serializeMappingOptions } from './serializeMappingOptions'
 import type {
@@ -320,7 +321,9 @@ export async function dispatchMappingJobs(): Promise<void> {
 
       if (hasReadErrors) {
         const scanErrorResult: TMapResults = {
-          sourceInstanceUID: `scan_${fileInfo.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+          // phiSafeToken rather than the sanitised name: this result reaches
+          // the server-bound log, so the UID must not encode the filename.
+          sourceInstanceUID: `scan_${phiSafeToken(`${fileInfo.path}/${fileInfo.name}`)}`,
           // Intentionally no outputFilePath: an unread file has no
           // de-identified output path, and we must not place the raw input
           // path in the server-bound channel.
