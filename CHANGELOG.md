@@ -1,3 +1,11 @@
+## [0.40.3](https://github.com/clintools/dicom-curate/compare/v0.40.2...v0.40.3) (2026-06-12)
+
+
+### Bug Fixes
+
+* keep raw file path out of read-failure error strings ([e50d149](https://github.com/clintools/dicom-curate/commit/e50d149f9c5f6977467fbaf764a74d042f1ab9c8))
+* use path hash instead of filename in synthetic failure UIDs ([872f5d7](https://github.com/clintools/dicom-curate/commit/872f5d764e49c8a081205989aca4286fa3a36118))
+
 ## [0.40.2](https://github.com/clintools/dicom-curate/compare/v0.40.1...v0.40.2) (2026-06-11)
 
 
