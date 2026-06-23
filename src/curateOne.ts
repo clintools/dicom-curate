@@ -287,17 +287,40 @@ export async function curateOne({
       const reader = new dcmjs.async.AsyncDicomReader()
       const parseFeed = cancellableReadableStreamIterable(file.stream())
       const feedDone = reader.stream.fromAsyncStream(parseFeed.iterable)
+      // Build a "never resolves, only rejects" sentinel from feedDone so we can
+      // race it against readFile() without letting a normal feedDone resolution
+      // exit the race too early (fromAsyncStream resolves after setComplete() but
+      // before readFile() finishes parsing the buffered data).
+      //
+      // Attaching .catch() here also prevents "Uncaught (in promise)" in the
+      // failure case: if the underlying ReadableStream fails (e.g. a mode-0000
+      // file that Chrome reads via its network service and reports as
+      // "TypeError: network error"), feedDone rejects while readFile() is still
+      // blocked inside ensureAvailable() — which has no timeout and can only be
+      // woken by addBuffer/setComplete, calls that never come when fromAsyncStream
+      // threw. Without this early .catch() the browser fires "Uncaught (in
+      // promise)" before the finally block ever runs.
+      const feedErrorSignal = new Promise<never>((_, reject) => {
+        feedDone.catch(reject)
+      })
       // Stop reading at the PixelData tag.  The fixed dcmjs read() loop breaks
       // out of the scan when readTagHeader() returns {untilTag: true}, leaving
       // stream.offset pointing at the byte immediately after the 4-byte tag
       // (i.e. the VR field for explicit-LE).  Subtracting 4 gives the start of
       // the PixelData tag, which is exactly the offset we need for the slice.
       try {
-        await reader.readFile({
-          ignoreErrors: true,
-          noCopy: true,
-          untilTag: '7FE00010',
-        })
+        // Race readFile against feedErrorSignal: on a normal run feedErrorSignal
+        // stays pending forever so readFile wins; on stream failure feedErrorSignal
+        // rejects immediately, breaking the deadlock where readFile() would hang
+        // waiting for data that will never arrive.
+        await Promise.race([
+          reader.readFile({
+            ignoreErrors: true,
+            noCopy: true,
+            untilTag: '7FE00010',
+          }),
+          feedErrorSignal,
+        ])
       } finally {
         // Do not await feedDone without cancelling first: dcmjs fromAsyncStream
         // appends every chunk to an internal buffer until the source ends.
