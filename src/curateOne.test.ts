@@ -1127,3 +1127,152 @@ describe('curateOne custom uploader', () => {
     }
   })
 })
+
+describe('curateOne stream read failure during parse (regression #287)', () => {
+  const inputPath =
+    'Sample_Protocol_Number/Sample_CRO/AB12-123/Visit 1/PET-Abdomen'
+
+  const noOpSpec: () => TCurationSpecification = () => ({
+    inputPathPattern:
+      'protocolNumber/activityProvider/centerSubjectId/timepoint/scan',
+    version: '3.0',
+    hostProps: {},
+    dicomPS315EOptions: 'Off',
+    modifyDicomHeader: () => ({}),
+    outputFilePathComponents: (parser) => [
+      parser.getFilePathComp('protocolNumber'),
+      parser.getFilePathComp('activityProvider'),
+      parser.getFilePathComp(parser.FILENAME),
+    ],
+    errors: () => [],
+  })
+
+  /**
+   * Build the leading bytes of a valid explicit-LE DICOM file: a 128-byte
+   * zero preamble, the "DICM" magic, and the very start of the file-meta
+   * group. This is enough for dcmjs's AsyncDicomReader to begin parsing and
+   * park itself inside ensureAvailable() waiting for the rest of the header —
+   * the exact state in which a mid-stream read failure used to deadlock
+   * readFile() forever (issue #287).
+   */
+  function partialDicomHeader(): Uint8Array {
+    const head = new Uint8Array(140)
+    // bytes 0..127 are the zero preamble (already zeroed)
+    head[128] = 0x44 // D
+    head[129] = 0x49 // I
+    head[130] = 0x43 // C
+    head[131] = 0x4d // M
+    // Start of (0002,0000) FileMetaInformationGroupLength, explicit-LE "UL".
+    // Truncated deliberately: not enough bytes follow to satisfy the reader.
+    head[132] = 0x02
+    head[133] = 0x00 // group 0002 LE
+    head[134] = 0x00
+    head[135] = 0x00 // element 0000 LE
+    head[136] = 0x55
+    head[137] = 0x4c // VR = "UL"
+    head[138] = 0x04
+    head[139] = 0x00 // value length 4 (the 4 value bytes never arrive)
+    return head
+  }
+
+  /**
+   * A Blob whose stream() enqueues a partial DICOM header and then errors the
+   * stream's reader mid-parse — simulating the browser behaviour where a
+   * mode-0000 file served through Chrome's network service surfaces as
+   * `TypeError: network error` on reader.read(). Extends native Blob so the
+   * curateOne `kind: 'blob'` path accepts it.
+   */
+  class FailingStreamBlob extends Blob {
+    declare readonly size: number
+
+    constructor(private readonly failure: Error) {
+      super([])
+      Object.defineProperty(this, 'size', {
+        value: 1024,
+        configurable: true,
+      })
+    }
+
+    override stream(): ReadableStream<Uint8Array<ArrayBuffer>> {
+      const { failure } = this
+      const header = partialDicomHeader()
+      let errored = false
+      return new ReadableStream<Uint8Array<ArrayBuffer>>({
+        pull(controller) {
+          if (!errored) {
+            // First pull: hand over the partial header so the reader starts
+            // consuming and parks waiting for the remainder.
+            controller.enqueue(header as Uint8Array<ArrayBuffer>)
+            errored = true
+            return
+          }
+          // Second pull: the underlying source fails mid-read.
+          controller.error(failure)
+        },
+      })
+    }
+  }
+
+  it('resolves with a parse-failure result instead of hanging when the stream errors mid-parse', async () => {
+    const failure = new TypeError('network error')
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new FailingStreamBlob(failure),
+      path: inputPath,
+      name: 'unreadable.dcm',
+      size: 1024,
+    }
+
+    // If the deadlock regressed, this would never settle; the suite-level
+    // timeout would then fail the test rather than hang the whole run.
+    const result = await curateOne({
+      fileInfo,
+      outputTarget: {},
+      mappingOptions: { curationSpec: noOpSpec, skipWrite: true },
+    })
+
+    // The catch block (curateOne.ts) returns a PHI-safe parse-failure result.
+    expect(result.sourceInstanceUID).toMatch(/^invalid_/)
+    // The raw filename must not leak into the server-bound UID.
+    expect(result.sourceInstanceUID).not.toContain('unreadable')
+    expect(result.anomalies).toEqual(['Could not parse file as DICOM data'])
+    expect(result.errors).toEqual([
+      'File is not a valid DICOM file or is corrupted',
+    ])
+    // fileInfo retains the real name for the private (input) log.
+    expect(result.fileInfo?.name).toBe('unreadable.dcm')
+    // No output path because nothing was written.
+    expect(result.outputFilePath).toBeUndefined()
+  }, 10_000)
+
+  it('does not produce an unhandled promise rejection when the stream errors', async () => {
+    const failure = new TypeError('network error')
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new FailingStreamBlob(failure),
+      path: inputPath,
+      name: 'unreadable.dcm',
+      size: 1024,
+    }
+
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', onUnhandled)
+
+    try {
+      await curateOne({
+        fileInfo,
+        outputTarget: {},
+        mappingOptions: { curationSpec: noOpSpec, skipWrite: true },
+      })
+      // Give any stray rejected promise a chance to surface before asserting.
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+
+    expect(unhandled).toEqual([])
+  }, 10_000)
+})
