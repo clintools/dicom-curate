@@ -498,6 +498,6 @@ async function curateMany(
 }
 
 // This is needed here for OUTPUT_FILE_PREFIX to also be exported by the package
-export * from './types'
+export * from './types.js'
 
 export { curateMany, curateOne, extractColumnMappings }
