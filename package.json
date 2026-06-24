@@ -45,7 +45,7 @@
     "clean": "rm -rf dist",
     "build": "pnpm generate:sampleSpec && pnpm build:esm && pnpm build:types && rollup -c",
     "build:esm": "node esbuild.config.js",
-    "build:types": "tsc --emitDeclarationOnly --outDir dist/types -p tsconfig.build.json",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist/types -p tsconfig.build.json && tsx scripts/fixDtsExtensions.ts",
     "watch": "node esbuild.config.js --watch",
     "pretest": "pnpm build:esm",
     "test": "vitest run --pool=forks --project unit",

@@ -1,16 +1,16 @@
 /**
  * dicom-curate spec composer (runtime multi-spec, input order)
  */
-import { specVersion } from '../src/config/specVersion'
+import { specVersion } from './config/specVersion'
+import { defaultSpec } from './defaultSpec'
+import { defaultPs315Options } from './deidentifyPS315E'
 import type {
   HostProps,
   TCurationSpecification,
   TParser,
   TPostExcludeParser,
   TPs315Options,
-} from '../src/types'
-import { defaultSpec } from './defaultSpec'
-import { defaultPs315Options } from './deidentifyPS315E'
+} from './types'
 
 type RetainOpt = string[] | false
 
