@@ -376,6 +376,85 @@ describe('curateOne PixelData preservation', () => {
     expect(Array.from(tail)).toEqual(Array.from(pixelBytes))
   })
 
+  it('writes full bytes to a FileSystemDirectoryHandle (browser write path)', async () => {
+    // Regression test: LazyCompositeBlob exposes its bytes only via the
+    // overridden stream(); a native write(blob) reads the empty Blob body and
+    // produces a 0-byte file. The mock's write() reproduces that native-copy
+    // behaviour (Blob.prototype.arrayBuffer bypasses the override), so this
+    // fails if curateOne passes the Blob directly and passes when it streams.
+    const written = new Map<string, Uint8Array>()
+
+    function makeDir(prefix: string): FileSystemDirectoryHandle {
+      return {
+        async getDirectoryHandle(name: string) {
+          return makeDir(prefix ? `${prefix}/${name}` : name)
+        },
+        async getFileHandle(name: string) {
+          const fullPath = prefix ? `${prefix}/${name}` : name
+          return {
+            async createWritable() {
+              const chunks: Uint8Array[] = []
+              return {
+                async write(data: Blob | Uint8Array) {
+                  if (data instanceof Blob) {
+                    // Read native bytes, ignoring any subclass override —
+                    // matches FileSystemWritableFileStream.write(blob).
+                    const buf = await Blob.prototype.arrayBuffer.call(data)
+                    chunks.push(new Uint8Array(buf))
+                  } else {
+                    chunks.push(data)
+                  }
+                },
+                async close() {
+                  const total = chunks.reduce((s, c) => s + c.byteLength, 0)
+                  const out = new Uint8Array(total)
+                  let offset = 0
+                  for (const c of chunks) {
+                    out.set(c, offset)
+                    offset += c.byteLength
+                  }
+                  written.set(fullPath, out)
+                },
+              }
+            },
+          } as unknown as FileSystemFileHandle
+        },
+      } as unknown as FileSystemDirectoryHandle
+    }
+
+    const pixelBytes = new Uint8Array([
+      0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x11, 0x22,
+    ])
+    const dicomBytes = buildDicomWithPixelData(pixelBytes)
+
+    const fileInfo: TFileInfo = {
+      kind: 'blob',
+      blob: new Blob([dicomBytes.buffer as ArrayBuffer], {
+        type: 'application/octet-stream',
+      }),
+      path: inputPath,
+      name: 'test.dcm',
+      size: dicomBytes.length,
+    }
+
+    const result = await curateOne({
+      fileInfo,
+      outputTarget: { directory: makeDir('') },
+      mappingOptions: { curationSpec: pixelSpec, skipWrite: false },
+    })
+
+    expect(result.mappingRequired).toBe(true)
+
+    // Exactly one file was written, and it is NOT empty.
+    expect(written.size).toBe(1)
+    const outputBytes = [...written.values()][0]
+    expect(outputBytes.length).toBeGreaterThan(0)
+
+    // Original pixel bytes preserved verbatim at the tail.
+    const tail = outputBytes.slice(outputBytes.length - pixelBytes.length)
+    expect(Array.from(tail)).toEqual(Array.from(pixelBytes))
+  })
+
   it('does not double-append PixelData when the spec produces no header changes', async () => {
     // When modifyDicomHeader returns {} and dicomPS315EOptions is Off,
     // curateOne short-circuits to write() -> original file blob (byte-identical

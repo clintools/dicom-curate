@@ -477,7 +477,14 @@ export async function curateOne({
           create: true,
         })
         const writable = await fileHandle.createWritable()
-        await writable.write(modifiedBlob)
+        // Write via stream() rather than write(modifiedBlob): LazyCompositeBlob
+        // keeps an empty native Blob body and exposes its bytes only through the
+        // overridden stream(), which write(blob) bypasses (yielding 0-byte files).
+        for await (const chunk of readableStreamToAsyncIterable(
+          modifiedBlob.stream(),
+        )) {
+          await writable.write(chunk as unknown as Uint8Array<ArrayBuffer>)
+        }
         await writable.close()
       }
     } else if (typeof outputTarget?.directory === 'string') {
