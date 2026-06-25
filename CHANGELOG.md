@@ -1,3 +1,10 @@
+## [0.40.4](https://github.com/clintools/dicom-curate/compare/v0.40.3...v0.40.4) (2026-06-25)
+
+
+### Bug Fixes
+
+* stream blob to FileSystemWritableFileStream to avoid 0-byte output ([a6c7383](https://github.com/clintools/dicom-curate/commit/a6c73838156660cd7a8b3bff37f6bb3842706ef7))
+
 ## [0.40.3](https://github.com/clintools/dicom-curate/compare/v0.40.2...v0.40.3) (2026-06-12)
 
 
