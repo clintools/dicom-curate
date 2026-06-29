@@ -20,18 +20,14 @@
  * Walks every `.d.ts` under `dist/types` and, for each relative specifier in
  * `import ... from '...'`, `export ... from '...'` and dynamic `import('...')`:
  *   - leaves it alone if it already ends in `.js`, `.json`, `.cjs` or `.mjs`;
- *   - rewrites it to `<specifier>/index.js` when the target resolves to a
- *     directory containing an `index.d.ts`;
- *   - otherwise appends `.js`.
+ *   - appends `.js` when `<specifier>.d.ts` exists;
+ *   - rewrites it to `<specifier>/index.js` when the target is a directory
+ *     containing an `index.d.ts`;
+ *   - otherwise records it as unresolved and fails the build, so a stale or
+ *     mistyped relative import cannot silently ship a non-resolving `.d.ts`.
  */
 
-import {
-  existsSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -43,35 +39,39 @@ const TYPES_DIR = resolve(
 )
 
 // Matches the specifier in `from '...'` / `from "..."` and `import('...')`.
-// Group 1 = quote+specifier prefix we keep, group 2 = specifier, group 3 = closing quote.
 const SPECIFIER_RE = /(\bfrom\s+|\bimport\s*\(\s*)(['"])(\.\.?\/[^'"]*)(['"])/g
 
 const ALREADY_HAS_EXT = /\.(js|cjs|mjs|json)$/
 
-function rewriteSpecifier(fileDir: string, specifier: string): string {
+// Resolve a relative specifier to its rewritten form, or `null` when it cannot
+// be mapped to an emitted declaration. A sibling file is preferred over a
+// same-named directory, matching how Node ESM resolves an explicit `./foo.js`.
+function rewriteSpecifier(fileDir: string, specifier: string): string | null {
   if (ALREADY_HAS_EXT.test(specifier)) return specifier
 
-  // Does the specifier point at a directory with an index.d.ts?
-  const asDir = resolve(fileDir, specifier)
-  if (existsSync(asDir) && statSync(asDir).isDirectory()) {
-    return `${specifier}/index.js`
-  }
-  return `${specifier}.js`
+  const target = resolve(fileDir, specifier)
+  if (existsSync(`${target}.d.ts`)) return `${specifier}.js`
+  if (existsSync(join(target, 'index.d.ts'))) return `${specifier}/index.js`
+  return null
 }
 
-function processFile(filePath: string): boolean {
+function processFile(filePath: string, unresolved: string[]): boolean {
   const fileDir = dirname(filePath)
   const original = readFileSync(filePath, 'utf8')
   const updated = original.replace(
     SPECIFIER_RE,
     (
-      _match,
+      match: string,
       prefix: string,
       openQuote: string,
       specifier: string,
       closeQuote: string,
     ) => {
       const rewritten = rewriteSpecifier(fileDir, specifier)
+      if (rewritten === null) {
+        unresolved.push(`${filePath} -> ${specifier}`)
+        return match
+      }
       return `${prefix}${openQuote}${rewritten}${closeQuote}`
     },
   )
@@ -100,12 +100,23 @@ function main() {
     )
     process.exit(1)
   }
+  const unresolved: string[] = []
   let changed = 0
   let scanned = 0
   for (const filePath of walkDts(TYPES_DIR)) {
     scanned++
-    if (processFile(filePath)) changed++
+    if (processFile(filePath, unresolved)) changed++
   }
+
+  if (unresolved.length > 0) {
+    console.error(
+      `fixDtsExtensions: ${unresolved.length} relative specifier(s) do not resolve to an emitted declaration:`,
+    )
+    for (const entry of unresolved) console.error(`  ${entry}`)
+    console.error('Fix the corresponding relative import(s) in src/.')
+    process.exit(1)
+  }
+
   console.log(
     `fixDtsExtensions: scanned ${scanned} declaration file(s), rewrote ${changed}.`,
   )
