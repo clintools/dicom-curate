@@ -1,3 +1,10 @@
+## [0.40.5](https://github.com/clintools/dicom-curate/compare/v0.40.4...v0.40.5) (2026-06-29)
+
+
+### Bug Fixes
+
+* prevent deadlock and unhandled rejection when ReadableStream read fails mid-parse ([a45b794](https://github.com/clintools/dicom-curate/commit/a45b794fbd607571b5060944b33b2e406217c41e))
+
 ## [0.40.4](https://github.com/clintools/dicom-curate/compare/v0.40.3...v0.40.4) (2026-06-25)
 
 
