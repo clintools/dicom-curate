@@ -1,3 +1,11 @@
+## [0.40.6](https://github.com/clintools/dicom-curate/compare/v0.40.5...v0.40.6) (2026-06-30)
+
+
+### Bug Fixes
+
+* fail dts-extension fixup on unresolved specifiers ([c7d7463](https://github.com/clintools/dicom-curate/commit/c7d746381a69bea0b3db8c9a63a00672d0292cab))
+* make published .d.ts resolve under NodeNext/node16 ([d246dca](https://github.com/clintools/dicom-curate/commit/d246dca6777e9e98943a853a9b027e47cebd6539)), closes [#289](https://github.com/clintools/dicom-curate/issues/289)
+
 ## [0.40.5](https://github.com/clintools/dicom-curate/compare/v0.40.4...v0.40.5) (2026-06-29)
 
 
