@@ -27,3 +27,6 @@ yarn-error.log*
 pnpm-debug.log*
 .pnpm-store/*
 /tsx-*/
+
+# bundled output of the conformance baseline updater
+conformance/.update-conformance-baselines.mjs
