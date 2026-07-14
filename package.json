@@ -51,7 +51,7 @@
     "test": "vitest run --pool=forks --project unit",
     "test:e2e": "pnpm build:esm && vitest run --pool=forks --project e2e",
     "test:conformance": "vitest run --pool=forks --project conformance",
-    "update:conformance-baselines": "tsx scripts/update-conformance-baselines.ts",
+    "update:conformance-baselines": "esbuild scripts/update-conformance-baselines.ts --bundle --platform=node --format=esm --external:dicom-synth --outfile=conformance/.update-conformance-baselines.mjs && node conformance/.update-conformance-baselines.mjs",
     "test:coverage": "vitest run --pool=forks --project unit --coverage",
     "test:watch": "vitest",
     "lint": "eslint src --ext .ts,.tsx",
