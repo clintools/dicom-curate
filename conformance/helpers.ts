@@ -1,13 +1,7 @@
-import { mkdtempSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import {
-  SYNTHETIC_FIXTURES,
-  type SyntheticCtVariant,
-  writeSyntheticFixturesToDir,
-} from 'dicom-synth'
+import { type DatasetSpec, writeCollectionFromSpec } from 'dicom-synth'
 import { curateOne } from '../src/curateOne'
 import type { TCurationSpecification, TMappingOptions } from '../src/types'
 
@@ -23,19 +17,6 @@ export const syntheticBaselinesDir = join(
 )
 
 export const publicBaselinesDir = join(conformanceRoot, 'baselines/public')
-
-let syntheticFixturesDirCache: string | undefined
-
-/** Ephemeral synthetic DICOM files (from dicom-synth) */
-export function getSyntheticFixturesDir(): string {
-  if (!syntheticFixturesDirCache) {
-    syntheticFixturesDirCache = mkdtempSync(
-      join(tmpdir(), 'dc-conformance-synth-'),
-    )
-    writeSyntheticFixturesToDir(syntheticFixturesDirCache)
-  }
-  return syntheticFixturesDirCache
-}
 
 export function syntheticBaselinePath(fixtureId: string): string {
   return join(syntheticBaselinesDir, `${fixtureId}.dciodvfy-baseline.json`)
@@ -96,23 +77,29 @@ export type ConformanceFixtureCase = {
   id: string
   dicomPath: string
   baselinePath: string
-  variant: SyntheticCtVariant
 }
 
-type SyntheticFixtureCatalogEntry = {
-  filename: string
-  variant: SyntheticCtVariant
-  description: string
+// Deterministic conformance fixture set — one of each image conformance
+// flavour. Generated inline from a dicom-synth DatasetSpec
+export const CONFORMANCE_SPEC: DatasetSpec = {
+  seed: 1,
+  entries: [
+    { type: 'valid-image' },
+    { type: 'invalid-uid-image' },
+    { type: 'vendor-warnings-image' },
+  ],
 }
 
-export const syntheticConformanceCases: ConformanceFixtureCase[] = (
-  SYNTHETIC_FIXTURES as readonly SyntheticFixtureCatalogEntry[]
-).map(({ filename, variant }) => {
-  const id = filename.replace(/\.dcm$/, '')
-  return {
-    id,
-    dicomPath: join(getSyntheticFixturesDir(), filename),
-    baselinePath: syntheticBaselinePath(id),
-    variant,
-  }
-})
+export async function writeSyntheticConformanceFixtures(
+  dir: string,
+): Promise<ConformanceFixtureCase[]> {
+  const manifest = await writeCollectionFromSpec(CONFORMANCE_SPEC, dir)
+  return manifest.map(({ path, relativePath }) => {
+    const id = basename(relativePath).replace(/\.dcm$/, '')
+    return {
+      id,
+      dicomPath: path,
+      baselinePath: syntheticBaselinePath(id),
+    }
+  })
+}

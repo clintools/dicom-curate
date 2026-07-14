@@ -103,8 +103,8 @@ importers:
         specifier: ^14.0.3
         version: 14.0.3
       dicom-synth:
-        specifier: ^0.1.0
-        version: 0.1.0(dcmjs@0.51.1)
+        specifier: ^2.0.0
+        version: 2.0.0(dcmjs@0.51.1)
       esbuild:
         specifier: ^0.20.0
         version: 0.20.2
@@ -2135,8 +2135,8 @@ packages:
     resolution: {integrity: sha512-3sUqbMEc77XqpdNO7FRyRog+eW3ph+GYCbj+rK+uYyRMuwsVy0rMiVtPn+QJlKFvWP/1PYpapqYn0Me2knFn+A==}
     engines: {node: '>=0.10.0'}
 
-  dicom-synth@0.1.0:
-    resolution: {integrity: sha512-I7wpIzKb90531559XSI75ipdw7KJBvIM2gz1n+T3waoLuXBYRE/YaQJlAIwDpuZkHDYhE8Qdgh4KlZfY/vzOkg==}
+  dicom-synth@2.0.0:
+    resolution: {integrity: sha512-ELGKXyM4Ubf4cJozkpGzoRY/oW8OgbFE02+HL5IQHLe3qXiyCbJaZLB8vVIK2KtkeCQXLlys+OkexMAyN6A0Ew==}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -6238,7 +6238,7 @@ snapshots:
 
   deepmerge@4.3.1: {}
 
-  dicom-synth@0.1.0(dcmjs@0.51.1):
+  dicom-synth@2.0.0(dcmjs@0.51.1):
     dependencies:
       dcmjs: 0.51.1
 
