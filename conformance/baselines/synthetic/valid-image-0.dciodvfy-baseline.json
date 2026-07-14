@@ -1,5 +1,5 @@
 {
-  "label": "valid-uid-ct-0.dcm",
+  "label": "valid-image-0.dcm",
   "violations": [
     "Error::</AccessionNumber(0008,0050)>::Missing attribute for Type 2 Required - Module=<GeneralStudy>",
     "Error::</AcquisitionNumber(0020,0012)>::Missing attribute for Type 2 Required - Module=<CTImage>",
