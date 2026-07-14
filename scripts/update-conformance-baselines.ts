@@ -21,32 +21,25 @@ import {
   defaultPublicCasesPath,
   fetchPublicCaseToCache,
   loadCaseById,
-  SYNTHETIC_FIXTURES,
-  writeSyntheticFixturesToDir,
 } from 'dicom-synth'
 import type { ConformanceBaseline } from '../conformance/baseline'
 import { runDciodvfy, violationSet } from '../conformance/dciodvfy'
 import {
   publicBaselinePath,
   repoRoot,
-  syntheticBaselinePath,
+  writeSyntheticConformanceFixtures,
 } from '../conformance/helpers'
 import { resolveLocalConformanceCases } from '../conformance/localFixtures'
 import { resolveConformanceBin } from '../conformance/resolveBin'
 
-function buildSyntheticTargets() {
+async function buildSyntheticTargets() {
   const syntheticDir = mkdtempSync(join(tmpdir(), 'dc-baseline-synth-'))
-  writeSyntheticFixturesToDir(syntheticDir)
-  return SYNTHETIC_FIXTURES.map(
-    ({ filename }: (typeof SYNTHETIC_FIXTURES)[number]) => {
-      const id = filename.replace(/\.dcm$/, '')
-      return {
-        label: filename,
-        dicomPath: join(syntheticDir, filename),
-        baselinePath: syntheticBaselinePath(id),
-      }
-    },
-  )
+  const cases = await writeSyntheticConformanceFixtures(syntheticDir)
+  return cases.map((c) => ({
+    label: `${c.id}.dcm`,
+    dicomPath: c.dicomPath,
+    baselinePath: c.baselinePath,
+  }))
 }
 
 function writeBaseline(path: string, baseline: ConformanceBaseline) {
@@ -68,7 +61,7 @@ async function main() {
     process.exit(1)
   }
 
-  const syntheticTargets = buildSyntheticTargets()
+  const syntheticTargets = await buildSyntheticTargets()
 
   for (const t of syntheticTargets) {
     const violations = [...violationSet(runDciodvfy(t.dicomPath, bin))].sort()
