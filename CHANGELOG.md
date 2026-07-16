@@ -1,3 +1,10 @@
+## [0.40.7](https://github.com/clintools/dicom-curate/compare/v0.40.6...v0.40.7) (2026-07-16)
+
+
+### Bug Fixes
+
+* bundle the baseline updater to fix ESM/CJS interop ([f7df232](https://github.com/clintools/dicom-curate/commit/f7df232906d3e7ef6e4f07ef9aabe454d32d504e))
+
 ## [0.40.6](https://github.com/clintools/dicom-curate/compare/v0.40.5...v0.40.6) (2026-06-30)
 
 
