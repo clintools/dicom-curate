@@ -60,8 +60,18 @@ jobs:
       - name: E2E smoke
         run: pnpm test:e2e
 
+      - name: Cache public conformance fixtures
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/dicom-synth-testcases
+          key: dicom-public-fixtures-${{ hashFiles('conformance/public-cases.json') }}
+          restore-keys: |
+            dicom-public-fixtures-
+
       - name: Conformance tests
         run: pnpm test:conformance
+        env:
+          RUN_PUBLIC_CONFORMANCE: "1"
 
       - name: Semantic Release Dry Run
         run: npx semantic-release --dry-run
