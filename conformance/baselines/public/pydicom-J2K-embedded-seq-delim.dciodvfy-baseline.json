@@ -1,0 +1,31 @@
+{
+  "label": "pydicom-J2K-embedded-seq-delim",
+  "violations": [
+    "Error::</Laterality(0020,0060)>::Missing attribute for Type 2C Conditional - Module=<GeneralSeries>",
+    "Warning::</AcquisitionTerminationCondition(0018,0071)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</ActualFrameDuration(0018,1242)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</BodyPartExamined(0018,0015)[1]>::Unrecognized defined term = <WHOLE BODY>",
+    "Warning::</CorrectedImage(0028,0051)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</CountRate(0018,1243)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</CountsAccumulated(0018,0070)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</DetectorVector(0054,0020)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</EnergyWindowVector(0054,0010)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</FrameIncrementPointer(0028,0009)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</ImageID(0054,0400)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</NumberOfDetectors(0054,0021)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</NumberOfEnergyWindows(0054,0011)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</NumberOfFrames(0028,0008)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</OtherPatientIDs(0010,1000)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</OtherPatientIDs(0010,1000)>::Retired attribute",
+    "Warning::</PatientSize(0010,1020)[1]>::Value is zero",
+    "Warning::</PatientWeight(0010,1030)[1]>::Value is zero",
+    "Warning::</ScanLength(0018,1302)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</ScanVelocity(0018,1300)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</TableHeight(0018,1130)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</TableTraverse(0018,1131)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</WholeBodyTechnique(0018,1301)>::Attribute is not present in standard DICOM IOD",
+    "Warning::Explicit value representation doesn't match data dictionary - [FD] Dictionary [SL]",
+    "Warning::Explicit value representation doesn't match data dictionary - [LO] Dictionary [PN]"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}

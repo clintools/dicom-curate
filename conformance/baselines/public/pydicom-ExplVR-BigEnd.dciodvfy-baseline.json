@@ -1,0 +1,25 @@
+{
+  "label": "pydicom-ExplVR-BigEnd",
+  "violations": [
+    "Error::</AccessionNumber(0008,0050)>::Missing attribute for Type 2 Required - Module=<GeneralStudy>",
+    "Error::</Laterality(0020,0060)>::Missing attribute for Type 2C Conditional - Module=<GeneralSeries>",
+    "Error::</PatientBirthDate(0010,0030)>::Missing attribute for Type 2 Required - Module=<Patient>",
+    "Error::</PatientID(0010,0020)>::Missing attribute for Type 2 Required - Module=<Patient>",
+    "Error::</PatientOrientation(0020,0020)>::Missing attribute for Type 2C Conditional - Module=<GeneralImage>",
+    "Error::</PatientSex(0010,0040)>::Missing attribute for Type 2 Required - Module=<Patient>",
+    "Error::</ReferringPhysicianName(0008,0090)>::Missing attribute for Type 2 Required - Module=<GeneralStudy>",
+    "Error::</StudyDate(0008,0020)[1]>::Value invalid for this VR [DA] = <1997.04.24>",
+    "Error::</StudyID(0020,0010)>::Missing attribute for Type 2 Required - Module=<GeneralStudy>",
+    "Error::</StudyTime(0008,0030)[1]>::Value invalid for this VR [TM] = <14:04:38>",
+    "Warning::</(0008,0000)>::Retired attribute",
+    "Warning::</(0010,0000)>::Retired attribute",
+    "Warning::</(0018,0000)>::Retired attribute",
+    "Warning::</(0020,0000)>::Retired attribute",
+    "Warning::</(0028,0000)>::Retired attribute",
+    "Warning::</(7fe0,0000)>::Retired attribute",
+    "Warning::</PatientID(0010,0020)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</PatientName(0010,0010)[1]>::Value dubious for this VR [PN] = <Anonymized> - Retired Person Name form",
+    "Warning::</StudyID(0020,0010)>::Missing attribute or value that would be needed to build DICOMDIR"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}

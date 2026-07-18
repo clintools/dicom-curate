@@ -1,0 +1,12 @@
+{
+  "label": "pydicom-MR-truncated",
+  "violations": [
+    "Error - Dicom dataset read failed",
+    "Error::</PixelData(7fe0,0010)>::Missing attribute for Type 1C Conditional - Module=<ImagePixel>",
+    "Error::while reading unencapsulated Pixel Data",
+    "Warning::</Laterality(0020,0060)>::is only permitted to be empty when actually unknown; should be absent (not empty) if an unpaired body part, and have a value if a paired body part",
+    "Warning::</NameOfPhysiciansReadingStudy(0008,1060)[1]>::Value dubious for this VR [PN] = <----> - Retired Person Name form",
+    "Warning::</OperatorsName(0008,1070)[1]>::Value dubious for this VR [PN] = <----> - Retired Person Name form"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}
