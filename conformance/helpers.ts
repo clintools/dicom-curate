@@ -9,8 +9,6 @@ export { resolveConformanceBin } from './resolveBin'
 
 const conformanceRoot = dirname(fileURLToPath(import.meta.url))
 
-export const repoRoot = join(conformanceRoot, '..')
-
 export const syntheticBaselinesDir = join(
   conformanceRoot,
   'baselines/synthetic',

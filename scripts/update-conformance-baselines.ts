@@ -17,19 +17,15 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import {
-  defaultPublicCasesPath,
-  fetchPublicCaseToCache,
-  loadCaseById,
-} from 'dicom-synth'
+import { fetchPublicCaseToCache } from 'dicom-synth'
 import type { ConformanceBaseline } from '../conformance/baseline'
 import { runDciodvfy, violationSet } from '../conformance/dciodvfy'
 import {
   publicBaselinePath,
-  repoRoot,
   writeSyntheticConformanceFixtures,
 } from '../conformance/helpers'
 import { resolveLocalConformanceCases } from '../conformance/localFixtures'
+import { loadPublicCases } from '../conformance/publicCases'
 import { resolveConformanceBin } from '../conformance/resolveBin'
 
 async function buildSyntheticTargets() {
@@ -73,17 +69,20 @@ async function main() {
   }
 
   if (!process.env.SKIP_PUBLIC_CONFORMANCE_BASELINES) {
-    const publicCaseId = 'pydicom-CT-small'
-    const catalogPath = defaultPublicCasesPath()
-    const record = loadCaseById(catalogPath, publicCaseId)
-    const cacheRoot = join(repoRoot, '.cache', 'conformance-baselines')
-    const dicomPath = await fetchPublicCaseToCache(record, cacheRoot)
-    const violations = [...violationSet(runDciodvfy(dicomPath, bin))].sort()
-    writeBaseline(publicBaselinePath(publicCaseId), {
-      label: publicCaseId,
-      violations,
-      notes: 'Regenerate with pnpm update:conformance-baselines',
-    })
+    for (const record of loadPublicCases()) {
+      if (record.dciodvfy_skip) {
+        console.log(`skipped ${record.id} (dciodvfy_skip)`)
+        continue
+      }
+      // Default cache root — shared with the public conformance tests.
+      const dicomPath = await fetchPublicCaseToCache(record)
+      const violations = [...violationSet(runDciodvfy(dicomPath, bin))].sort()
+      writeBaseline(publicBaselinePath(record.id), {
+        label: record.id,
+        violations,
+        notes: 'Regenerate with pnpm update:conformance-baselines',
+      })
+    }
   } else {
     console.log(
       'skipped public baselines (SKIP_PUBLIC_CONFORMANCE_BASELINES=1)',

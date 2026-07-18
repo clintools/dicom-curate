@@ -19,6 +19,10 @@ export type DifferentialFixture = {
   id: string
   dicomPath: string
   baselinePath?: string
+  /** Skip this fixture's tests (e.g. corpus gated behind an env flag). */
+  skip?: boolean
+  /** Documented parser gap: the passthrough test pins the rejection. */
+  expectCurateRejection?: boolean
 }
 
 function assertPassthroughNonRegression(
@@ -47,7 +51,7 @@ export function registerDifferentialConformanceTests(
       !!fixture.baselinePath && existsSync(fixture.baselinePath)
 
     describe(fixture.id, () => {
-      it.skipIf(!bin || !hasBaseline)(
+      it.skipIf(!bin || fixture.skip || !hasBaseline)(
         'live before matches committed baseline (dciodvfy version drift)',
         () => {
           const baseline = baselineViolationSet(fixture.baselinePath!)
@@ -69,14 +73,17 @@ export function registerDifferentialConformanceTests(
         },
       )
 
-      it.skipIf(!bin)('same file has empty introduced set', () => {
-        const v = runDciodvfy(fixture.dicomPath, bin!)
-        const { ok, introduced } = isConformanceNonRegression(v, v)
-        expect(ok).toBe(true)
-        expect(introduced).toEqual([])
-      })
+      it.skipIf(!bin || fixture.skip)(
+        'same file has empty introduced set',
+        () => {
+          const v = runDciodvfy(fixture.dicomPath, bin!)
+          const { ok, introduced } = isConformanceNonRegression(v, v)
+          expect(ok).toBe(true)
+          expect(introduced).toEqual([])
+        },
+      )
 
-      it.skipIf(!bin)(
+      it.skipIf(!bin || fixture.skip)(
         'byte-identical copy introduces no new violations',
         async () => {
           const before = runDciodvfy(fixture.dicomPath, bin!)
@@ -93,26 +100,40 @@ export function registerDifferentialConformanceTests(
         },
       )
 
-      it.skipIf(!bin)(
+      it.skipIf(!bin || fixture.skip)(
         'passthrough curate introduces no new dciodvfy violations',
         async () => {
-          const baseline = hasBaseline
-            ? baselineViolationSet(fixture.baselinePath!)
-            : undefined
-          const before = runDciodvfy(fixture.dicomPath, bin!)
           const outDir = await mkdtemp(
             join(tmpdir(), `${tempPrefix}-curate-${fixture.id}-`),
           )
-          const curated = await runPassthroughCurate(fixture.dicomPath, outDir)
-          const after = runDciodvfy(curated, bin!)
-          const { ok, introduced } = assertPassthroughNonRegression(
-            before,
-            after,
-            baseline,
-          )
-          expect(ok, introduced.join('\n')).toBe(true)
-          expect(introduced).toEqual([])
-          await rm(outDir, { recursive: true, force: true })
+          try {
+            if (fixture.expectCurateRejection) {
+              // Pins the documented parser gap: if curate learns to handle
+              // this file, this fails and the flag should be removed.
+              await expect(
+                runPassthroughCurate(fixture.dicomPath, outDir),
+              ).rejects.toThrow()
+              return
+            }
+            const baseline = hasBaseline
+              ? baselineViolationSet(fixture.baselinePath!)
+              : undefined
+            const before = runDciodvfy(fixture.dicomPath, bin!)
+            const curated = await runPassthroughCurate(
+              fixture.dicomPath,
+              outDir,
+            )
+            const after = runDciodvfy(curated, bin!)
+            const { ok, introduced } = assertPassthroughNonRegression(
+              before,
+              after,
+              baseline,
+            )
+            expect(ok, introduced.join('\n')).toBe(true)
+            expect(introduced).toEqual([])
+          } finally {
+            await rm(outDir, { recursive: true, force: true })
+          }
         },
       )
     })
