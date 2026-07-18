@@ -1,0 +1,8 @@
+{
+  "label": "pydicom-J2K-pixelrep-mismatch",
+  "violations": [
+    "Warning::</ImageType(0008,0008)[4]>::Unrecognized defined term = <NORMAL>",
+    "Warning::</PatientName(0010,0010)[1]>::Value dubious for this VR [PN] = <JXD191021006> - Retired Person Name form"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}

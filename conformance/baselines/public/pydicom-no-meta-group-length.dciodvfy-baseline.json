@@ -1,0 +1,17 @@
+{
+  "label": "pydicom-no-meta-group-length",
+  "violations": [
+    "Error - Information Object Not found",
+    "Error::</ImplementationVersionName(0002,0013)>::Value invalid for this VR [SH] - Trailing character invalid for this VR = '' (0)",
+    "Error::</MediaStorageSOPClassUID(0002,0002)>::MediaStorageSOPClassUID but missing SOPClassUID and not a directory",
+    "Error::</MediaStorageSOPInstanceUID(0002,0003)>::MediaStorageSOPInstanceUID but missing SOPInstanceUID and not a directory",
+    "Warning::</FileMetaInformationVersion(0002,0001)>::Bad FileMetaInformationVersion Attribute - wrong VR, length or not 0x00,0x01",
+    "Warning::</Modality(0008,0060)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</PatientID(0010,0020)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</SeriesNumber(0020,0011)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</StudyDate(0008,0020)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</StudyID(0020,0010)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</StudyTime(0008,0030)>::Missing attribute or value that would be needed to build DICOMDIR"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}
