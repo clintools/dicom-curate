@@ -1,0 +1,127 @@
+{
+  "cases": [
+    {
+      "id": "pydicom-badVR",
+      "violation_class": "invalid-vr",
+      "dciodvfy_skip": true,
+      "notes": "MIT-licensed pydicom test file. dciodvfy aborts (assertion) on this encoding; use for fetch/cache only.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/badVR.dcm"
+      },
+      "sha256": "d12583df0cf66146256238b4cada266956a317c0546c7516cb36f56982ce85b2"
+    },
+    {
+      "id": "pydicom-CT-small",
+      "violation_class": "real-world-warnings",
+      "notes": "MIT-licensed pydicom CT_small.dcm; dciodvfy reports warnings on a mostly-valid file.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/CT_small.dcm"
+      },
+      "sha256": "3dd31e5cc835b3f2cdd46c9da1982f59251e78518fefa8163d914631c66437d6"
+    },
+    {
+      "id": "pydicom-ExplVR-BigEnd",
+      "violation_class": "big-endian-transfer-syntax",
+      "notes": "MIT-licensed pydicom ExplVR_BigEnd.dcm; retired Explicit VR Big Endian transfer syntax with multiple errors and warnings.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/ExplVR_BigEnd.dcm"
+      },
+      "sha256": "42eb61ea5650f1064e52d48019cd87b118e52cf4dfbc8fa57427ed2ed4c036ea"
+    },
+    {
+      "id": "pydicom-image-dfl",
+      "violation_class": "deflated-transfer-syntax",
+      "notes": "MIT-licensed pydicom image_dfl.dcm; Deflated Explicit VR Little Endian transfer syntax.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/image_dfl.dcm"
+      },
+      "sha256": "0029ebbba17e7c6f081408d433cd28b5d1cfee0eeb4cff509b4d972ffa9daf27"
+    },
+    {
+      "id": "pydicom-J2K-pixelrep-mismatch",
+      "violation_class": "j2k-pixel-representation-mismatch",
+      "notes": "MIT-licensed pydicom J2K_pixelrep_mismatch.dcm; JPEG 2000 codestream pixel representation disagrees with the dataset.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/J2K_pixelrep_mismatch.dcm"
+      },
+      "sha256": "2df92c523d36639e4d88f892f47e4f6616c48ab017a445a6241ffe38b2d07bbf"
+    },
+    {
+      "id": "pydicom-J2K-embedded-seq-delim",
+      "violation_class": "embedded-sequence-delimiter",
+      "notes": "MIT-licensed pydicom JPEG2000-embedded-sequence-delimiter.dcm; sequence delimiter bytes embedded inside encapsulated pixel data.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/JPEG2000-embedded-sequence-delimiter.dcm"
+      },
+      "sha256": "b1fd9301d9d0cbe03ee35843b1c192d040eee7dc43bf97bb1e96ba3ad602d87f"
+    },
+    {
+      "id": "pydicom-MR-truncated",
+      "violation_class": "truncated-pixel-data",
+      "notes": "MIT-licensed pydicom MR_truncated.dcm; pixel data shorter than the declared length.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/MR_truncated.dcm"
+      },
+      "sha256": "a3f26c279dd214951d32a1548362df3c93f9730135fa893a01552c0e632f587f"
+    },
+    {
+      "id": "pydicom-SC-rgb-small-odd",
+      "violation_class": "odd-length-value",
+      "notes": "MIT-licensed pydicom SC_rgb_small_odd.dcm; odd-length pixel data value.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/SC_rgb_small_odd.dcm"
+      },
+      "sha256": "4aca361ab330f57f60e6b1e3b31dcd834a512bee8a4246bbe1d151011c47e031"
+    },
+    {
+      "id": "pydicom-nested-priv-SQ",
+      "violation_class": "nested-private-sequences",
+      "notes": "MIT-licensed pydicom nested_priv_SQ.dcm; private sequences nested inside private sequences.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/nested_priv_SQ.dcm"
+      },
+      "sha256": "5cc694964c10cb02b501f02585909a7f4ef4656c07a89e603d1833629919c5c6"
+    },
+    {
+      "id": "pydicom-no-meta-group-length",
+      "violation_class": "missing-meta-group-length",
+      "notes": "MIT-licensed pydicom no_meta_group_length.dcm; file meta information without a group length element.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/no_meta_group_length.dcm"
+      },
+      "sha256": "76c6af82b4246285f6e5b53f150af44b9b7e2afe7ae25e1b604c549ba3d16733"
+    },
+    {
+      "id": "pydicom-UN-sequence",
+      "violation_class": "un-vr-sequence",
+      "curate_skip": true,
+      "notes": "MIT-licensed pydicom UN_sequence.dcm; sequence encoded with VR UN. dcmjs cannot parse it (curateOne rejects the file), so only the dciodvfy drift check runs.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/UN_sequence.dcm"
+      },
+      "sha256": "09f033e0d40a18c4ade0b08b8d318ab6deb684a84f503d4ec4f00908883dd431"
+    },
+    {
+      "id": "pydicom-meta-missing-tsyntax",
+      "violation_class": "missing-meta-transfer-syntax",
+      "curate_skip": true,
+      "notes": "MIT-licensed pydicom meta_missing_tsyntax.dcm; file meta without TransferSyntaxUID. dcmjs cannot parse it (curateOne rejects the file), so only the dciodvfy drift check runs.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/meta_missing_tsyntax.dcm"
+      },
+      "sha256": "075dc51483951bb651ddafd77e803101fcee21ab656ca87d6e531eaeaeb440f2"
+    }
+  ]
+}
