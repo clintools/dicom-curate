@@ -3,10 +3,7 @@
   "violations": [
     "Error::</SourceImageSequence(0008,2112)[1]/ReferencedSOPClassUID(0008,1150)>::Missing attribute for Type 1 Required - Module=<SOPInstanceReferenceMacro>",
     "Error::</SourceImageSequence(0008,2112)[1]/ReferencedSOPInstanceUID(0008,1155)>::Missing attribute for Type 1 Required - Module=<SOPInstanceReferenceMacro>",
-    "Warning::</Laterality(0020,0060)>::is only permitted to be empty when actually unknown; should be absent (not empty) if an unpaired body part, and have a value if a paired body part",
-    "Warning::</NumberOfFrames(0028,0008)>::Attribute is not present in standard DICOM IOD",
-    "Warning::</SourceImageSequence(0008,2112)[1]/SOPClassUID(0008,0016)>::Attribute is not present in standard DICOM IOD",
-    "Warning::</SourceImageSequence(0008,2112)[1]/SOPInstanceUID(0008,0018)>::Attribute is not present in standard DICOM IOD"
+    "Warning::</Laterality(0020,0060)>::is only permitted to be empty when actually unknown; should be absent (not empty) if an unpaired body part, and have a value if a paired body part"
   ],
   "notes": "Regenerate with pnpm update:conformance-baselines"
 }

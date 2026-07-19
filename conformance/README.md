@@ -132,6 +132,10 @@ Runs only when `CONFORMANCE_LOCAL_PATH` is set (resolved inside the suite, not a
 
 Some `dciodvfy` warnings are disputed or context-dependent. Regexes in `allowlist.ts` (`CONFORMANCE_ALLOWLIST`) are subtracted in `violationSet` before comparisons.
 
+| Entry | Why suppressed |
+|-------|----------------|
+| `Warning: … Attribute is not present in standard DICOM IOD` | Depends on the dciodvfy build's IOD data dictionary — the warning set differs between dicom3tools versions (e.g. local install vs CI's apt package), so it can never match a pinned baseline. Trade-off: a curate change that *added* a non-IOD attribute would not be flagged; warning-level only. |
+
 **Remember:** `dciodvfy` remains a regression aid, not a certification tool.
 
 ## dicom3tools (required binary)
