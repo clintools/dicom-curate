@@ -300,6 +300,11 @@ export type TParser = {
   getFilePathComp: (component: string | number | symbol) => string
   getMapping: ((value: string) => string | number) | undefined
   getDicom: (attrName: string) => any
+  // Reads the file meta information group (group 0002) — not the dataset. Use
+  // for MediaStorageSOPClassUID, which is where a DICOMDIR declares its SOP class.
+  // Returns the ORIGINAL value even in postExclude, where getDicom has already
+  // switched to de-identified values. Non-string meta values read as undefined.
+  getMetaDicom: (attrName: string) => string | undefined
   missingDicom: (attrName: string) => boolean
   protectUid: (uid: string) => string
   addDays: (dicomDateString: string, offsetDays: number) => string

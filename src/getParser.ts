@@ -15,6 +15,7 @@ export default function getParser(
   dicomPS315EOptions: TCurationSpecification['dicomPS315EOptions'],
   columnMappings?: TColumnMappings,
   additionalData?: TCurationSpecification['additionalData'],
+  naturalMetaData?: TNaturalData,
 ): TParser {
   function protectUid(uid: string): string {
     let protectedUid = uid
@@ -89,6 +90,24 @@ export default function getParser(
           }
         })()
 
+  // Reads the file meta information group (group 0002), which getDicom cannot
+  // see because it operates on the dataset alone. Needed to identify a file by
+  // MediaStorageSOPClassUID (e.g. for a DICOMDIR disguised as a .DCM).
+  //
+  // Values are always the ORIGINAL ones, even in postExclude where getDicom has
+  // already switched to de-identified values — the meta group is captured once
+  // and never re-read. Only string values are returned; a non-string meta value
+  // (e.g. the OB FileMetaInformationVersion) reads as undefined.
+  function getMetaDicom(attrName: string): string | undefined {
+    if (!naturalMetaData) return undefined
+    if (attrName in dcmjs.data.DicomMetaDictionary.dictionary) {
+      // if in hex like "(0002,0002)", convert to text key
+      attrName = dcmjs.data.DicomMetaDictionary.dictionary[attrName].name
+    }
+    const value = _get(naturalMetaData, attrName)
+    return typeof value === 'string' ? value : undefined
+  }
+
   function missingDicom(attrName: string) {
     const value = getDicom(attrName)
     return typeof value === 'undefined' || value === ''
@@ -99,6 +118,7 @@ export default function getParser(
     getFilePathComp,
     getMapping,
     getDicom,
+    getMetaDicom,
     missingDicom,
     protectUid,
     // TODO: Phase this out in favor of ISO8601 duration handling.

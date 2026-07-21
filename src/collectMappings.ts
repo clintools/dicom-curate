@@ -34,6 +34,12 @@ export default function collectMappings(
   const naturalData = dcmjs.data.DicomMetaDictionary.naturalizeDataset(
     dicomData.dict,
   )
+  // File meta group (0002), kept separate from the dataset so preExclude can
+  // reach MediaStorageSOPClassUID. Absent on a file that was not read from
+  // Part 10 bytes, so guard rather than assume.
+  const naturalMetaData = dicomData.meta
+    ? dcmjs.data.DicomMetaDictionary.naturalizeDataset(dicomData.meta)
+    : undefined
   mapResults.sourceInstanceUID = naturalData.SOPInstanceUID
 
   const finalSpec = composeSpecs(mappingOptions.curationSpec())
@@ -46,13 +52,19 @@ export default function collectMappings(
     finalSpec.dicomPS315EOptions,
     mappingOptions.columnMappings,
     finalSpec.additionalData,
+    naturalMetaData,
   )
 
-  // preExclude: original DICOM tags visible via parser.getDicom
+  // preExclude: original DICOM tags visible via parser.getDicom / parser.getMetaDicom
   let preExcludeError: string | undefined
   try {
     if (finalSpec.preExclude?.(parser)) {
       mapResults.excluded = 'pre'
+      // Name only, never the full path: anomalies are shared with the
+      // server-bound log, and the raw path is carried in fileInfo instead.
+      mapResults.anomalies.push(
+        `Skipped pre-excluded file: ${parser.getFilePathComp(parser.FILENAME)}`,
+      )
       return [naturalData, mapResults]
     }
   } catch (e) {
@@ -157,7 +169,8 @@ export default function collectMappings(
     }
   }
 
-  // postExclude: output path is finalised; parser.getDicom() returns de-identified values
+  // postExclude: output path is finalised; parser.getDicom() returns de-identified
+  // values — but parser.getMetaDicom() still returns the original meta group.
   try {
     if (
       finalSpec.postExclude?.({
@@ -166,6 +179,9 @@ export default function collectMappings(
       })
     ) {
       mapResults.excluded = 'post'
+      mapResults.anomalies.push(
+        `Skipped post-excluded file: ${parser.getFilePathComp(parser.FILENAME)}`,
+      )
       return [naturalData, mapResults]
     }
   } catch (e) {
