@@ -1,0 +1,28 @@
+{
+  "label": "gdcm-undef-item-wrong-vl",
+  "violations": [
+    "Error::</AcquisitionComments(0018,4000)>::Value invalid for this VR [LT] - Trailing character invalid for this VR = '' (0)",
+    "Error::</FrameOfReferenceUID(0020,0052)>::Missing attribute for Type 1 Required - Module=<FrameOfReference>",
+    "Error::</ImageType(0008,0008)>::A value is required for value 3 in MR Images",
+    "Error::</ImageType(0008,0008)>::Value invalid for this VR [CS] - Trailing character invalid for this VR = '' (0)",
+    "Error::</InstitutionName(0008,0080)>::Value invalid for this VR [LO] - Trailing character invalid for this VR = '' (0)",
+    "Error::</InversionTime(0018,0082)>::Attribute present when condition unsatisfied (which may not be present otherwise) for Type 2C Conditional - Module=<MRImage>",
+    "Error::</Manufacturer(0008,0070)>::Value invalid for this VR [LO] - Trailing character invalid for this VR = '' (0)",
+    "Error::</MediaStorageSOPClassUID(0002,0002)>::MediaStorageSOPClassUID different from SOPClassUID",
+    "Error::</MediaStorageSOPInstanceUID(0002,0003)>::MediaStorageSOPInstanceUID different from SOPInstanceUID",
+    "Error::</PixelSpacing(0028,0030)>::Value invalid for this VR [DS] - Trailing character invalid for this VR = '' (0)",
+    "Error::</SoftwareVersions(0018,1020)>::Value invalid for this VR [LO] - Trailing character invalid for this VR = '' (0)",
+    "Error::</StationName(0008,1010)>::Value invalid for this VR [SH] - Trailing character invalid for this VR = '' (0)",
+    "Warning::</(7fe0,0000)>::Retired attribute",
+    "Warning::</AcquisitionComments(0018,4000)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</AcquisitionComments(0018,4000)>::Retired attribute",
+    "Warning::</EchoTrainLength(0018,0091)[1]>::Value is zero",
+    "Warning::</FileMetaInformationVersion(0002,0001)>::Bad FileMetaInformationVersion Attribute - wrong VR, length or not 0x00,0x01",
+    "Warning::</Laterality(0020,0060)>::is only permitted to be empty when actually unknown; should be absent (not empty) if an unpaired body part, and have a value if a paired body part",
+    "Warning::</PatientName(0010,0010)[1]>::Value dubious for this VR [PN] = <TODO> - Retired Person Name form",
+    "Warning::</ScanOptions(0018,0022)[1]>::Unrecognized defined term = <FAST_GEMS>",
+    "Warning::</ScanOptions(0018,0022)[2]>::Unrecognized defined term = <VB_GEMS>",
+    "Warning::Group 0x7fe0 specified as 0x2000c actually 0x20008"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}
