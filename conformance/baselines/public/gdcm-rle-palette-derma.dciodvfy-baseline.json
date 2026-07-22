@@ -1,0 +1,13 @@
+{
+  "label": "gdcm-rle-palette-derma",
+  "violations": [
+    "Error::</FileMetaInformationGroupLength(0002,0000)>::Missing attribute for Type 1 Required - Module=<FileMetaInformation>",
+    "Error::</Laterality(0020,0060)>::Missing attribute for Type 2C Conditional - Module=<GeneralSeries>",
+    "Error::</MediaStorageSOPInstanceUID(0002,0003)>::MediaStorageSOPInstanceUID different from SOPInstanceUID",
+    "Error::</PatientOrientation(0020,0020)>::Missing attribute for Type 2C Conditional - Module=<GeneralImage>",
+    "Warning::</NumberOfFrames(0028,0008)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</PhotometricInterpretation(0028,0004)[1]>::VOI LUT Module (WindowCenter and WindowWidth) not appropriate for non-grayscale images = <RGB>",
+    "Warning::</ReferringPhysicianName(0008,0090)[1]>::Value dubious for this VR [PN] = <Amministratore PCCerizza> - Retired Person Name form"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}

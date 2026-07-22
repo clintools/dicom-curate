@@ -1,0 +1,17 @@
+{
+  "label": "gdcm-missing-icon-pixeldata",
+  "violations": [
+    "Error::</IconImageSequence(0088,0200)[1]/PixelData(7fe0,0010)>::Missing attribute for Type 1 Required - Module=<IconImageSequenceMacro>",
+    "Error::</PixelAspectRatio(0028,0034)>::PixelAspectRatio may not be present when it has a ratio of 1:1 = <1\\1>",
+    "Error::</PixelAspectRatio(0028,0034)>::Shall not be present when PixelSpacing is present",
+    "Warning::</(140d,1000)>::Private tag without owner",
+    "Warning::</(160d,1000)>::Private tag without owner",
+    "Warning::</(160d,1001)>::Private tag without owner",
+    "Warning::</(170d,1000)>::Private tag without owner",
+    "Warning::</ImageType(0008,0008)[4]>::Unrecognized defined term = <CT_SOM5 TOP>",
+    "Warning::</PatientName(0010,0010)[1]>::Value dubious for this VR [PN] = <0006001> - Retired Person Name form",
+    "Warning::</RequestedProcedureDescription(0032,1060)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</StorageMediaFileSetUID(0088,0140)>::Attribute is not present in standard DICOM IOD"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}

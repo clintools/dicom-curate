@@ -122,6 +122,88 @@
         "url": "https://raw.githubusercontent.com/pydicom/pydicom/v3.0.1/src/pydicom/data/test_files/meta_missing_tsyntax.dcm"
       },
       "sha256": "075dc51483951bb651ddafd77e803101fcee21ab656ca87d6e531eaeaeb440f2"
+    },
+    {
+      "id": "gdcm-acr-nema-libido",
+      "violation_class": "acr-nema-legacy",
+      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) LIBIDO-8-ACR_NEMA-Lena_128_128.acr; legacy ACR-NEMA (pre-DICOM) with no File Meta Information — dciodvfy reports 'Information Object Not found'.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/LIBIDO-8-ACR_NEMA-Lena_128_128.acr"
+      },
+      "sha256": "62c75c553303781ba986c12650f3bc75f3669de55544035d1006c715e4460c31"
+    },
+    {
+      "id": "gdcm-rle-palette-derma",
+      "violation_class": "rle-palette-color",
+      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) DermaColorLossLess.dcm; RLE-lossless palette-colour image; missing File Meta group length with a SOP Instance UID mismatch.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/DermaColorLossLess.dcm"
+      },
+      "sha256": "5e8e5cfd305e1598a2bc2e1f2a9db1d882f5cea03f0a09c62a5a407e2d8245c3"
+    },
+    {
+      "id": "gdcm-jp2-vs-j2k",
+      "violation_class": "jp2-vs-j2k-codestream",
+      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) ELSCINT1_JP2vsJ2K.dcm; JP2 file-format wrapper where a raw JPEG 2000 codestream is expected; also invalid CS characters in BodyPartExamined.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/ELSCINT1_JP2vsJ2K.dcm"
+      },
+      "sha256": "aae4c32a21bbc1cedc68eb63469c5983fb383945a29c3238a92959e6f2e660eb"
+    },
+    {
+      "id": "gdcm-cp246-sq-as-un",
+      "violation_class": "cp246-encapsulated-pixeldata-vr",
+      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) MEDILABInvalidCP246_EVRLESQasUN.dcm; CP-246 explicit-VR encoding where encapsulated PixelData VR is OW but OB is required.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/MEDILABInvalidCP246_EVRLESQasUN.dcm"
+      },
+      "sha256": "a899db1b1ef4defadde9f32d99adab0cc9475854e55ba1f3b879c16be4a7a20f"
+    },
+    {
+      "id": "gdcm-undef-item-wrong-vl",
+      "violation_class": "undefined-length-item-wrong-vl",
+      "curate_skip": true,
+      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) BugGDCM2_UndefItemWrongVL.dcm; a sequence item declares an incorrect value length. dcmjs cannot parse it (curateOne rejects the file), so only the dciodvfy drift check runs.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/BugGDCM2_UndefItemWrongVL.dcm"
+      },
+      "sha256": "f99fe81a59d583731fb5f76afd316a7e2bc4fc885714abee67d838ebef33299e"
+    },
+    {
+      "id": "gdcm-private-icon-no-item",
+      "violation_class": "malformed-private-sequence-length",
+      "curate_skip": true,
+      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) Bug_Siemens_PrivateIconNoItem.dcm; a private icon sequence carries a corrupt explicit length. dcmjs cannot parse it (curateOne rejects the file), so only the dciodvfy drift check runs.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/Bug_Siemens_PrivateIconNoItem.dcm"
+      },
+      "sha256": "8727ad01ff3810ced96d44a6848589eeb63c1fd8a723cb30a7f455f0ec2d3059"
+    },
+    {
+      "id": "gdcm-no-preamble",
+      "violation_class": "missing-preamble",
+      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) US-IRAD-NoPreambleStartWith0003.dcm; no 128-byte preamble/DICM prefix, starting at group 0003 which dciodvfy flags as an illegal private group.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/US-IRAD-NoPreambleStartWith0003.dcm"
+      },
+      "sha256": "6d5f4339711e440049e417a3ebc10b34c8f5b2b2115edd591974036bcbf84604"
+    },
+    {
+      "id": "gdcm-missing-icon-pixeldata",
+      "violation_class": "missing-icon-image-pixeldata",
+      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) CT-SIEMENS-MissingPixelDataInIconSQ.dcm; an IconImageSequence item is missing the Type 1 required PixelData.",
+      "source": {
+        "kind": "url",
+        "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/CT-SIEMENS-MissingPixelDataInIconSQ.dcm"
+      },
+      "sha256": "2ae0cea21d91abc5fd4813294cf36627126f06ce9dacf660b53959dcbd96d955"
     }
   ]
 }

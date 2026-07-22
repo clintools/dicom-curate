@@ -1,0 +1,21 @@
+{
+  "label": "gdcm-acr-nema-libido",
+  "violations": [
+    "Error - Information Object Not found",
+    "Error::</RecognitionCode(0008,0010)[1]>::Value invalid for this VR [SH] = <ACRNEMA_LIBIDO_1.1> - Length invalid for this VR = <18> - expected <= 16",
+    "Warning::</(0008,0000)>::Retired attribute",
+    "Warning::</(0028,0000)>::Retired attribute",
+    "Warning::</(7fe0,0000)>::Retired attribute",
+    "Warning::</ImageDimensions(0028,0005)>::Retired attribute",
+    "Warning::</InstanceNumber(0020,0013) >::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</LengthToEnd(0008,0001)>::Retired attribute",
+    "Warning::</Modality(0008,0060)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</PatientID(0010,0020)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</RecognitionCode(0008,0010)>::Retired attribute",
+    "Warning::</SeriesNumber(0020,0011)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</StudyDate(0008,0020)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</StudyID(0020,0010)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</StudyTime(0008,0030)>::Missing attribute or value that would be needed to build DICOMDIR"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}

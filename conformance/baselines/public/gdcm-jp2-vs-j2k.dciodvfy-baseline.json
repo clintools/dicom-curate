@@ -1,0 +1,18 @@
+{
+  "label": "gdcm-jp2-vs-j2k",
+  "violations": [
+    "Error::</BodyPartExamined(0018,0015)[1]>::Value invalid for this VR [CS] = <JPEG 2000 Compressed Image>",
+    "Error::</BodyPartExamined(0018,0015)[1]>::Value invalid for this VR [CS] = <JPEG 2000 Compressed Image> - Length invalid for this VR = <26> - expected <= 16",
+    "Error::</Laterality(0020,0060)>::Missing attribute for Type 2C Conditional - Module=<GeneralSeries>",
+    "Error::</MediaStorageSOPInstanceUID(0002,0003)>::MediaStorageSOPInstanceUID different from SOPInstanceUID",
+    "Warning::</BodyPartExamined(0018,0015)[1]>::Unrecognized defined term = <JPEG 2000 Compressed Image>",
+    "Warning::</NumberOfStudyRelatedInstances(0020,1208)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</PatientID(0010,0020)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</RequestedProcedureID(0040,1001)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</ScheduledProcedureStepEndDate(0040,0004)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</ScheduledProcedureStepEndTime(0040,0005)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</ScheduledProcedureStepStartDate(0040,0002)>::Attribute is not present in standard DICOM IOD",
+    "Warning::</ScheduledProcedureStepStartTime(0040,0003)>::Attribute is not present in standard DICOM IOD"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}

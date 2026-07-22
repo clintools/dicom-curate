@@ -1,0 +1,20 @@
+{
+  "label": "gdcm-no-preamble",
+  "violations": [
+    "Error - Information Object Not found",
+    "Error::</(0003,0010)>::Attribute with an odd group number is not in a legal private group",
+    "Error::</(0003,0010)>::Bad group",
+    "Error::</PatientBirthDate(0010,0030)[1]>::Value invalid for this VR [DA] = <000000>",
+    "Error::</PatientBirthDate(0010,0030)[1]>::Value invalid for this VR [DA] = <000000> - Length invalid for this VR = <6> - expected == 8 or 10",
+    "Error::</SeriesInstanceUID(0020,000e)>::SeriesInstanceUID has same value as StudyInstanceUID = <1.2.840.113680.3.103.14954.2871468849.1240351>",
+    "Error::Attribute with an odd group number is not in a legal private group",
+    "Error::Bad group",
+    "Warning::</NameOfPhysiciansReadingStudy(0008,1060)[1]>::Value dubious for this VR [PN] = <PL> - Retired Person Name form",
+    "Warning::</OperatorsName(0008,1070)[1]>::Value dubious for this VR [PN] = <PR> - Retired Person Name form",
+    "Warning::</OtherPatientIDs(0010,1000)>::Retired attribute",
+    "Warning::</PerformingPhysicianName(0008,1050)[1]>::Value dubious for this VR [PN] = <B******> - Retired Person Name form",
+    "Warning::</SeriesNumber(0020,0011)>::Missing attribute or value that would be needed to build DICOMDIR",
+    "Warning::</StudyID(0020,0010)>::Missing attribute or value that would be needed to build DICOMDIR"
+  ],
+  "notes": "Regenerate with pnpm update:conformance-baselines"
+}
