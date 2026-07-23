@@ -42,8 +42,43 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install dciodvfy
-        run: sudo apt-get update && sudo apt-get install -y dicom3tools
+      # Ubuntu's apt package is a stale dicom3tools snapshot missing checks our
+      # baselines depend on (e.g. CP-246 encapsulated PixelData VR) — build the
+      # pinned snapshot from source instead. See conformance/README.md.
+      - name: Cache dciodvfy build
+        id: cache-dciodvfy
+        uses: actions/cache@v4
+        with:
+          path: .cache-dciodvfy/extracted/usr/bin
+          key: dciodvfy-${{ runner.os }}-1.00.snapshot.20260320044638-v3
+
+      - name: Build dciodvfy (dicom3tools 1.00.snapshot.20260320044638)
+        if: steps.cache-dciodvfy.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y xutils-dev
+          curl -fsSL -o /tmp/dicom3tools.tar.bz2 "https://www.dclunie.com/dicom3tools/workinprogress/dicom3tools_1.00.snapshot.20260320044638.tar.bz2"
+          echo "669b0c5e28535327ed0c0375491901bc553c2493923cc55e71a09eba07e7bdd2  /tmp/dicom3tools.tar.bz2" | sha256sum -c -
+          mkdir -p /tmp/dicom3tools && tar xjf /tmp/dicom3tools.tar.bz2 -C /tmp/dicom3tools
+          cd /tmp/dicom3tools/dicom3tools_1.00.snapshot.20260320044638
+          ./Configure
+          imake -I./config -DInstallInTopDir -DUseXXXXID
+          # World tolerates failures in vendor converters and display tools we do not need
+          make World -j"$(nproc)"
+          test -x appsrc/dcfile/dciodvfy
+          mkdir -p "$GITHUB_WORKSPACE/.cache-dciodvfy/extracted/usr/bin"
+          cp appsrc/dcfile/dciodvfy "$GITHUB_WORKSPACE/.cache-dciodvfy/extracted/usr/bin/dciodvfy"
+
+      # A cache hit skips the build entirely, so the pinned URL and its checksum
+      # never run. Without this, a stale cache silently yields wrong findings.
+      - name: Verify dciodvfy is the pinned build
+        run: |
+          set -e
+          BIN="$GITHUB_WORKSPACE/.cache-dciodvfy/extracted/usr/bin/dciodvfy"
+          test -x "$BIN"
+          echo "embedded version: $(grep -aoE '1\.00\.snapshot\.[0-9]+' "$BIN" | sort -u | tr '\n' ' ')"
+          grep -aqF '1.00.snapshot.20260320044638' "$BIN"
 
       - name: Type Check
         run: pnpm tsc --noEmit

@@ -103,7 +103,9 @@ Unit tests for line parsing and normalisation. Always runs; does not need `dciod
 
 `public-cases.json` is a local catalog in the same format as dicom-synth's bundled one (loaded with its `loadCasesFromJson`). Each case is a real quirky DICOM file, fetched on demand from upstream and pinned by sha256 — an upstream change fails loudly with a "bump metadata" error rather than drifting silently. Fetched files land in `~/.cache/dicom-synth-testcases/<sha256>/` and are reused across runs; CI caches that directory keyed on the catalog hash, so network is only needed when the catalog changes.
 
-All current cases come from the MIT-licensed [pydicom test_files](https://github.com/pydicom/pydicom/tree/main/src/pydicom/data/test_files) set, pinned to the `v3.0.1` tag:
+Cases come from two public, permissively-licensed corpora, each pinned so an upstream change fails loudly rather than drifting silently.
+
+**pydicom** — MIT-licensed [test_files](https://github.com/pydicom/pydicom/tree/main/src/pydicom/data/test_files), pinned to the `v3.0.1` tag:
 
 | Case | Quirk | Flags |
 |------|-------|-------|
@@ -120,6 +122,19 @@ All current cases come from the MIT-licensed [pydicom test_files](https://github
 | `pydicom-UN-sequence` | Sequence encoded with VR UN | `curate_skip` — dcmjs cannot parse it; passthrough test pins the rejection |
 | `pydicom-meta-missing-tsyntax` | File meta without TransferSyntaxUID | `curate_skip` — dcmjs cannot parse it; passthrough test pins the rejection |
 
+**GDCM** — BSD-licensed test data from [malaterre/gdcmdata](https://github.com/malaterre/gdcmdata), pinned to the submodule commit `9b38ac7` that GDCM `v3.2.10` references:
+
+| Case | Quirk | Flags |
+|------|-------|-------|
+| `gdcm-acr-nema-libido` | Legacy ACR-NEMA (pre-DICOM), no File Meta Information | |
+| `gdcm-rle-palette-derma` | RLE-lossless palette colour; missing File Meta group length | |
+| `gdcm-jp2-vs-j2k` | JP2 wrapper where a raw JPEG 2000 codestream is expected | |
+| `gdcm-cp246-sq-as-un` | CP-246 encapsulated PixelData VR is OW, expected OB | |
+| `gdcm-undef-item-wrong-vl` | Sequence item declares an incorrect value length | `curate_skip` — dcmjs cannot parse it; passthrough test pins the rejection |
+| `gdcm-private-icon-no-item` | Private icon sequence with a corrupt explicit length | `curate_skip` — dcmjs cannot parse it; passthrough test pins the rejection |
+| `gdcm-no-preamble` | No 128-byte preamble/DICM prefix; starts at group 0003 | |
+| `gdcm-missing-icon-pixeldata` | IconImageSequence item missing Type 1 PixelData | |
+
 Each skip flag is a documented coverage gap, recorded in the case's `notes`. `curate_skip` cases assert that `curateOne` still rejects the file — if a dcmjs upgrade makes one parseable, the test fails and the flag should be removed. The `update:conformance-baselines` script fetches through the same default cache as the tests, so files are only ever downloaded once per machine.
 
 **Adding a case:** download the file, `shasum -a 256` it, add an entry (prefer a tag-pinned URL over a branch), verify dciodvfy and passthrough curate behaviour locally, set skip flags with a reason in `notes` if needed, then run `pnpm update:conformance-baselines` and commit the new baseline JSON.
@@ -134,21 +149,72 @@ Some `dciodvfy` warnings are disputed or context-dependent. Regexes in `allowlis
 
 | Entry | Why suppressed |
 |-------|----------------|
-| `Warning: … Attribute is not present in standard DICOM IOD` | Depends on the dciodvfy build's IOD data dictionary — the warning set differs between dicom3tools versions (e.g. local install vs CI's apt package), so it can never match a pinned baseline. Trade-off: a curate change that *added* a non-IOD attribute would not be flagged; warning-level only. |
+| `Warning: … Attribute is not present in standard DICOM IOD` | **Environment-sensitive**, not just version-sensitive: the *same* pinned snapshot emits a different set of these warnings depending on where it is built and run. Observed — macOS/arm64 and emulated `linux/amd64` Docker emit members that CI's native x86_64 Linux runner does not. Suppressing the whole class keeps committed baselines reproducible across dev machines and CI (verified: a macOS build and CI's x86_64 build then produce identical baseline JSON). Trade-off: a curate change that *added* a non-IOD attribute would not be flagged; warning-level only. |
 
 **Remember:** `dciodvfy` remains a regression aid, not a certification tool.
 
 ## dicom3tools (required binary)
 
-Conformance tests invoke **`dciodvfy`** from [dicom3tools](https://www.dclunie.com/dicom3tools.html). It is not shipped with this repo or `dicom-synth`.
+Conformance tests invoke **`dciodvfy`** from [dicom3tools](https://www.dclunie.com/dicom3tools.html). **It is not shipped with this repo or `dicom-synth`.**
+
+**Pinned version:** `1.00.snapshot.20260320044638` (a dated source snapshot from
+[dclunie.com's workinprogress listing](https://www.dclunie.com/dicom3tools/workinprogress/index.html)).
+Ubuntu's `apt` package (`dicom3tools`) is a much older snapshot that is missing
+checks our baselines depend on — e.g. it never flags the CP-246
+encapsulated-PixelData-VR error in `gdcm-cp246-sq-as-un`. **Committed baselines
+are only guaranteed to match this pinned snapshot; older or newer builds may
+drift** (see "Fail — baseline drift" above).
+
+**CI** builds this snapshot from source (see `.github/workflows/ci.yml`,
+"Build dciodvfy") and caches the result at `.cache-dciodvfy/extracted/usr/bin/dciodvfy`
+— the same path `resolveConformanceBin()` checks after `DCIODVFY_PATH` and
+`PATH`, so no env var is needed for CI or for a local build placed there.
+
+**To run the conformance tests locally**, build the same pinned snapshot CI
+uses — a mismatched `dciodvfy` will fail the baseline drift tests:
 
 ```bash
-# Debian/Ubuntu
-sudo apt-get install dicom3tools
-export DCIODVFY_PATH=/path/to/dciodvfy   # optional override
+# Linux build deps
+sudo apt-get install g++ xutils-dev bzip2 make
+
+curl -fsSL -o /tmp/dicom3tools.tar.bz2 \
+  "https://www.dclunie.com/dicom3tools/workinprogress/dicom3tools_1.00.snapshot.20260320044638.tar.bz2"
+echo "669b0c5e28535327ed0c0375491901bc553c2493923cc55e71a09eba07e7bdd2  /tmp/dicom3tools.tar.bz2" \
+  | sha256sum -c -
+mkdir -p /tmp/dicom3tools && tar xjf /tmp/dicom3tools.tar.bz2 -C /tmp/dicom3tools
+cd /tmp/dicom3tools/dicom3tools_1.00.snapshot.20260320044638
+./Configure
+imake -I./config -DInstallInTopDir -DUseXXXXID
+make World   # prints errors for vendor converters and display tools; exits 0
+
+export DCIODVFY_PATH=/tmp/dicom3tools/dicom3tools_1.00.snapshot.20260320044638/appsrc/dcfile/dciodvfy
 ```
 
-**CI:** `.github/workflows/ci.yml` installs `dicom3tools` before `pnpm test:conformance`.
+### Regenerating baselines — always on the CI platform
+
+Commit baselines generated on **native x86_64 Linux** (what `ubuntu-latest`
+runs), and nowhere else. `dciodvfy` output for a given fixture is not fully
+portable across environments — the *same* pinned snapshot can emit a different
+warning set on macOS/arm64, or under emulated `linux/amd64` Docker on Apple
+Silicon, than on a native x86_64 runner. The [allowlist](#allowlist) neutralises
+the one class we have seen diverge (`Attribute is not present in standard DICOM
+IOD`), but it cannot pre-empt a class we have *not* yet seen. Generating on the
+CI platform is what guarantees a committed baseline matches CI; anything else
+relies on the allowlist having already caught every divergence.
+
+- **Windows:** WSL2 is a genuine x86_64 Linux VM — build `dciodvfy` and run
+  `pnpm update:conformance-baselines` inside it. (WSL1 is a syscall shim, not
+  the same; prefer WSL2.)
+- **macOS / Apple Silicon:** do not treat local output — native *or* Dockered —
+  as authoritative. Use a real x86_64 Linux box, a Codespace, or let CI be the
+  source of truth.
+- **Verify the binary before regenerating:**
+  `grep -aoE '1\.00\.snapshot\.[0-9]+' "$(command -v dciodvfy)"` must print the
+  pinned snapshot. A stray older `dciodvfy` on `PATH` silently produces baselines
+  that fail CI as drift.
+- **Keep the allowlist active when regenerating** (`update:conformance-baselines`
+  applies it at write time). Baselines generated with it disabled bake in the
+  environment-specific warnings above and then fail CI as `missing:` drift.
 
 ## Local and private fixtures
 
