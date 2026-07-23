@@ -51,9 +51,11 @@ function run(
   data: TDicomData,
   preExclude?: (parser: TParser) => boolean,
   inputFilePath = 'study/subject/test.dcm',
+  skipWrite = false,
 ) {
   const mappingOptions: TMappingOptions = {
     curationSpec: makeSpec(preExclude),
+    skipWrite,
   }
   return collectMappings(inputFilePath, data, mappingOptions)
 }
@@ -123,5 +125,19 @@ describe('preExclude driven by media storage SOP class', () => {
     const anomaly = mapResults.anomalies.join(' ')
     expect(anomaly).toContain('test.dcm')
     expect(anomaly).not.toContain('study/subject')
+  })
+
+  it('still excludes but emits no anomaly on the form-generation pass', () => {
+    // collectMappings runs on both the skipWrite (form-generation) pass and the
+    // write pass; the exclusion anomaly is emitted only on the write pass so
+    // consumers do not double-count the file.
+    const [, mapResults] = run(
+      dicomdirData(),
+      excludeDicomdir,
+      'study/subject/test.dcm',
+      true,
+    )
+    expect(mapResults.excluded).toBe('pre')
+    expect(mapResults.anomalies).toEqual([])
   })
 })

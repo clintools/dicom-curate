@@ -60,11 +60,18 @@ export default function collectMappings(
   try {
     if (finalSpec.preExclude?.(parser)) {
       mapResults.excluded = 'pre'
+      // Write pass only: collectMappings runs on both the form-generation pass
+      // (skipWrite) and the write pass, so emitting on both would double-count
+      // the file for anomaly consumers. Matches the benign scan-exclusion
+      // anomalies, which are likewise write-pass only.
+      //
       // Name only, never the full path: anomalies are shared with the
       // server-bound log, and the raw path is carried in fileInfo instead.
-      mapResults.anomalies.push(
-        `Skipped pre-excluded file: ${parser.getFilePathComp(parser.FILENAME)}`,
-      )
+      if (!mappingOptions.skipWrite) {
+        mapResults.anomalies.push(
+          `Skipped pre-excluded file: ${parser.getFilePathComp(parser.FILENAME)}`,
+        )
+      }
       return [naturalData, mapResults]
     }
   } catch (e) {
@@ -179,9 +186,12 @@ export default function collectMappings(
       })
     ) {
       mapResults.excluded = 'post'
-      mapResults.anomalies.push(
-        `Skipped post-excluded file: ${parser.getFilePathComp(parser.FILENAME)}`,
-      )
+      // Write pass only — see the preExclude note above.
+      if (!mappingOptions.skipWrite) {
+        mapResults.anomalies.push(
+          `Skipped post-excluded file: ${parser.getFilePathComp(parser.FILENAME)}`,
+        )
+      }
       return [naturalData, mapResults]
     }
   } catch (e) {
