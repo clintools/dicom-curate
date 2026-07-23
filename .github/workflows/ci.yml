@@ -50,7 +50,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache-dciodvfy/extracted/usr/bin
-          key: dciodvfy-${{ runner.os }}-1.00.snapshot.20260320044638-v1
+          key: dciodvfy-${{ runner.os }}-1.00.snapshot.20260320044638-v3
 
       - name: Build dciodvfy (dicom3tools 1.00.snapshot.20260320044638)
         if: steps.cache-dciodvfy.outputs.cache-hit != 'true'
@@ -69,6 +69,16 @@ jobs:
           test -x appsrc/dcfile/dciodvfy
           mkdir -p "$GITHUB_WORKSPACE/.cache-dciodvfy/extracted/usr/bin"
           cp appsrc/dcfile/dciodvfy "$GITHUB_WORKSPACE/.cache-dciodvfy/extracted/usr/bin/dciodvfy"
+
+      # A cache hit skips the build entirely, so the pinned URL and its checksum
+      # never run. Without this, a stale cache silently yields wrong findings.
+      - name: Verify dciodvfy is the pinned build
+        run: |
+          set -e
+          BIN="$GITHUB_WORKSPACE/.cache-dciodvfy/extracted/usr/bin/dciodvfy"
+          test -x "$BIN"
+          echo "embedded version: $(grep -aoE '1\.00\.snapshot\.[0-9]+' "$BIN" | sort -u | tr '\n' ' ')"
+          grep -aqF '1.00.snapshot.20260320044638' "$BIN"
 
       - name: Type Check
         run: pnpm tsc --noEmit
