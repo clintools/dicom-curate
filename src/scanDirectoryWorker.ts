@@ -13,6 +13,30 @@ const DEFAULT_EXCLUDED_FILETYPES = [
 ]
 
 /**
+ * Name-based exclusion decision for an S3 object key.
+ *
+ * Exported for testing: the S3 listing path needs a live bucket, and the worker
+ * runs in its own process where the S3 client cannot be mocked.
+ *
+ * Unlike the filesystem paths, an S3 key carries its whole prefix while the
+ * exclusion list holds bare filenames — and the defaults apply here too.
+ */
+export function isS3KeyExcludedByName(
+  key: string,
+  extraExcludedFiletypes: string[],
+  includeDefaults: boolean,
+): boolean {
+  const objectName = key.slice(key.lastIndexOf('/') + 1)
+  const allExcludedFiletypes = [
+    ...(includeDefaults ? DEFAULT_EXCLUDED_FILETYPES : []),
+    ...extraExcludedFiletypes,
+  ]
+  return allExcludedFiletypes.some(
+    (excluded) => objectName.toLowerCase() === excluded.toLowerCase(),
+  )
+}
+
+/**
  * Build a PHI-safe error message for a file that could not be read during
  * scanning. Only the error code/name is included — never `error.message`,
  * because node fs errors embed the full raw path in the message (e.g.
@@ -237,9 +261,7 @@ async function shouldProcessFileItem(
 
     // Check if the file is in the list of excluded files
     if (
-      excludedFiletypes.some(
-        (excluded) => s3Item.Key.toLowerCase() === excluded.toLowerCase(),
-      )
+      isS3KeyExcludedByName(s3Item.Key, excludedFiletypes, !noDefaultExclusions)
     ) {
       fileAnomalies.push(`Skipped excluded file: ${s3Item.Key}`)
       return false

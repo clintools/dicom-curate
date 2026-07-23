@@ -1,4 +1,9 @@
 import * as dcmjs from 'dcmjs'
+import { generateFile } from 'dicom-synth'
+import {
+  buildDicomdirDcmjsBuffer,
+  DICOMDIR_SOP_CLASS_UID,
+} from '../testutils/minimalDicom'
 import { curateOne } from './curateOne'
 import { hash } from './hash'
 import type {
@@ -1354,4 +1359,99 @@ describe('curateOne stream read failure during parse (regression #287)', () => {
 
     expect(unhandled).toEqual([])
   }, 10_000)
+})
+
+describe('curateOne DICOMDIR pre-exclusion', () => {
+  const inputPath =
+    'Sample_Protocol_Number/Sample_CRO/AB12-123/Visit 1/PET-Abdomen'
+
+  // A spec that excludes DICOMDIRs by media storage SOP class. The SOP class
+  // lives in the file meta group, so only getMetaDicom can see it.
+  const dicomdirExcludingSpec: () => TCurationSpecification = () => ({
+    inputPathPattern:
+      'protocolNumber/activityProvider/centerSubjectId/timepoint/scan',
+    version: '3.0',
+    hostProps: {},
+    dicomPS315EOptions: 'Off',
+    modifyDicomHeader: () => ({}),
+    outputFilePathComponents: (parser) => [
+      parser.getFilePathComp('protocolNumber'),
+      parser.getFilePathComp(parser.FILENAME),
+    ],
+    errors: () => [],
+    preExclude: (parser) =>
+      parser.getMetaDicom('MediaStorageSOPClassUID') === DICOMDIR_SOP_CLASS_UID,
+  })
+
+  function fileInfoFor(buffer: ArrayBuffer, name: string): TFileInfo {
+    return {
+      kind: 'blob',
+      blob: new Blob([buffer], { type: 'application/octet-stream' }),
+      path: inputPath,
+      name,
+      size: buffer.byteLength,
+    }
+  }
+
+  it('excludes a DICOMDIR carrying a .dcm extension and writes nothing', async () => {
+    const result = await curateOne({
+      // Named like an instance: filename-based exclusion cannot catch this.
+      fileInfo: fileInfoFor(buildDicomdirDcmjsBuffer(), 'IM000001.dcm'),
+      outputTarget: {},
+      mappingOptions: { curationSpec: dicomdirExcludingSpec, skipWrite: false },
+    })
+
+    expect(result.excluded).toBe('pre')
+    expect(result.mappedBlob).toBeUndefined()
+    expect(result.anomalies.join(' ')).toContain('IM000001.dcm')
+  })
+
+  it('cannot exclude a DICOMDIR that dcmjs rejects, but writes nothing', async () => {
+    // Known limitation: preExclude runs only after a successful parse. A
+    // DICOMDIR whose writer omitted the meta group length is rejected by dcmjs
+    // outright, so it is reported as a parse error rather than a clean
+    // exclusion. It is still never written to the output.
+    const { buffer } = await generateFile({ type: 'dicomdir' })
+
+    const result = await curateOne({
+      fileInfo: fileInfoFor(buffer.buffer as ArrayBuffer, 'IM000009.dcm'),
+      outputTarget: {},
+      mappingOptions: { curationSpec: dicomdirExcludingSpec, skipWrite: false },
+    })
+
+    expect(result.excluded).toBeUndefined()
+    expect(result.mappedBlob).toBeUndefined()
+    expect(result.errors?.join(' ')).toContain('not a valid DICOM file')
+  })
+
+  it('does not exclude an ordinary image instance', async () => {
+    const dataset = {
+      PatientName: 'Test',
+      PatientID: 'P001',
+      Modality: 'CT',
+      SOPClassUID: '1.2.840.10008.5.1.4.1.1.2',
+      SOPInstanceUID: '1.2.3.4.5.6.7.8.9',
+      SeriesInstanceUID: '1.2.3.4.5.6.7.8',
+      StudyInstanceUID: '1.2.3.4.5.6.7',
+      SeriesNumber: '1',
+    }
+    const dicomDict = new dcmjs.data.DicomDict({
+      '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2.1'] },
+      '00020002': { vr: 'UI', Value: [dataset.SOPClassUID] },
+      '00020003': { vr: 'UI', Value: [dataset.SOPInstanceUID] },
+    })
+    dicomDict.dict = dcmjs.data.DicomMetaDictionary.denaturalizeDataset(dataset)
+
+    const result = await curateOne({
+      fileInfo: fileInfoFor(
+        dicomDict.write({ allowInvalidVRLength: true }),
+        'IM000002.dcm',
+      ),
+      outputTarget: {},
+      mappingOptions: { curationSpec: dicomdirExcludingSpec, skipWrite: false },
+    })
+
+    expect(result.excluded).toBeUndefined()
+    expect(result.mappedBlob).toBeDefined()
+  })
 })
