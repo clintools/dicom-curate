@@ -14,7 +14,6 @@
     "Error::</SoftwareVersions(0018,1020)>::Value invalid for this VR [LO] - Trailing character invalid for this VR = '' (0)",
     "Error::</StationName(0008,1010)>::Value invalid for this VR [SH] - Trailing character invalid for this VR = '' (0)",
     "Warning::</(7fe0,0000)>::Retired attribute",
-    "Warning::</AcquisitionComments(0018,4000)>::Attribute is not present in standard DICOM IOD",
     "Warning::</AcquisitionComments(0018,4000)>::Retired attribute",
     "Warning::</EchoTrainLength(0018,0091)[1]>::Value is zero",
     "Warning::</FileMetaInformationVersion(0002,0001)>::Bad FileMetaInformationVersion Attribute - wrong VR, length or not 0x00,0x01",

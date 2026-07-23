@@ -16,8 +16,7 @@
     "Warning::</(7fe0,0000)>::Retired attribute",
     "Warning::</ImageType(0008,0008)[4]>::Unrecognized defined term = <CT_SOM5 TOP>",
     "Warning::</PatientName(0010,0010)[1]>::Value dubious for this VR [PN] = <F F S -05020 *C12345-AZERTYUIOP> - Retired Person Name form",
-    "Warning::</ReferringPhysicianName(0008,0090)[1]>::Value dubious for this VR [PN] = <20456CRM/SP-XXXXX YYYYYYYY> - Retired Person Name form",
-    "Warning::</RequestedProcedureDescription(0032,1060)>::Attribute is not present in standard DICOM IOD"
+    "Warning::</ReferringPhysicianName(0008,0090)[1]>::Value dubious for this VR [PN] = <20456CRM/SP-XXXXX YYYYYYYY> - Retired Person Name form"
   ],
   "notes": "Regenerate with pnpm update:conformance-baselines"
 }
