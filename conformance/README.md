@@ -149,7 +149,7 @@ Some `dciodvfy` warnings are disputed or context-dependent. Regexes in `allowlis
 
 | Entry | Why suppressed |
 |-------|----------------|
-| `Warning: … Attribute is not present in standard DICOM IOD` | Depends on the dciodvfy build's IOD data dictionary — the warning set differs between dicom3tools versions (e.g. local install vs CI's apt package), so it can never match a pinned baseline. Trade-off: a curate change that *added* a non-IOD attribute would not be flagged; warning-level only. |
+| `Warning: … Attribute is not present in standard DICOM IOD` | **Environment-sensitive**, not just version-sensitive: the *same* pinned snapshot emits a different set of these warnings depending on where it is built and run. Observed — macOS/arm64 and emulated `linux/amd64` Docker emit members that CI's native x86_64 Linux runner does not. Suppressing the whole class keeps committed baselines reproducible across dev machines and CI (verified: a macOS build and CI's x86_64 build then produce identical baseline JSON). Trade-off: a curate change that *added* a non-IOD attribute would not be flagged; warning-level only. |
 
 **Remember:** `dciodvfy` remains a regression aid, not a certification tool.
 
@@ -189,6 +189,32 @@ make World   # prints errors for vendor converters and display tools; exits 0
 
 export DCIODVFY_PATH=/tmp/dicom3tools/dicom3tools_1.00.snapshot.20260320044638/appsrc/dcfile/dciodvfy
 ```
+
+### Regenerating baselines — always on the CI platform
+
+Commit baselines generated on **native x86_64 Linux** (what `ubuntu-latest`
+runs), and nowhere else. `dciodvfy` output for a given fixture is not fully
+portable across environments — the *same* pinned snapshot can emit a different
+warning set on macOS/arm64, or under emulated `linux/amd64` Docker on Apple
+Silicon, than on a native x86_64 runner. The [allowlist](#allowlist) neutralises
+the one class we have seen diverge (`Attribute is not present in standard DICOM
+IOD`), but it cannot pre-empt a class we have *not* yet seen. Generating on the
+CI platform is what guarantees a committed baseline matches CI; anything else
+relies on the allowlist having already caught every divergence.
+
+- **Windows:** WSL2 is a genuine x86_64 Linux VM — build `dciodvfy` and run
+  `pnpm update:conformance-baselines` inside it. (WSL1 is a syscall shim, not
+  the same; prefer WSL2.)
+- **macOS / Apple Silicon:** do not treat local output — native *or* Dockered —
+  as authoritative. Use a real x86_64 Linux box, a Codespace, or let CI be the
+  source of truth.
+- **Verify the binary before regenerating:**
+  `grep -aoE '1\.00\.snapshot\.[0-9]+' "$(command -v dciodvfy)"` must print the
+  pinned snapshot. A stray older `dciodvfy` on `PATH` silently produces baselines
+  that fail CI as drift.
+- **Keep the allowlist active when regenerating** (`update:conformance-baselines`
+  applies it at write time). Baselines generated with it disabled bake in the
+  environment-specific warnings above and then fail CI as `missing:` drift.
 
 ## Local and private fixtures
 
