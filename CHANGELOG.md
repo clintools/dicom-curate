@@ -1,3 +1,16 @@
+# [0.41.0](https://github.com/clintools/dicom-curate/compare/v0.40.7...v0.41.0) (2026-07-26)
+
+
+### Bug Fixes
+
+* apply default exclusions to S3 keys and match on basename ([9afef8f](https://github.com/clintools/dicom-curate/commit/9afef8fd061fc9efde27c8383cea3c9d58c31989))
+* emit pre-/post-exclude anomalies on the write pass only ([e5257c5](https://github.com/clintools/dicom-curate/commit/e5257c54f1bfd15620bf1a766144d49622fa0c8e))
+
+
+### Features
+
+* expose the file meta group to spec parsers via getMetaDicom ([a68e763](https://github.com/clintools/dicom-curate/commit/a68e7639a995444fdb3c4f7e6855bf66ded0b806))
+
 ## [0.40.7](https://github.com/clintools/dicom-curate/compare/v0.40.6...v0.40.7) (2026-07-16)
 
 
