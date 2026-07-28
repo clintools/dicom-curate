@@ -2,22 +2,21 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createTestDicomDir } from '../testutils/dicomFixtures'
-import {
-  writeFakeDicomSignatureFile,
-  writeMinimalDicomFile,
-  writeNonDicomFile,
-} from '../testutils/minimalDicom'
+import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/minimalDicom'
 import { collectScanMessages } from '../testutils/workerTestHelpers'
 
-function makeScanTree(): string {
+async function makeScanTree(): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), 'scan-worker-test-'))
   const nested = join(root, 'level1', 'nested')
   mkdirSync(nested, { recursive: true })
-  writeMinimalDicomFile(join(root, 'level1', 'root_valid.dcm'))
-  writeMinimalDicomFile(join(nested, 'nested_valid.dcm'))
-  writeNonDicomFile(join(root, 'readme.txt'))
-  writeNonDicomFile(join(root, 'tiny.bin'), 'x')
-  writeFakeDicomSignatureFile(join(root, 'fake.dcm'))
+  await writeSynthFile(join(root, 'level1', 'root_valid.dcm'), VALID_CT_IMAGE)
+  await writeSynthFile(join(nested, 'nested_valid.dcm'), VALID_CT_IMAGE)
+  await writeSynthFile(join(root, 'readme.txt'), { type: 'non-dicom' })
+  await writeSynthFile(join(root, 'tiny.bin'), {
+    type: 'non-dicom',
+    content: 'x',
+  })
+  await writeSynthFile(join(root, 'fake.dcm'), { type: 'fake-signature' })
   return root
 }
 
@@ -31,7 +30,7 @@ describe('scanDirectoryWorker (Node path scan)', () => {
   })
 
   it('discovers valid DICOM files in nested directories', async () => {
-    const root = makeScanTree()
+    const root = await makeScanTree()
     trees.push(root)
 
     const { files, done, error } = await collectScanMessages(root)
@@ -46,7 +45,7 @@ describe('scanDirectoryWorker (Node path scan)', () => {
   })
 
   it('reports anomalies for non-DICOM and invalid signature files', async () => {
-    const root = makeScanTree()
+    const root = await makeScanTree()
     trees.push(root)
 
     const { anomalies } = await collectScanMessages(root)
@@ -60,7 +59,7 @@ describe('scanDirectoryWorker (Node path scan)', () => {
   it('skips default excluded filetypes with anomalies', async () => {
     const root = mkdtempSync(join(tmpdir(), 'scan-excl-'))
     trees.push(root)
-    writeMinimalDicomFile(join(root, 'good.dcm'))
+    await writeSynthFile(join(root, 'good.dcm'), VALID_CT_IMAGE)
     writeFileSync(join(root, 'DICOMDIR'), Buffer.alloc(200))
 
     const { files, anomalies } = await collectScanMessages(root)
@@ -79,7 +78,7 @@ describe('scanDirectoryWorker (Node path scan)', () => {
     trees.push(root)
     const sub = join(root, '患者データ')
     mkdirSync(sub, { recursive: true })
-    writeMinimalDicomFile(join(sub, '検査.dcm'))
+    await writeSynthFile(join(sub, '検査.dcm'), VALID_CT_IMAGE)
 
     const { files, done } = await collectScanMessages(root)
     expect(done).toBe(true)
@@ -91,7 +90,7 @@ describe('scanDirectoryWorker (Node path scan)', () => {
     trees.push(root)
     const dotted = join(root, 'study.')
     mkdirSync(dotted, { recursive: true })
-    writeMinimalDicomFile(join(dotted, 'inside.dcm'))
+    await writeSynthFile(join(dotted, 'inside.dcm'), VALID_CT_IMAGE)
 
     const { files, done } = await collectScanMessages(root)
     expect(done).toBe(true)
@@ -122,7 +121,7 @@ describe('scanDirectoryWorker (Node path scan)', () => {
       dir = join(dir, `segment${i}`)
       mkdirSync(dir)
     }
-    writeMinimalDicomFile(join(dir, 'deep.dcm'))
+    await writeSynthFile(join(dir, 'deep.dcm'), VALID_CT_IMAGE)
 
     const { files, done, error } = await collectScanMessages(root)
     expect(error).toBeUndefined()
@@ -133,7 +132,7 @@ describe('scanDirectoryWorker (Node path scan)', () => {
   it('passes previousFileInfo from fileInfoIndex', async () => {
     const root = mkdtempSync(join(tmpdir(), 'scan-index-'))
     trees.push(root)
-    writeMinimalDicomFile(join(root, 'indexed.dcm'))
+    await writeSynthFile(join(root, 'indexed.dcm'), VALID_CT_IMAGE)
     const baseName = root.split('/').pop()!
     const key = `${baseName}/indexed.dcm`
 

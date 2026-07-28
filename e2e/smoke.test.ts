@@ -9,11 +9,7 @@ import {
   cleanupTestDicomDir,
   createTestDicomDir,
 } from '../testutils/dicomFixtures'
-import {
-  writeFakeDicomSignatureFile,
-  writeMinimalDicomFile,
-  writeNonDicomFile,
-} from '../testutils/minimalDicom'
+import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/minimalDicom'
 import {
   assertInputOutputDisjoint,
   baseCurateOptions,
@@ -43,7 +39,7 @@ describe('E2E smoke: curateMany', () => {
     workspaces.push(cleanup)
 
     const srcPath = join(inputDir, 'study', 'subject', 'instance.dcm')
-    writeMinimalDicomFile(srcPath)
+    await writeSynthFile(srcPath, VALID_CT_IMAGE)
     const beforeInput = hashDirectoryFiles(inputDir)
 
     const result = await curateMany(
@@ -109,8 +105,9 @@ describe('E2E smoke: curateMany', () => {
     const { inputDir, outputDir, cleanup } = createWorkspace()
     workspaces.push(cleanup)
 
-    writeMinimalDicomFile(join(inputDir, 'study', 'subject', 'instance.dcm'), {
-      patientId: 'E2E-PS315-PATIENT',
+    await writeSynthFile(join(inputDir, 'study', 'subject', 'instance.dcm'), {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: 'E2E-PS315-PATIENT' },
     })
 
     const result = await curateMany(
@@ -129,7 +126,10 @@ describe('E2E smoke: curateMany', () => {
     const { inputDir, outputDir, cleanup } = createWorkspace()
     workspaces.push(cleanup)
 
-    writeMinimalDicomFile(join(inputDir, 'study', 'subject', 'instance.dcm'))
+    await writeSynthFile(
+      join(inputDir, 'study', 'subject', 'instance.dcm'),
+      VALID_CT_IMAGE,
+    )
     const progressMessages: Array<{ response?: string }> = []
 
     const result = await curateMany(
@@ -147,11 +147,16 @@ describe('E2E smoke: curateMany', () => {
     const { inputDir, outputDir, cleanup } = createWorkspace()
     workspaces.push(cleanup)
 
-    writeMinimalDicomFile(join(inputDir, 'study', 'subject', 'valid.dcm'))
-    writeNonDicomFile(join(inputDir, 'study', 'subject', 'notes.txt'))
-    writeFakeDicomSignatureFile(
-      join(inputDir, 'study', 'subject', 'bad_sig.dcm'),
+    await writeSynthFile(
+      join(inputDir, 'study', 'subject', 'valid.dcm'),
+      VALID_CT_IMAGE,
     )
+    await writeSynthFile(join(inputDir, 'study', 'subject', 'notes.txt'), {
+      type: 'non-dicom',
+    })
+    await writeSynthFile(join(inputDir, 'study', 'subject', 'bad_sig.dcm'), {
+      type: 'fake-signature',
+    })
 
     const beforeInput = hashDirectoryFiles(inputDir)
 
@@ -185,14 +190,20 @@ describe('E2E smoke: curateMany', () => {
     async () => {
       const { inputDir, outputDir, cleanup } = createWorkspace()
 
-      writeMinimalDicomFile(join(inputDir, 'study', 'subject', 'valid.dcm'))
+      await writeSynthFile(
+        join(inputDir, 'study', 'subject', 'valid.dcm'),
+        VALID_CT_IMAGE,
+      )
 
       // A directory with read-but-no-execute permission: readdir can list the
       // file (so the feeder sees it), but fs.stat fails with EACCES — a real
       // filesystem read failure whose raw message contains the full path.
       const lockedDir = join(inputDir, 'study', 'locked-subject')
       mkdirSync(lockedDir, { recursive: true })
-      writeMinimalDicomFile(join(lockedDir, 'secret-patient.dcm'))
+      await writeSynthFile(
+        join(lockedDir, 'secret-patient.dcm'),
+        VALID_CT_IMAGE,
+      )
       chmodSync(lockedDir, 0o666)
       // Restore permissions before cleanup, even on assertion failure —
       // rmSync cannot remove contents of a no-execute directory.
