@@ -6,10 +6,10 @@
  *
  * See README.md — "Test files" and "How to read results".
  */
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe } from 'vitest'
+import { afterAll, describe } from 'vitest'
 import { registerDifferentialConformanceTests } from './differentialSuite'
 import { writeSyntheticConformanceFixtures } from './helpers'
 
@@ -17,6 +17,10 @@ import { writeSyntheticConformanceFixtures } from './helpers'
 // register the per-fixture dciodvfy tests from the resulting cases.
 const dir = mkdtempSync(join(tmpdir(), 'dc-conformance-synth-'))
 const syntheticConformanceCases = await writeSyntheticConformanceFixtures(dir)
+
+afterAll(() => {
+  rmSync(dir, { recursive: true, force: true })
+})
 
 describe('dciodvfy differential conformance', () => {
   registerDifferentialConformanceTests(
