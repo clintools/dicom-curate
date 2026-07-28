@@ -10,7 +10,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeMinimalDicomFile } from '../testutils/minimalDicom'
+import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/minimalDicom'
 import { curateOne } from './curateOne'
 import type { TCurationSpecification, TFileInfo } from './types'
 
@@ -44,7 +44,10 @@ describe('curateOne output boundary', () => {
     const root = mkdtempSync(join(tmpdir(), 'out-mod-'))
     dirs.push(root)
     const srcPath = join(root, 'study', 'subject', 'in.dcm')
-    writeMinimalDicomFile(srcPath, { patientId: 'SOURCE-ID' })
+    await writeSynthFile(srcPath, {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: 'SOURCE-ID' },
+    })
     const outRoot = join(root, 'output')
 
     const result = await curateOne({
@@ -72,7 +75,10 @@ describe('curateOne output boundary', () => {
     const root = mkdtempSync(join(tmpdir(), 'out-src-'))
     dirs.push(root)
     const srcPath = join(root, 'study', 'subject', 'in.dcm')
-    writeMinimalDicomFile(srcPath, { patientId: 'KEEP-ME' })
+    await writeSynthFile(srcPath, {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: 'KEEP-ME' },
+    })
     const before = readFileSync(srcPath)
 
     await curateOne({
@@ -98,7 +104,7 @@ describe('curateOne output boundary', () => {
     const root = mkdtempSync(join(tmpdir(), 'out-fail-'))
     dirs.push(root)
     const srcPath = join(root, 'in.dcm')
-    writeMinimalDicomFile(srcPath)
+    await writeSynthFile(srcPath, VALID_CT_IMAGE)
     const blocker = join(root, 'not-a-dir')
     writeFileSync(blocker, 'blocked')
 
@@ -125,7 +131,7 @@ describe('curateOne output boundary', () => {
     const root = mkdtempSync(join(tmpdir(), 'out-http-'))
     dirs.push(root)
     const srcPath = join(root, 'study', 'subject', 'in.dcm')
-    writeMinimalDicomFile(srcPath)
+    await writeSynthFile(srcPath, VALID_CT_IMAGE)
 
     const originalFetch = globalThis.fetch
     globalThis.fetch = vi
@@ -159,7 +165,7 @@ describe('curateOne output boundary', () => {
     const root = mkdtempSync(join(tmpdir(), 'out-skip-'))
     dirs.push(root)
     const srcPath = join(root, 'study', 'subject', 'in.dcm')
-    writeMinimalDicomFile(srcPath)
+    await writeSynthFile(srcPath, VALID_CT_IMAGE)
     const outRoot = join(root, 'output')
 
     const fileInfo: TFileInfo = {
@@ -205,7 +211,7 @@ describe('curateOne output boundary', () => {
     dirs.push(root)
     mkdirSync(join(root, 'nested', 'input'), { recursive: true })
     const srcPath = join(root, 'nested', 'input', 'scan.dcm')
-    writeMinimalDicomFile(srcPath)
+    await writeSynthFile(srcPath, VALID_CT_IMAGE)
     const outRoot = join(root, 'dest')
 
     const result = await curateOne({

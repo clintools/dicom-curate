@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeMinimalDicomFile } from '../testutils/minimalDicom'
+import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/minimalDicom'
 import {
   createMappingWorker,
   runMappingWorker,
@@ -93,7 +93,10 @@ describe('applyMappingsWorker', () => {
     const dir = mkdtempSync(join(tmpdir(), 'map-valid-'))
     dirs.push(dir)
     const dcmPath = join(dir, 'study', 'subject', 'file.dcm')
-    writeMinimalDicomFile(dcmPath, { patientId: 'OLD-ID' })
+    await writeSynthFile(dcmPath, {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: 'OLD-ID' },
+    })
 
     const csv = 'oldId,newId\nOLD-ID,NEW-ID\n'
     const columnMappings = extractCsvMappings(csv, testCsvMapping)
@@ -116,7 +119,10 @@ describe('applyMappingsWorker', () => {
     const dir = mkdtempSync(join(tmpdir(), 'map-missing-'))
     dirs.push(dir)
     const dcmPath = join(dir, 'study', 'subject', 'file.dcm')
-    writeMinimalDicomFile(dcmPath, { patientId: 'UNKNOWN-ID' })
+    await writeSynthFile(dcmPath, {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: 'UNKNOWN-ID' },
+    })
 
     const csv = 'oldId,newId\nOLD-ID,NEW-ID\n'
     const columnMappings = extractCsvMappings(csv, testCsvMapping)
@@ -138,7 +144,10 @@ describe('applyMappingsWorker', () => {
     const dir = mkdtempSync(join(tmpdir(), 'map-dup-'))
     dirs.push(dir)
     const dcmPath = join(dir, 'study', 'subject', 'file.dcm')
-    writeMinimalDicomFile(dcmPath, { patientId: 'DUP-ID' })
+    await writeSynthFile(dcmPath, {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: 'DUP-ID' },
+    })
 
     const csv = 'oldId,newId\nDUP-ID,FIRST\nDUP-ID,SECOND\n'
     const columnMappings = extractCsvMappings(csv, testCsvMapping)
@@ -161,7 +170,10 @@ describe('applyMappingsWorker', () => {
     const dir = mkdtempSync(join(tmpdir(), 'map-badcsv-'))
     dirs.push(dir)
     const dcmPath = join(dir, 'study', 'subject', 'file.dcm')
-    writeMinimalDicomFile(dcmPath, { patientId: 'OLD-ID' })
+    await writeSynthFile(dcmPath, {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: 'OLD-ID' },
+    })
 
     const columnMappings = extractCsvMappings('only-header\n', testCsvMapping)
 
@@ -179,7 +191,10 @@ describe('applyMappingsWorker', () => {
     const dir = mkdtempSync(join(tmpdir(), 'map-path-'))
     dirs.push(dir)
     const dcmPath = join(dir, 'only', 'one', 'segment.dcm')
-    writeMinimalDicomFile(dcmPath, { patientId: 'OLD-ID' })
+    await writeSynthFile(dcmPath, {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: 'OLD-ID' },
+    })
 
     const csv = 'oldId,newId\nOLD-ID,NEW-ID\n'
     const columnMappings = extractCsvMappings(csv, testCsvMapping)
@@ -231,7 +246,10 @@ describe('applyMappingsWorker', () => {
     const dir = mkdtempSync(join(tmpdir(), 'map-partial-'))
     dirs.push(dir)
     const goodPath = join(dir, 'study', 'subject', 'good.dcm')
-    writeMinimalDicomFile(goodPath, { patientId: 'OLD-ID' })
+    await writeSynthFile(goodPath, {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: 'OLD-ID' },
+    })
 
     const badFileInfo: TFileInfo = {
       kind: 'blob',
@@ -279,7 +297,10 @@ describe('applyMappingsWorker', () => {
     dirs.push(dir)
     const targetId = 'ID-0500'
     const dcmPath = join(dir, 'study', 'subject', 'file.dcm')
-    writeMinimalDicomFile(dcmPath, { patientId: targetId })
+    await writeSynthFile(dcmPath, {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: targetId },
+    })
 
     const lines = ['oldId,newId']
     for (let i = 0; i < 1000; i++) {
@@ -304,7 +325,7 @@ describe('applyMappingsWorker', () => {
     const dir = mkdtempSync(join(tmpdir(), 'map-lookup-'))
     dirs.push(dir)
     const dcmPath = join(dir, 'study', 'subject', 'file.dcm')
-    writeMinimalDicomFile(dcmPath)
+    await writeSynthFile(dcmPath, VALID_CT_IMAGE)
 
     const outDir = mkdtempSync(join(tmpdir(), 'map-out-'))
     dirs.push(outDir)
@@ -370,7 +391,7 @@ describe('applyMappingsWorker', () => {
     const dir = mkdtempSync(join(tmpdir(), 'map-unknown-req-'))
     dirs.push(dir)
     const dcmPath = join(dir, 'study', 'subject', 'file.dcm')
-    writeMinimalDicomFile(dcmPath)
+    await writeSynthFile(dcmPath, VALID_CT_IMAGE)
 
     const worker = await createMappingWorker()
     let workerCrashed = false
