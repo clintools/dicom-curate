@@ -25,11 +25,13 @@ export default defineConfig({
         'src/**/*.integration.test.ts',
         'src/**/*.spec.ts',
         'src/**/*.d.ts',
-        // Worker entry points are excluded from coverage totals because Vitest v8
-        // does not attribute child-thread execution to these files; they are
-        // exercised via dist/esm bundles in scanDirectoryWorker.test.ts and
-        // applyMappingsWorker.test.ts (see workerTestHelpers.ts). Do not treat
-        // headline coverage % as complete without those integration tests.
+        // Thread wiring only; the logic they delegate to lives in scanCore.ts /
+        // applyMappingsCore.ts, which are covered by in-process unit tests.
+        // Excluded because Vitest v8 attributes nothing to code running inside a
+        // worker_threads child, not because they are untested — the wiring is
+        // exercised end-to-end via the dist/esm bundles in
+        // scanDirectoryWorker.test.ts / applyMappingsWorker.test.ts (see
+        // workerTestHelpers.ts).
         'src/scanDirectoryWorker.ts',
         'src/applyMappingsWorker.ts',
       ],
