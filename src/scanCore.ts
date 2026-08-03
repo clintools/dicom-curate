@@ -529,6 +529,10 @@ export async function scanDirectory(
   ctx: ScanContext,
 ): Promise<void> {
   const { filters, controller, previousIndex, emit } = ctx
+  // Shared by the counter and feeder below, which run interleaved via
+  // Promise.all. Access is safe because both run in the same worker and JS is
+  // single-threaded; the counter increments, the feeder decrements on files
+  // that fail the full filter.
   let totalDiscovered = 0
 
   /**
@@ -696,6 +700,10 @@ export async function scanDirectoryNode(
   ctx: ScanContext,
 ): Promise<void> {
   const { filters, controller, previousIndex, emit } = ctx
+  // Shared by the counter and feeder below, which run interleaved via
+  // Promise.all. Access is safe because both run in the same worker and JS is
+  // single-threaded; the counter increments, the feeder decrements on files
+  // that fail the full filter.
   let totalDiscovered = 0
 
   try {
