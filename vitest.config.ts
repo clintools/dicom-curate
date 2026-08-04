@@ -47,6 +47,9 @@ export default defineConfig({
             '**/dist/**',
             'e2e/**',
             'conformance/**',
+            // Runs in the 'integration' project instead: needs the dist/esm
+            // build, so it cannot run in the fast unit pass.
+            'src/**/*.integration.test.ts',
           ],
           server: {
             deps: {
@@ -60,6 +63,22 @@ export default defineConfig({
         test: {
           name: 'e2e',
           include: ['e2e/**/*.test.ts'],
+          exclude: ['**/node_modules/**', '**/dist/**'],
+          testTimeout: 120_000,
+          hookTimeout: 30_000,
+          server: {
+            deps: {
+              inline: ['@noble/hashes'],
+            },
+          },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          // Cross-module flows driven through real workers from dist/esm.
+          name: 'integration',
+          include: ['src/**/*.integration.test.ts'],
           exclude: ['**/node_modules/**', '**/dist/**'],
           testTimeout: 120_000,
           hookTimeout: 30_000,
