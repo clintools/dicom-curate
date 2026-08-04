@@ -3,7 +3,7 @@ import * as dcmjs from 'dcmjs'
 import curateDict from './curateDict'
 import type { TMappingOptions } from './types'
 
-describe('Integration tests: Date offsets should only affect instance data, not scanner data', () => {
+describe('curateDict: date offsets should only affect instance data, not scanner data', () => {
   // Test DICOM data with both instance and scanner dates
   const originalCalibrationDate = '20220301'
   const originalManufactureDate = '20200815'
