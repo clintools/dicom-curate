@@ -66,6 +66,26 @@ export async function writeImage(
   writeFileSync(filePath, buffer)
 }
 
+/**
+ * Write `count` distinct instances into `study/subject/` under `inputDir`.
+ * Each gets a unique PatientID so results can be matched back to their source.
+ * Returns the leaf filenames written.
+ */
+export async function writeImages(
+  inputDir: string,
+  count: number,
+): Promise<string[]> {
+  const names: string[] = []
+  for (let i = 0; i < count; i++) {
+    const name = `instance-${String(i).padStart(4, '0')}.dcm`
+    await writeImage(join(inputDir, 'study', 'subject', name), {
+      PatientID: `PID-${String(i).padStart(4, '0')}`,
+    })
+    names.push(name)
+  }
+  return names
+}
+
 /** Minimal spec mirroring an `input/study/subject` tree. */
 export function integrationSpec(): () => TCurationSpecification {
   return () => ({
@@ -123,13 +143,39 @@ export type CapturedRun = {
   progress: TProgressMessage[]
 }
 
-/** Run `curateMany` against real workers, retaining the progress stream. */
+/**
+ * Run `curateMany` against real workers, retaining the progress stream.
+ * `onMessage` fires for each message, so a test can act once work is genuinely
+ * in flight rather than guessing with a timer.
+ */
 export async function runCapturingProgress(
   options: OrganizeOptions,
+  onMessage?: (msg: TProgressMessage) => void,
 ): Promise<CapturedRun> {
   const progress: TProgressMessage[] = []
   const result = await curateMany(options, (msg: TProgressMessage) => {
     progress.push(msg)
+    onMessage?.(msg)
   })
   return { result, progress }
+}
+
+/**
+ * As above, but resolves with the rejection instead of throwing — so the
+ * progress captured before a failure stays inspectable.
+ */
+export async function runExpectingRejection(
+  options: OrganizeOptions,
+  onMessage?: (msg: TProgressMessage) => void,
+): Promise<{ progress: TProgressMessage[]; error: unknown }> {
+  const progress: TProgressMessage[] = []
+  try {
+    await curateMany(options, (msg: TProgressMessage) => {
+      progress.push(msg)
+      onMessage?.(msg)
+    })
+    return { progress, error: undefined }
+  } catch (error) {
+    return { progress, error }
+  }
 }
