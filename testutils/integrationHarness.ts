@@ -6,7 +6,14 @@
  * its workers from `new URL('./*.js', import.meta.url)` and offers no
  * injection seam.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { curateMany } from 'dicom-curate'
@@ -86,6 +93,21 @@ export async function writeImages(
   return names
 }
 
+/** Every file under `dir`, recursively, as paths relative to `dir`. */
+export function listFilesRecursive(dir: string, prefix = ''): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    const rel = prefix ? `${prefix}/${entry}` : entry
+    if (statSync(full).isDirectory()) {
+      out.push(...listFilesRecursive(full, rel))
+    } else {
+      out.push(rel)
+    }
+  }
+  return out
+}
+
 /** Minimal spec mirroring an `input/study/subject` tree. */
 export function integrationSpec(): () => TCurationSpecification {
   return () => ({
@@ -117,8 +139,43 @@ export type IntegrationOverrides = Partial<
     | 'dateOffset'
     | 'signal'
     | 'skipCollectingMappings'
+    | 'table'
   >
 >
+
+/**
+ * Spec for the CSV-load (two-pass) mapping flow: PatientID is rewritten from a
+ * `table` joined on the original value. Pair with `table: [{ oldId, newId }]`
+ * on the options.
+ */
+export function csvMappingSpec(): () => TCurationSpecification {
+  return () => ({
+    version: '3.0',
+    hostProps: {},
+    inputPathPattern: 'study/subject',
+    dicomPS315EOptions: 'Off',
+    modifyDicomHeader: (parser) => ({
+      PatientID: String(parser.getMapping?.('centerSubjectId')),
+    }),
+    additionalData: {
+      type: 'load',
+      collect: {},
+      mapping: {
+        centerSubjectId: {
+          value: (p) => p.getDicom('PatientID'),
+          lookup: (row) => String(row.oldId),
+          replace: (row) => String(row.newId),
+        },
+      },
+    },
+    outputFilePathComponents: (parser) => [
+      'curated',
+      parser.getFilePathComp('subject'),
+      parser.getFilePathComp(parser.FILENAME),
+    ],
+    errors: () => [],
+  })
+}
 
 export function integrationOptions(
   inputDir: string,

@@ -7,32 +7,16 @@
  * exercises `workerCount > 1`, and the scan worker's 'stop'/'resume'
  * backpressure round-trip is driven by `index.ts` against a live worker.
  */
-import { readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
 import {
   createIntegrationWorkspace,
   type IntegrationWorkspace,
   integrationOptions,
   integrationSpec,
+  listFilesRecursive,
   runCapturingProgress,
   runExpectingRejection,
   writeImages,
 } from '../testutils/integrationHarness'
-
-/** Every file under `dir`, recursively, as paths relative to `dir`. */
-function listFiles(dir: string, prefix = ''): string[] {
-  const out: string[] = []
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry)
-    const rel = prefix ? `${prefix}/${entry}` : entry
-    if (statSync(full).isDirectory()) {
-      out.push(...listFiles(full, rel))
-    } else {
-      out.push(rel)
-    }
-  }
-  return out
-}
 
 describe('curateMany orchestration with real workers', () => {
   const workspaces: IntegrationWorkspace[] = []
@@ -71,7 +55,7 @@ describe('curateMany orchestration with real workers', () => {
       (r) => r.outputFilePath,
     )
     expect(new Set(outputPaths).size).toBe(count)
-    expect(listFiles(outputDir)).toHaveLength(count)
+    expect(listFilesRecursive(outputDir)).toHaveLength(count)
 
     // Each source file is represented exactly once.
     const patientIds = (result.mapResultsList ?? [])
@@ -97,7 +81,7 @@ describe('curateMany orchestration with real workers', () => {
 
     expect(result.response).toBe('done')
     expect(result.processedFiles).toBe(count)
-    expect(listFiles(outputDir)).toHaveLength(count)
+    expect(listFilesRecursive(outputDir)).toHaveLength(count)
 
     // The count must never overshoot the discovered total, in any message —
     // a pause/resume that lost or replayed a file would break this.
@@ -152,6 +136,6 @@ describe('curateMany orchestration with real workers', () => {
 
     expect(result.response).toBe('done')
     expect(result.processedFiles).toBe(count)
-    expect(listFiles(outputDir)).toHaveLength(count)
+    expect(listFilesRecursive(outputDir)).toHaveLength(count)
   })
 })
