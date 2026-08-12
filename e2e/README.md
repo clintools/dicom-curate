@@ -25,7 +25,7 @@ This runs `pnpm build:esm` first, then Vitest (`e2e` project in `vitest.config.t
 
 - `e2e/smoke.test.ts` — `curateMany` scenarios
 - `e2e/helpers.ts` — workspace, overlap guard, hashes, minimal specs
-- Reuses `testutils/minimalDicom.ts` and `testutils/dicomFixtures.ts`
+- Reuses `testutils/synthFixtures.ts` and `testutils/dicomFixtures.ts`
 
 ## CI
 

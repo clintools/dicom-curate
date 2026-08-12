@@ -1,5 +1,5 @@
 import type { TDicomData } from 'dcmjs'
-import { DICOMDIR_SOP_CLASS_UID } from '../testutils/minimalDicom'
+import { DICOMDIR_SOP_CLASS_UID } from '../testutils/dicomdirFixture'
 import collectMappings from './collectMappings'
 import type { TCurationSpecification, TMappingOptions, TParser } from './types'
 

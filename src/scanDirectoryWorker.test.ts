@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createTestDicomDir } from '../testutils/dicomFixtures'
-import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/minimalDicom'
+import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/synthFixtures'
 import { collectScanMessages } from '../testutils/workerTestHelpers'
 
 async function makeScanTree(): Promise<string> {

@@ -9,7 +9,7 @@ import {
   cleanupTestDicomDir,
   createTestDicomDir,
 } from '../testutils/dicomFixtures'
-import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/minimalDicom'
+import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/synthFixtures'
 import {
   assertInputOutputDisjoint,
   baseCurateOptions,
