@@ -866,3 +866,88 @@ export async function scanDirectoryNode(
     } satisfies FileScanMsg)
   }
 }
+
+/** Thread bindings a worker entry point supplies to the message handler. */
+export type ScanHandlerBindings = {
+  emit: ScanEmit
+  /** Close the port once a traversal settles, so the worker can be torn down. */
+  close: () => void
+}
+
+/**
+ * Build the worker's message handler: filter defaulting, traversal selection
+ * and backpressure dispatch. Kept out of scanDirectoryWorker.ts so it can be
+ * unit-tested in-process.
+ */
+export function createScanHandler({ emit, close }: ScanHandlerBindings) {
+  // Controller for the scan in flight, so 'stop'/'resume' can act on it. One
+  // scan per worker: the port closes when the traversal settles, so this is
+  // cleared on settle rather than ever being replaced by a second scan.
+  let currentController: ScanController | null = null
+
+  function handleMessage(event: MessageEvent<FileScanRequest>): void {
+    switch (event.data.request) {
+      case 'scan': {
+        const eventData = event.data
+
+        const previousIndex = eventData.fileInfoIndex as
+          | PreviousFileIndex
+          | undefined
+
+        const filters: ScanFilters = {
+          excludedFiletypes: eventData.excludedFiletypes ?? [],
+          // Compile excluded path regex strings (converted from globs in the main thread)
+          excludedPathRegexes: (eventData.excludedPathRegexes ?? []).map(
+            (pattern: string) => new RegExp(pattern),
+          ),
+          noDicomSignatureCheck: eventData.noDicomSignatureCheck ?? false,
+          noDefaultExclusions: eventData.noDefaultExclusions ?? false,
+        }
+
+        const controller = new ScanController()
+        currentController = controller
+        const ctx = { filters, controller, previousIndex, emit }
+
+        let scan: Promise<void>
+        if ('path' in eventData) {
+          scan = scanDirectoryNode(eventData.path, ctx)
+        } else if ('directoryHandle' in eventData) {
+          scan = scanDirectory(eventData.directoryHandle, ctx)
+        } else if ('bucketOptions' in eventData) {
+          scan = scanS3Bucket(eventData.bucketOptions, ctx)
+        } else {
+          console.error('No valid directory information provided for scanning.')
+          break
+        }
+
+        // The traversal always emits its own 'done'/'error' before resolving;
+        // close the port once it settles so the worker can be reused/torn down.
+        scan
+          .finally(() => {
+            currentController = null
+            close()
+          })
+          // Only reachable if emit itself threw inside a traversal's catch, by
+          // which point the scan is over and there is nobody left to tell.
+          .catch(() => {})
+        break
+      }
+      case 'stop': {
+        // Pause the feeder — the counter is NOT affected by backpressure
+        currentController?.pause()
+        break
+      }
+      case 'resume': {
+        // Resume the feeder
+        currentController?.resume()
+        break
+      }
+      default:
+        console.error(
+          `Unknown request ${(event.data as { request: string }).request}`,
+        )
+    }
+  }
+
+  return { handleMessage }
+}

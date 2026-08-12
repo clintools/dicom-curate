@@ -26,6 +26,7 @@ vi.mock('./s3Client', () => ({
 
 const {
   cheapFilterNameOnly,
+  createScanHandler,
   isS3KeyExcludedByName,
   safeReadErrorMessage,
   ScanController,
@@ -514,6 +515,112 @@ describe('cheapFilterNameOnly', () => {
     expect(cheapFilterNameOnly('DICOMDIR', 'root/DICOMDIR', filters)).toBe(
       false,
     )
+  })
+})
+
+describe('createScanHandler', () => {
+  const trees: string[] = []
+
+  afterEach(() => {
+    for (const t of trees.splice(0)) {
+      rmSync(t, { recursive: true, force: true })
+    }
+    vi.restoreAllMocks()
+  })
+
+  function makeHandler() {
+    const { msgs, emit } = collector()
+    const close = vi.fn()
+    const { handleMessage } = createScanHandler({ emit, close })
+    return {
+      msgs,
+      close,
+      send: (data: unknown) => handleMessage({ data } as MessageEvent),
+    }
+  }
+
+  function makeTree(): string {
+    const root = mkdtempSync(join(tmpdir(), 'scancore-handler-'))
+    trees.push(root)
+    writeDicom(join(root, 'valid.dcm'))
+    return root
+  }
+
+  it('dispatches a path request to the node traversal, then closes', async () => {
+    const { msgs, close, send } = makeHandler()
+
+    send({ request: 'scan', path: makeTree() })
+
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+    expect(fileNames(msgs)).toEqual(['valid.dcm'])
+    expect(msgs.some((m) => m.response === 'done')).toBe(true)
+  })
+
+  it('compiles the excluded path regexes carried on the request', async () => {
+    const root = makeTree()
+    writeDicom(join(root, 'skipme.dcm'))
+    const { msgs, close, send } = makeHandler()
+
+    send({ request: 'scan', path: root, excludedPathRegexes: ['skipme'] })
+
+    await vi.waitFor(() => expect(close).toHaveBeenCalled())
+    expect(fileNames(msgs)).toEqual(['valid.dcm'])
+  })
+
+  it('reports missing directory information and leaves the port open', () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { msgs, close, send } = makeHandler()
+
+    send({ request: 'scan' })
+
+    expect(logged).toHaveBeenCalledWith(
+      'No valid directory information provided for scanning.',
+    )
+    expect(close).not.toHaveBeenCalled()
+    expect(msgs).toEqual([])
+  })
+
+  it('reports an unknown request', () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    makeHandler().send({ request: 'no-such-op' })
+
+    expect(logged).toHaveBeenCalledWith('Unknown request no-such-op')
+  })
+
+  it('ignores stop and resume when no scan is in flight', () => {
+    const { msgs, close, send } = makeHandler()
+
+    send({ request: 'stop' })
+    send({ request: 'resume' })
+
+    expect(close).not.toHaveBeenCalled()
+    expect(msgs).toEqual([])
+  })
+
+  it('routes stop and resume to the scan in flight', async () => {
+    const pause = vi.spyOn(ScanController.prototype, 'pause')
+    const resume = vi.spyOn(ScanController.prototype, 'resume')
+    const { close, send } = makeHandler()
+
+    send({ request: 'scan', path: makeTree() })
+    send({ request: 'stop' })
+    send({ request: 'resume' })
+
+    expect(pause).toHaveBeenCalledTimes(1)
+    expect(resume).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(close).toHaveBeenCalled())
+  })
+
+  it('clears the controller once the scan settles', async () => {
+    const { close, send } = makeHandler()
+    send({ request: 'scan', path: makeTree() })
+    await vi.waitFor(() => expect(close).toHaveBeenCalled())
+
+    const pause = vi.spyOn(ScanController.prototype, 'pause')
+    send({ request: 'stop' })
+
+    expect(pause).not.toHaveBeenCalled()
   })
 })
 
