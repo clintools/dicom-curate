@@ -15,6 +15,12 @@ export const VALID_CT_IMAGE: ValidImageSpec = {
   modality: 'CT',
 }
 
+// Unseeded, generateFile mints random UIDs per call, so fixture bytes would
+// differ run to run. Pinning restores the constant UIDs the hand-rolled dcmjs
+// helper produced; pass a distinct `index` here if a test ever needs two
+// instances that differ.
+const FIXTURE_SEED = 1
+
 /**
  * Exists because dicom-synth has no equivalent: `generateFile` performs no
  * I/O, and `writeCollectionFromSpec` derives its own filenames and layout, so
@@ -24,7 +30,7 @@ export async function writeSynthFile(
   filePath: string,
   spec: FileSpec,
 ): Promise<void> {
-  const { buffer } = await generateFile(spec)
+  const { buffer } = await generateFile(spec, { seed: FIXTURE_SEED })
   mkdirSync(join(filePath, '..'), { recursive: true })
   writeFileSync(filePath, buffer)
 }
