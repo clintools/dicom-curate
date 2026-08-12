@@ -4,6 +4,12 @@ on:
   pull_request:
     branches:
       - main
+  # Actions caches are scoped to the branch that wrote them, and a PR can only
+  # read its own scope plus the base branch. Without a run on main nothing ever
+  # populates the shared scope, so every PR rebuilds dicom3tools from source.
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -58,7 +64,7 @@ jobs:
           set -e
           sudo apt-get update
           sudo apt-get install -y xutils-dev
-          curl -fsSL -o /tmp/dicom3tools.tar.bz2 "https://www.dclunie.com/dicom3tools/workinprogress/dicom3tools_1.00.snapshot.20260320044638.tar.bz2"
+          curl -fsSL --retry 3 --retry-delay 5 --retry-connrefused -o /tmp/dicom3tools.tar.bz2 "https://www.dclunie.com/dicom3tools/workinprogress/dicom3tools_1.00.snapshot.20260320044638.tar.bz2"
           echo "669b0c5e28535327ed0c0375491901bc553c2493923cc55e71a09eba07e7bdd2  /tmp/dicom3tools.tar.bz2" | sha256sum -c -
           mkdir -p /tmp/dicom3tools && tar xjf /tmp/dicom3tools.tar.bz2 -C /tmp/dicom3tools
           cd /tmp/dicom3tools/dicom3tools_1.00.snapshot.20260320044638
