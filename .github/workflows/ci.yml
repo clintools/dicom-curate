@@ -118,7 +118,11 @@ jobs:
         env:
           RUN_PUBLIC_CONFORMANCE: "1"
 
+      # PR-only: semantic-release returns early on a pull request, but on a push
+      # it runs verifyAuth — a push --dry-run needing write, which this job's
+      # read-only token is refused (403). The real release runs in release.yml.
       - name: Semantic Release Dry Run
+        if: github.event_name == 'pull_request'
         run: npx semantic-release --dry-run
         env:
           # HUSKY: 0 # uncomment this to disable husky in the semantic-release step
