@@ -1,4 +1,8 @@
-import { createMappingHandler, type MappingEmit } from './applyMappingsCore'
+import {
+  createMappingHandler,
+  type MappingEmit,
+  type MappingResponse,
+} from './applyMappingsCore'
 import { fixupNodeWorkerEnvironment } from './worker'
 
 // Re-exported so existing importers keep their paths; defined in
@@ -14,11 +18,24 @@ export { safeSerializeError } from './applyMappingsCore'
 // Thread wiring only: message handling lives in applyMappingsCore.ts so it can
 // be unit-tested in-process.
 
-// Cast to any: in a worker context postMessage accepts a transfer list as the
-// second argument, but TypeScript's lib.dom.d.ts types globalThis.postMessage
-// with Window's signature which doesn't allow that form.
-const emit: MappingEmit = (msg, transfer) =>
-  (globalThis.postMessage as any)(msg, transfer)
+// Called with one argument unless there is something to transfer: an explicit
+// undefined leaves the outcome to the browser's overload resolution, and no CI
+// job exercises the browser path.
+//
+// Resolved per call, not once at module scope: under Node,
+// fixupNodeWorkerEnvironment() defines globalThis.postMessage only after this
+// module has been imported.
+//
+// Cast: in a worker context postMessage accepts a transfer list as the second
+// argument, but TypeScript's lib.dom.d.ts types globalThis.postMessage with
+// Window's signature which doesn't allow that form.
+const emit: MappingEmit = (msg, transfer) => {
+  const post = globalThis.postMessage as (
+    msg: MappingResponse,
+    transfer?: ReadableStream<Uint8Array>[],
+  ) => void
+  return transfer ? post(msg, transfer) : post(msg)
+}
 
 fixupNodeWorkerEnvironment()
   .then(() => {
