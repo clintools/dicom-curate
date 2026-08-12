@@ -24,30 +24,27 @@ export type FsQuirkFixture = {
   root: string
   /** POSIX-style paths of the generated DICOM files, relative to `root`. */
   relativePaths: string[]
-  /** Leaf filenames of the generated DICOM files. */
-  filenames: string[]
 }
+
+/** Files per fixture tree; assert against it so an empty tree cannot pass. */
+export const QUIRK_FIXTURE_FILE_COUNT = 3
 
 /**
  * Create a temporary directory tree of valid DICOM files exercising one path
  * quirk. Caller owns cleanup of the returned `root` (e.g. via `rmSync`).
- *
- * A fixed `seed` keeps the generated UIDs — and thus the tree — deterministic.
  */
 export async function writeQuirkFixture(
   quirk: PathQuirk,
-  options?: { count?: number; seed?: number },
 ): Promise<FsQuirkFixture> {
-  const count = options?.count ?? 3
-  const seed = options?.seed ?? 42
-
   const root = mkdtempSync(join(tmpdir(), `fs-edge-${quirk}-`))
 
   const spec: DatasetSpec = {
-    seed,
+    // Path segments are index-derived, so the tree is the same either way; the
+    // seed only pins the generated UIDs, and hence the file bytes.
+    seed: 1,
     layout: 'hierarchical',
     pathQuirks: [quirk],
-    studies: [{ series: [{ instances: { count } }] }],
+    studies: [{ series: [{ instances: { count: QUIRK_FIXTURE_FILE_COUNT } }] }],
   }
 
   const manifest = await writeCollectionFromSpec(spec, root)
@@ -55,6 +52,5 @@ export async function writeQuirkFixture(
   return {
     root,
     relativePaths: manifest.map((m) => m.relativePath),
-    filenames: manifest.map((m) => m.relativePath.split('/').pop() ?? ''),
   }
 }
