@@ -41,7 +41,7 @@ We do **not** require violations to disappear after curate. We only require the 
 | **Pass** | No new violations introduced (and, where applicable, live output still matches the committed baseline). |
 | **Fail — introduced** | Curate (or the test setup) added at least one normalised `dciodvfy` line not present before. Printed as `introduced` in the assertion message. |
 | **Fail — baseline drift** | Live `dciodvfy` on the fixture differs from the JSON in `baselines/` (extra or missing lines). Usually means `dicom3tools` was upgraded, or `dicom-synth` output changed. Refresh baselines after confirming the change is expected. |
-| **Skipped** | `dciodvfy` not on `PATH` and `DCIODVFY_PATH` unset — install [dicom3tools](https://www.dclunie.com/dicom3tools.html) or set `DCIODVFY_PATH`. |
+| **Skipped** | No `dciodvfy` found via `DCIODVFY_PATH`, `PATH`, or `.cache-dciodvfy/extracted/usr/bin/dciodvfy` — build [dicom3tools](https://www.dclunie.com/dicom3tools.html) (see below) or set `DCIODVFY_PATH`. |
 | **Skipped (public)** | `RUN_PUBLIC_CONFORMANCE` unset (or `0`/`false`) — needs network on first run (fetched files are cached). CI sets it; local runs opt in. |
 | **Skipped (local)** | `CONFORMANCE_LOCAL_PATH` unset — optional private corpus; off in default CI. |
 | **Fail (local config)** | `CONFORMANCE_LOCAL_PATH` set but invalid (missing path, no `.dcm` files, etc.) — one failing test reports the error. |
@@ -103,7 +103,7 @@ Unit tests for line parsing and normalisation. Always runs; does not need `dciod
 
 `public-cases.json` is a local catalog in the same format as dicom-synth's bundled one (loaded with its `loadCasesFromJson`). Each case is a real quirky DICOM file, fetched on demand from upstream and pinned by sha256 — an upstream change fails loudly with a "bump metadata" error rather than drifting silently. Fetched files land in `~/.cache/dicom-synth-testcases/<sha256>/` and are reused across runs; CI caches that directory keyed on the catalog hash, so network is only needed when the catalog changes.
 
-Cases come from two public, permissively-licensed corpora, each pinned so an upstream change fails loudly rather than drifting silently.
+Cases come from two public corpora, each pinned so an upstream change fails loudly rather than drifting silently. No fixture is vendored here — the catalog holds a URL and a sha256, and files are fetched into the local cache on demand.
 
 **pydicom** — MIT-licensed [test_files](https://github.com/pydicom/pydicom/tree/main/src/pydicom/data/test_files), pinned to the `v3.0.1` tag:
 
@@ -122,7 +122,7 @@ Cases come from two public, permissively-licensed corpora, each pinned so an ups
 | `pydicom-UN-sequence` | Sequence encoded with VR UN | `curate_skip` — dcmjs cannot parse it; passthrough test pins the rejection |
 | `pydicom-meta-missing-tsyntax` | File meta without TransferSyntaxUID | `curate_skip` — dcmjs cannot parse it; passthrough test pins the rejection |
 
-**GDCM** — BSD-licensed test data from [malaterre/gdcmdata](https://github.com/malaterre/gdcmdata), pinned to the submodule commit `9b38ac7` that GDCM `v3.2.10` references:
+**GDCM** — test data from [malaterre/gdcmdata](https://github.com/malaterre/gdcmdata), pinned to the submodule commit `9b38ac7` that GDCM `v3.2.10` references. **Licence status is unresolved:** that repository carries no `LICENSE`/`COPYING`/`NOTICE` at the pinned commit, and GDCM's own `README.Copyright.txt` grants BSD over the GDCM distribution rather than over this separately-hosted data. Treat the files as publicly-published test material of unstated licence — do not restate them as BSD, and prefer keeping them fetched-by-URL rather than vendored.
 
 | Case | Quirk | Flags |
 |------|-------|-------|
@@ -149,7 +149,7 @@ Some `dciodvfy` warnings are disputed or context-dependent. Regexes in `allowlis
 
 | Entry | Why suppressed |
 |-------|----------------|
-| `Warning: … Attribute is not present in standard DICOM IOD` | **Environment-sensitive**, not just version-sensitive: the *same* pinned snapshot emits a different set of these warnings depending on where it is built and run. Observed — macOS/arm64 and emulated `linux/amd64` Docker emit members that CI's native x86_64 Linux runner does not. Suppressing the whole class keeps committed baselines reproducible across dev machines and CI (verified: a macOS build and CI's x86_64 build then produce identical baseline JSON). Trade-off: a curate change that *added* a non-IOD attribute would not be flagged; warning-level only. |
+| `Warning: … Attribute is not present in standard DICOM IOD` | **Environment-sensitive**, not just version-sensitive: the *same* pinned snapshot emits a different set of these warnings depending on where it is built and run. Observed — macOS/arm64 and emulated `linux/amd64` Docker emit members that CI's native x86_64 Linux runner does not. Suppressing the whole class keeps committed baselines reproducible across dev machines and CI — verified for *today's* corpus, in that a macOS build and CI's x86_64 build then produce identical baseline JSON. That is evidence, not a guarantee: it says this is the only class we have seen diverge, not that no other class can, which is why baselines are still generated on the CI platform (see [Regenerating baselines](#regenerating-baselines--always-on-the-ci-platform)). Trade-off: a curate change that *added* a non-IOD attribute would not be flagged; warning-level only. |
 
 **Remember:** `dciodvfy` remains a regression aid, not a certification tool.
 
@@ -215,6 +215,13 @@ relies on the allowlist having already caught every divergence.
   `grep -aoE '1\.00\.snapshot\.[0-9]+' "$(command -v dciodvfy)"` must print the
   pinned snapshot. A stray older `dciodvfy` on `PATH` silently produces baselines
   that fail CI as drift.
+- **Some baselines encode the build's integer width.** dicom3tools typedefs
+  `Uint32` as `unsigned long` (`libsrc/include/generic/basetype.h`), so on LP64
+  the byte offsets in "Bad Explicit Value Length" messages do not wrap at 2³²:
+  `gdcm-private-icon-no-item` records `0x10000012f`, which a Windows-native
+  (LLP64) or 32-bit build would print as `0x12f`. Stable across every platform
+  the rule above allows; deliberately not normalised, since the value is real
+  fixture output.
 - **Keep the allowlist active when regenerating** (`update:conformance-baselines`
   applies it at write time). Baselines generated with it disabled bake in the
   environment-specific warnings above and then fail CI as `missing:` drift.

@@ -126,7 +126,7 @@
     {
       "id": "gdcm-acr-nema-libido",
       "violation_class": "acr-nema-legacy",
-      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) LIBIDO-8-ACR_NEMA-Lena_128_128.acr; legacy ACR-NEMA (pre-DICOM) with no File Meta Information — dciodvfy reports 'Information Object Not found'.",
+      "notes": "GDCM test file (malaterre/gdcmdata, no upstream licence file) LIBIDO-8-ACR_NEMA-Lena_128_128.acr; legacy ACR-NEMA (pre-DICOM) with no File Meta Information — dciodvfy reports 'Information Object Not found'.",
       "source": {
         "kind": "url",
         "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/LIBIDO-8-ACR_NEMA-Lena_128_128.acr"
@@ -136,7 +136,7 @@
     {
       "id": "gdcm-rle-palette-derma",
       "violation_class": "rle-palette-color",
-      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) DermaColorLossLess.dcm; RLE-lossless palette-colour image; missing File Meta group length with a SOP Instance UID mismatch.",
+      "notes": "GDCM test file (malaterre/gdcmdata, no upstream licence file) DermaColorLossLess.dcm; RLE-lossless palette-colour image; missing File Meta group length with a SOP Instance UID mismatch.",
       "source": {
         "kind": "url",
         "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/DermaColorLossLess.dcm"
@@ -146,7 +146,7 @@
     {
       "id": "gdcm-jp2-vs-j2k",
       "violation_class": "jp2-vs-j2k-codestream",
-      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) ELSCINT1_JP2vsJ2K.dcm; JP2 file-format wrapper where a raw JPEG 2000 codestream is expected; also invalid CS characters in BodyPartExamined.",
+      "notes": "GDCM test file (malaterre/gdcmdata, no upstream licence file) ELSCINT1_JP2vsJ2K.dcm; JP2 file-format wrapper where a raw JPEG 2000 codestream is expected; also invalid CS characters in BodyPartExamined.",
       "source": {
         "kind": "url",
         "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/ELSCINT1_JP2vsJ2K.dcm"
@@ -156,7 +156,7 @@
     {
       "id": "gdcm-cp246-sq-as-un",
       "violation_class": "cp246-encapsulated-pixeldata-vr",
-      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) MEDILABInvalidCP246_EVRLESQasUN.dcm; CP-246 explicit-VR encoding where encapsulated PixelData VR is OW but OB is required.",
+      "notes": "GDCM test file (malaterre/gdcmdata, no upstream licence file) MEDILABInvalidCP246_EVRLESQasUN.dcm; CP-246 explicit-VR encoding where encapsulated PixelData VR is OW but OB is required.",
       "source": {
         "kind": "url",
         "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/MEDILABInvalidCP246_EVRLESQasUN.dcm"
@@ -167,7 +167,7 @@
       "id": "gdcm-undef-item-wrong-vl",
       "violation_class": "undefined-length-item-wrong-vl",
       "curate_skip": true,
-      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) BugGDCM2_UndefItemWrongVL.dcm; a sequence item declares an incorrect value length. dcmjs cannot parse it (curateOne rejects the file), so only the dciodvfy drift check runs.",
+      "notes": "GDCM test file (malaterre/gdcmdata, no upstream licence file) BugGDCM2_UndefItemWrongVL.dcm; a sequence item declares an incorrect value length. dcmjs cannot parse it (curateOne rejects the file), so only the dciodvfy drift check runs.",
       "source": {
         "kind": "url",
         "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/BugGDCM2_UndefItemWrongVL.dcm"
@@ -178,7 +178,7 @@
       "id": "gdcm-private-icon-no-item",
       "violation_class": "malformed-private-sequence-length",
       "curate_skip": true,
-      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) Bug_Siemens_PrivateIconNoItem.dcm; a private icon sequence carries a corrupt explicit length. dcmjs cannot parse it (curateOne rejects the file), so only the dciodvfy drift check runs.",
+      "notes": "GDCM test file (malaterre/gdcmdata, no upstream licence file) Bug_Siemens_PrivateIconNoItem.dcm; a private icon sequence carries a corrupt explicit length. dcmjs cannot parse it (curateOne rejects the file), so only the dciodvfy drift check runs.",
       "source": {
         "kind": "url",
         "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/Bug_Siemens_PrivateIconNoItem.dcm"
@@ -188,7 +188,7 @@
     {
       "id": "gdcm-no-preamble",
       "violation_class": "missing-preamble",
-      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) US-IRAD-NoPreambleStartWith0003.dcm; no 128-byte preamble/DICM prefix, starting at group 0003 which dciodvfy flags as an illegal private group.",
+      "notes": "GDCM test file (malaterre/gdcmdata, no upstream licence file) US-IRAD-NoPreambleStartWith0003.dcm; no 128-byte preamble/DICM prefix, starting at group 0003 which dciodvfy flags as an illegal private group.",
       "source": {
         "kind": "url",
         "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/US-IRAD-NoPreambleStartWith0003.dcm"
@@ -198,7 +198,7 @@
     {
       "id": "gdcm-missing-icon-pixeldata",
       "violation_class": "missing-icon-image-pixeldata",
-      "notes": "BSD-licensed GDCM test file (malaterre/gdcmdata) CT-SIEMENS-MissingPixelDataInIconSQ.dcm; an IconImageSequence item is missing the Type 1 required PixelData.",
+      "notes": "GDCM test file (malaterre/gdcmdata, no upstream licence file) CT-SIEMENS-MissingPixelDataInIconSQ.dcm; an IconImageSequence item is missing the Type 1 required PixelData.",
       "source": {
         "kind": "url",
         "url": "https://raw.githubusercontent.com/malaterre/gdcmdata/9b38ac7a8baee4e943505ab3c56fb7d19d54754f/CT-SIEMENS-MissingPixelDataInIconSQ.dcm"
