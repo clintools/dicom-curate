@@ -73,6 +73,10 @@ describe('scanDirectoryWorker (Node path scan)', () => {
     ).toBe(true)
   })
 
+  // The exhaustive quirk sweep lives in scanDirectoryWorker.fsedgecases.test.ts
+  // and asserts the full file set. The two cases below are kept for the
+  // specifics dicom-synth does not generate: CJK segments rather than Latin
+  // accents, and a dot on the only directory rather than on every one.
   it('handles unicode path segments', async () => {
     const root = mkdtempSync(join(tmpdir(), 'scan-unicode-'))
     trees.push(root)
@@ -113,6 +117,8 @@ describe('scanDirectoryWorker (Node path scan)', () => {
     }
   })
 
+  // Deeper than the fsedgecases deep-nesting fixture (8 quirk segments under
+  // two hierarchy levels), so it stays alongside that sweep.
   it('uses a deep path without failing', async () => {
     const root = mkdtempSync(join(tmpdir(), 'scan-long-'))
     trees.push(root)
