@@ -56,7 +56,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache-dciodvfy/extracted/usr/bin
-          key: dciodvfy-${{ runner.os }}-1.00.snapshot.20260320044638-v3
+          key: dciodvfy-${{ runner.os }}-1.00.snapshot.20260320044638-v4
 
       - name: Build dciodvfy (dicom3tools 1.00.snapshot.20260320044638)
         if: steps.cache-dciodvfy.outputs.cache-hit != 'true'
