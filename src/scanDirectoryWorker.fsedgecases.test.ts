@@ -4,7 +4,7 @@ import type { PathQuirk } from 'dicom-synth'
 import {
   QUIRK_FIXTURE_FILE_COUNT,
   writeQuirkFixture,
-} from '../testutils/fsFixtures'
+} from '../testutils/synthFixtures'
 import { collectScanMessages } from '../testutils/workerTestHelpers'
 
 // On POSIX filesystems every quirk below is legal and must be discovered in

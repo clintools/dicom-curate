@@ -10,7 +10,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/minimalDicom'
+import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/synthFixtures'
 import { curateOne } from './curateOne'
 import type { TCurationSpecification, TFileInfo } from './types'
 

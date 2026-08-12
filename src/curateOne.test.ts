@@ -3,7 +3,7 @@ import { generateFile } from 'dicom-synth'
 import {
   buildDicomdirDcmjsBuffer,
   DICOMDIR_SOP_CLASS_UID,
-} from '../testutils/minimalDicom'
+} from '../testutils/dicomdirFixture'
 import { curateOne } from './curateOne'
 import { hash } from './hash'
 import type {
