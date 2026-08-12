@@ -185,7 +185,10 @@ mkdir -p /tmp/dicom3tools && tar xjf /tmp/dicom3tools.tar.bz2 -C /tmp/dicom3tool
 cd /tmp/dicom3tools/dicom3tools_1.00.snapshot.20260320044638
 ./Configure
 imake -I./config -DInstallInTopDir -DUseXXXXID
-make World   # prints errors for vendor converters and display tools; exits 0
+# Vendor converters and display tools print errors; World's exit status does not
+# reflect them either way, so check for the binary rather than trusting it.
+make World || true
+test -x appsrc/dcfile/dciodvfy
 
 export DCIODVFY_PATH=/tmp/dicom3tools/dicom3tools_1.00.snapshot.20260320044638/appsrc/dcfile/dciodvfy
 ```
