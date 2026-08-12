@@ -1,7 +1,10 @@
 import { rmSync } from 'node:fs'
 import { basename } from 'node:path'
 import type { PathQuirk } from 'dicom-synth'
-import { writeQuirkFixture } from '../testutils/fsFixtures'
+import {
+  QUIRK_FIXTURE_FILE_COUNT,
+  writeQuirkFixture,
+} from '../testutils/fsFixtures'
 import { collectScanMessages } from '../testutils/workerTestHelpers'
 
 // On POSIX filesystems every quirk below is legal and must be discovered in
@@ -17,7 +20,7 @@ const quirks: PathQuirk[] = [
 
 function relativeFromRoot(root: string, path: string, name: string): string {
   const prefix = `${basename(root)}/`
-  return `${path}/${name}`.replace(prefix, '')
+  return `${path}/${name}`.slice(prefix.length)
 }
 
 describe('scanDirectoryWorker over edge-case directory trees', () => {
@@ -34,6 +37,7 @@ describe('scanDirectoryWorker over edge-case directory trees', () => {
   )('discovers every DICOM file under %s paths', async (quirk) => {
     const { root, relativePaths } = await writeQuirkFixture(quirk)
     trees.push(root)
+    expect(relativePaths).toHaveLength(QUIRK_FIXTURE_FILE_COUNT)
 
     const { files, done, error } = await collectScanMessages(root)
     expect(error).toBeUndefined()
