@@ -24,6 +24,10 @@ function findEntryPoints(dir, baseDir = '') {
       // Skip UMD-specific entry point (only for rollup)
       if (item === 'index.umd.ts') continue
 
+      // Skip the worker cores: their worker entry points already inline them,
+      // so a standalone bundle each is ~5 MB of output nothing imports.
+      if (item === 'scanCore.ts' || item === 'applyMappingsCore.ts') continue
+
       // Add as entry point
       entries.push(`src/${relativePath}`)
     }
