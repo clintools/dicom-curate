@@ -45,11 +45,32 @@ export type UploadError = {
   error: string
 }
 
+/** Mapping results as curateOne returns them, forwarded verbatim. */
+type MapResults = Awaited<ReturnType<typeof curateOne>>
+
+/** Everything the mapping worker sends back to the main thread. */
+export type MappingResponse =
+  | { response: 'error'; error: string; fileInfo: TFileInfo }
+  | { response: 'lookup'; outputPath: string }
+  | {
+      response: 'upload'
+      key: string
+      stream: ReadableStream<Uint8Array>
+      size: number
+      contentType?: string
+      headers?: Record<string, string>
+    }
+  | { response: 'finished'; mapResults: MapResults }
+
 /**
  * Callback used to emit results to the main thread. The optional transfer list
- * matches the worker postMessage form used to hand off a ReadableStream.
+ * matches the worker postMessage form used to hand off a ReadableStream — the
+ * upload stream is the only thing this worker ever transfers.
  */
-export type MappingEmit = (msg: unknown, transfer?: unknown[]) => void
+export type MappingEmit = (
+  msg: MappingResponse,
+  transfer?: ReadableStream<Uint8Array>[],
+) => void
 
 /**
  * Safely serialize an error for postMessage to avoid DataCloneError.
