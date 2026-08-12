@@ -48,6 +48,8 @@ We do **not** require violations to disappear after curate. We only require the 
 
 Normalised violation keys look like `Error::</TagName(gggg,eeee)>::message` (file paths stripped). See `dciodvfy.ts` → `normaliseViolation`.
 
+`Value dubious for this VR [PN]` messages echo the offending person name, and upstream fixtures carry real ones. The value is replaced with `<redacted>` during normalisation so it never reaches a committed baseline — the tag path still identifies the finding, so drift detection is unaffected.
+
 ## The `baselines/` folder
 
 **Not DICOM files.** Each `*.dciodvfy-baseline.json` is a saved list of normalised violation strings from one `dciodvfy -new` run on a fixture **at a point in time**.

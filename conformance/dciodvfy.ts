@@ -45,7 +45,8 @@ export function parseDciodvfyOutput(
 
 /**
  * Normalise for set comparison: `severity::tagPath::message`
- * Drops filesystem paths and collapses per-character UI invalid-value noise.
+ * Drops filesystem paths, collapses per-character UI invalid-value noise, and
+ * redacts echoed person names.
  *
  * Splits on the literal ` - ` separator; tag paths or messages containing that
  * substring may be parsed incorrectly.
@@ -76,6 +77,14 @@ export function normaliseViolation(v: DciodvfyViolation): string {
       message = base
     }
   }
+
+  // These messages echo the offending person name back. Upstream fixtures carry
+  // real identifying values, and the name adds no drift signal the tag path does
+  // not already carry, so keep the finding and drop the value.
+  message = message.replace(
+    /^(Value dubious for this VR \[PN\]) = <.*>/,
+    '$1 = <redacted>',
+  )
 
   return `${severity}::${tagPath}::${message}`
 }
