@@ -64,8 +64,12 @@ jobs:
           cd /tmp/dicom3tools/dicom3tools_1.00.snapshot.20260320044638
           ./Configure
           imake -I./config -DInstallInTopDir -DUseXXXXID
-          # World tolerates failures in vendor converters and display tools we do not need
-          make World -j"$(nproc)"
+          # World's exit status is not a build result: its final `all` step runs
+          # each subdir in one shell for-loop that keeps only the last status
+          # (config/Imake.rules:429; ALLSUBDIRS ends `libsrc appsrc support`), so
+          # a failure in appsrc is masked and one in support aborts the step.
+          # Vendor converters we do not need fail routinely — `test -x` decides.
+          make World -j"$(nproc)" || echo "make World reported failures; checking for dciodvfy"
           test -x appsrc/dcfile/dciodvfy
           mkdir -p "$GITHUB_WORKSPACE/.cache-dciodvfy/extracted/usr/bin"
           cp appsrc/dcfile/dciodvfy "$GITHUB_WORKSPACE/.cache-dciodvfy/extracted/usr/bin/dciodvfy"
