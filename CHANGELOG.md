@@ -1,3 +1,10 @@
+## [0.41.1](https://github.com/clintools/dicom-curate/compare/v0.41.0...v0.41.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* drop the dead worker core bundles from the esm build ([cb4b1a4](https://github.com/clintools/dicom-curate/commit/cb4b1a4e7b7d23a7c1693fbd55eaf84aecc969ec))
+
 # [0.41.0](https://github.com/clintools/dicom-curate/compare/v0.40.7...v0.41.0) (2026-07-26)
 
 
