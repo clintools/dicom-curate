@@ -6,43 +6,52 @@
  * its workers from `new URL('./*.js', import.meta.url)` and offers no
  * injection seam.
  */
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { join } from 'node:path'
 import { curateMany } from 'dicom-curate'
+import { afterEach } from 'vitest'
 import type {
   OrganizeOptions,
   TCurationSpecification,
   TProgressMessage,
 } from '../src/types'
 import { VALID_CT_IMAGE, writeSynthFile } from './synthFixtures'
+import {
+  assertInputOutputDisjoint,
+  createWorkspace,
+  INPUT_DIR_NAME,
+  type Workspace,
+} from './workspace'
 
-export type IntegrationWorkspace = {
-  inputDir: string
-  outputDir: string
-  cleanup: () => void
+export { listFilesRecursive, type Workspace } from './workspace'
+
+export function createIntegrationWorkspace(): Workspace {
+  return createWorkspace('dicom-curate-integration-')
 }
 
-/** Fail fast when input and output trees could collide. */
-function assertDisjoint(inputDir: string, outputDir: string): void {
-  const input = resolve(inputDir)
-  const output = resolve(outputDir)
-  if (input === output || output.startsWith(input + sep)) {
-    throw new Error(`output dir must not sit inside input dir: ${output}`)
-  }
+// The specs below hard-code `input/...` because spec functions are serialized
+// to the worker and cannot close over variables. Fail loudly if the workspace
+// layout ever stops matching that literal.
+if (INPUT_DIR_NAME !== 'input') {
+  throw new Error(
+    `integrationHarness specs hard-code 'input/...' but INPUT_DIR_NAME is '${INPUT_DIR_NAME}'`,
+  )
 }
 
-export function createIntegrationWorkspace(): IntegrationWorkspace {
-  const base = mkdtempSync(join(tmpdir(), 'dicom-curate-integration-'))
-  const inputDir = join(base, 'input')
-  const outputDir = join(base, 'output')
-  mkdirSync(inputDir, { recursive: true })
-  mkdirSync(outputDir, { recursive: true })
-  assertDisjoint(inputDir, outputDir)
-  return {
-    inputDir,
-    outputDir,
-    cleanup: () => rmSync(base, { recursive: true, force: true }),
+/**
+ * Register per-test workspace cleanup and return a factory for them. Call once
+ * inside a `describe`; every workspace it hands out is removed after each test.
+ */
+export function useWorkspaces(): () => Workspace {
+  const workspaces: Workspace[] = []
+  afterEach(() => {
+    for (const w of workspaces.splice(0)) {
+      w.cleanup()
+    }
+  })
+  return () => {
+    const w = createIntegrationWorkspace()
+    workspaces.push(w)
+    return w
   }
 }
 
@@ -83,27 +92,24 @@ export async function writeImages(
   return written
 }
 
-/** Every file under `dir`, recursively, as paths relative to `dir`. */
-export function listFilesRecursive(dir: string, prefix = ''): string[] {
-  const out: string[] = []
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry)
-    const rel = prefix ? `${prefix}/${entry}` : entry
-    if (statSync(full).isDirectory()) {
-      out.push(...listFilesRecursive(full, rel))
-    } else {
-      out.push(rel)
-    }
-  }
-  return out
-}
-
-/** Minimal spec mirroring an `input/study/subject` tree. */
+/**
+ * Minimal spec mirroring the `input/study/subject` tree `createWorkspace`
+ * builds.
+ *
+ * The pattern's leading `input` is required, not incidental: scanned paths are
+ * relative to the scan root's parent, so they start with the input directory's
+ * own basename. Omitting it shifts every `getFilePathComp` lookup by one and
+ * silently returns the wrong segment rather than erroring.
+ *
+ * It must stay an inline literal — spec functions are serialized to the worker
+ * and `checkClosure` rejects any closed-over variable, so this cannot reference
+ * `INPUT_DIR_NAME`. The assertion below keeps the two in step.
+ */
 export function integrationSpec(): () => TCurationSpecification {
   return () => ({
     version: '3.0',
     hostProps: { protocolNumber: 'integration' },
-    inputPathPattern: 'study/subject',
+    inputPathPattern: 'input/study/subject',
     dicomPS315EOptions: 'Off',
     modifyDicomHeader: () => ({}),
     outputFilePathComponents: (parser) => [
@@ -134,19 +140,31 @@ export type IntegrationOverrides = Partial<
 >
 
 /**
- * Spec for the CSV-load (two-pass) mapping flow: PatientID is rewritten from a
- * `table` joined on the original value. Pair with `table: [{ oldId, newId }]`
- * on the options.
+ * Spec for the direct CSV-load mapping flow (`additionalData.type: 'load'`):
+ * PatientID is rewritten from a supplied `table`, joined on the original
+ * value. Requires `table: [{ oldId, newId }]` on the options.
+ *
+ * Not the two-pass flow — that is `type: 'listing'`, which derives its mapping
+ * from a first read-only pass instead of a caller-supplied table.
  */
 export function csvMappingSpec(): () => TCurationSpecification {
   return () => ({
     version: '3.0',
     hostProps: {},
-    inputPathPattern: 'study/subject',
+    // Inline literal, and must include the input dir basename — see
+    // integrationSpec above.
+    inputPathPattern: 'input/study/subject',
     dicomPS315EOptions: 'Off',
-    modifyDicomHeader: (parser) => ({
-      PatientID: String(parser.getMapping?.('centerSubjectId')),
-    }),
+    modifyDicomHeader: (parser) => {
+      // Without a `table`, getMapping is undefined and `String(undefined)`
+      // would write the literal 'undefined' as PatientID with no error at all.
+      if (!parser.getMapping) {
+        throw new Error(
+          'csvMappingSpec requires `table` in the curate options (no mapping resolver was supplied)',
+        )
+      }
+      return { PatientID: String(parser.getMapping('centerSubjectId')) }
+    },
     additionalData: {
       type: 'load',
       collect: {},
@@ -173,7 +191,7 @@ export function integrationOptions(
   curationSpec: OrganizeOptions['curationSpec'],
   overrides?: IntegrationOverrides,
 ): OrganizeOptions {
-  assertDisjoint(inputDir, outputDir)
+  assertInputOutputDisjoint(inputDir, outputDir)
   return {
     inputType: 'path',
     inputDirectory: inputDir,
@@ -210,6 +228,10 @@ export async function runCapturingProgress(
 /**
  * As above, but resolves with the rejection instead of throwing — so the
  * progress captured before a failure stays inspectable.
+ *
+ * Throws if the run *completes*: a caller using this expects a rejection, and
+ * surfacing that as `error: undefined` would turn a real regression into a
+ * confusing assertion mismatch further down the test.
  */
 export async function runExpectingRejection(
   options: OrganizeOptions,
@@ -221,8 +243,10 @@ export async function runExpectingRejection(
       progress.push(msg)
       onMessage?.(msg)
     })
-    return { progress, error: undefined }
   } catch (error) {
     return { progress, error }
   }
+  throw new Error(
+    `expected curateMany to reject, but it completed after ${progress.length} progress messages`,
+  )
 }

@@ -1,94 +1,19 @@
-import { createHash } from 'node:crypto'
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-} from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, relative, resolve, sep } from 'node:path'
 import type { OrganizeOptions, TCurationSpecification } from '../src/types'
+import { createWorkspace as createSharedWorkspace } from '../testutils/workspace'
 
-/** Fail fast when input and output trees could collide. */
-export function assertInputOutputDisjoint(
-  inputDir: string,
-  outputDir: string,
-): void {
-  const input = resolve(inputDir)
-  const output = resolve(outputDir)
-  if (
-    input === output ||
-    input.startsWith(output + sep) ||
-    output.startsWith(input + sep)
-  ) {
-    throw new Error(
-      `Input and output directories must not overlap (input=${input}, output=${output})`,
-    )
-  }
-}
+// Workspace and directory helpers are shared with the integration suite; see
+// testutils/workspace.ts.
+export {
+  assertInputOutputDisjoint,
+  hashDirectoryFiles,
+  listFilesRecursive,
+  type Workspace,
+} from '../testutils/workspace'
 
-export function createWorkspace(): {
-  inputDir: string
-  outputDir: string
-  cleanup: () => void
-} {
-  const base = mkdtempSync(join(tmpdir(), 'dicom-curate-e2e-'))
-  const inputDir = join(base, 'input')
-  const outputDir = join(base, 'output')
-  mkdirSync(inputDir, { recursive: true })
-  mkdirSync(outputDir, { recursive: true })
-  assertInputOutputDisjoint(inputDir, outputDir)
-  return {
-    inputDir,
-    outputDir,
-    cleanup: () => {
-      if (existsSync(base)) {
-        rmSync(base, { recursive: true, force: true })
-      }
-    },
-  }
-}
+import { assertInputOutputDisjoint } from '../testutils/workspace'
 
-export function hashDirectoryFiles(root: string): Map<string, string> {
-  const hashes = new Map<string, string>()
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        walk(full)
-      } else {
-        const rel = relative(root, full)
-        const digest = createHash('sha256')
-          .update(readFileSync(full))
-          .digest('hex')
-        hashes.set(rel, digest)
-      }
-    }
-  }
-  if (existsSync(root)) {
-    walk(root)
-  }
-  return hashes
-}
-
-export function listFilesRecursive(root: string): string[] {
-  const files: string[] = []
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        walk(full)
-      } else {
-        files.push(relative(root, full))
-      }
-    }
-  }
-  if (existsSync(root)) {
-    walk(root)
-  }
-  return files.sort()
+export function createWorkspace() {
+  return createSharedWorkspace('dicom-curate-e2e-')
 }
 
 /** Minimal spec: path-aware layout under study/subject/. */

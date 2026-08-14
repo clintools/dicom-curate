@@ -8,30 +8,17 @@
  * backpressure round-trip is driven by `index.ts` against a live worker.
  */
 import {
-  createIntegrationWorkspace,
-  type IntegrationWorkspace,
   integrationOptions,
   integrationSpec,
   listFilesRecursive,
   runCapturingProgress,
   runExpectingRejection,
+  useWorkspaces,
   writeImages,
 } from '../testutils/integrationHarness'
 
 describe('curateMany orchestration with real workers', () => {
-  const workspaces: IntegrationWorkspace[] = []
-
-  afterEach(() => {
-    for (const w of workspaces.splice(0)) {
-      w.cleanup()
-    }
-  })
-
-  function workspace(): IntegrationWorkspace {
-    const w = createIntegrationWorkspace()
-    workspaces.push(w)
-    return w
-  }
+  const workspace = useWorkspaces()
 
   it('processes every file exactly once across a pool of four workers', async () => {
     const { inputDir, outputDir } = workspace()
@@ -128,6 +115,12 @@ describe('curateMany orchestration with real workers', () => {
 
     // Real workers were hard-terminated. A fresh run over the same input must
     // still complete — partial output from the aborted run is re-processed.
+    //
+    // KNOWN RACE: mappingWorkerPool holds its state at module level and the
+    // next run resets `aborted` to false. A message still in flight from a
+    // terminated run-1 worker can therefore pass the `if (aborted) return`
+    // guard and mutate run-2 counters. If this assertion ever flakes, that is
+    // the cause — it is a product bug, not a test bug.
     const { result } = await runCapturingProgress(
       integrationOptions(inputDir, outputDir, integrationSpec(), {
         workerCount: 2,

@@ -438,13 +438,20 @@ result.excluded // => 'pre' | 'post' | undefined
 
 ## Testing
 
-Vitest is split into three projects in `vitest.config.ts`:
+Vitest is split into four projects in `vitest.config.ts`:
 
 | Command | Project | Location | Purpose |
 |---------|---------|----------|---------|
-| `pnpm test` | `unit` | `src/**/*.test.ts` | Unit and integration tests co-located with source |
+| `pnpm test` | `unit` | `src/**/*.test.ts` | Unit tests co-located with source (excludes `*.integration.test.ts`) |
+| `pnpm test:integration` | `integration` | `src/**/*.integration.test.ts` | Cross-module flows through real workers (runs `build:esm` first; uses `dist/`) |
 | `pnpm test:e2e` | `e2e` | `e2e/` | Pipeline smoke tests (runs `build:esm` first; uses `dist/`) |
 | `pnpm test:conformance` | `conformance` | `conformance/` | `dciodvfy` regression (synthetic; optional public/local via env) |
+
+`integration` and `e2e` both drive the real workers from `dist/esm`, since
+`curateMany` builds them from `new URL(...)` and has no injection seam. They
+differ in intent: `e2e` asserts the final outputs of the public API, while
+`integration` targets intermediate behaviour and failure handling (progress
+messages, concurrency, backpressure, abort).
 
 Other scripts:
 

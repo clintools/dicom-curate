@@ -8,28 +8,15 @@
  */
 import { join } from 'node:path'
 import {
-  createIntegrationWorkspace,
-  type IntegrationWorkspace,
   integrationOptions,
   integrationSpec,
   runCapturingProgress,
+  useWorkspaces,
 } from '../testutils/integrationHarness'
 import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/synthFixtures'
 
 describe('curateMany driven through real workers', () => {
-  const workspaces: IntegrationWorkspace[] = []
-
-  afterEach(() => {
-    for (const w of workspaces.splice(0)) {
-      w.cleanup()
-    }
-  })
-
-  function workspace(): IntegrationWorkspace {
-    const w = createIntegrationWorkspace()
-    workspaces.push(w)
-    return w
-  }
+  const workspace = useWorkspaces()
 
   it('reports progress incrementally before the run completes', async () => {
     const { inputDir, outputDir } = workspace()
@@ -88,10 +75,10 @@ describe('curateMany driven through real workers', () => {
     // The source filename is deliberately NOT preserved. With de-identification
     // off and the output path differing from the input path, collectMappings
     // renames the leaf to `<Modality>_<sourceInstanceUID>.dcm` so that
-    // restructuring two trees into one cannot collide.
-    expect(mapped?.outputFilePath).toMatch(/^curated\//)
+    // restructuring two trees into one cannot collide. The 'subject' segment
+    // confirms getFilePathComp resolved against the right path component.
     expect(mapped?.outputFilePath).toBe(
-      `curated/study/CT_${mapped?.sourceInstanceUID}.dcm`,
+      `curated/subject/CT_${mapped?.sourceInstanceUID}.dcm`,
     )
 
     // The same result is also accumulated into the terminal message, so a
