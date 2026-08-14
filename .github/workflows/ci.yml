@@ -105,6 +105,9 @@ jobs:
       - name: E2E smoke
         run: pnpm test:e2e
 
+      - name: Integration tests
+        run: pnpm test:integration
+
       - name: Cache public conformance fixtures
         uses: actions/cache@v4
         with:

@@ -1,5 +1,9 @@
 /**
- * Two-pass CSV mapping (strategy W2) driven through `curateMany`.
+ * Direct CSV-load mapping (`additionalData.type: 'load'`) driven through
+ * `curateMany` — a caller-supplied `table` joined per file.
+ *
+ * NOT the two-pass flow: that is `type: 'listing'`, which derives its mapping
+ * from a first read-only pass.
  *
  * `applyMappingsWorker.test.ts` already exercises the mapping worker against a
  * real worker, but one file per run — so it cannot detect mis-attribution. The
@@ -7,32 +11,19 @@
  * its own file when several workers process the batch concurrently.
  */
 import {
-  createIntegrationWorkspace,
   csvMappingSpec,
-  type IntegrationWorkspace,
   integrationOptions,
   listFilesRecursive,
   runCapturingProgress,
+  useWorkspaces,
   writeImages,
 } from '../testutils/integrationHarness'
 
 /** Target ids this suite maps onto; source ids come from `writeImages`. */
 const mappedId = (i: number) => `NEW-${String(i).padStart(4, '0')}`
 
-describe('two-pass CSV mapping through real workers', () => {
-  const workspaces: IntegrationWorkspace[] = []
-
-  afterEach(() => {
-    for (const w of workspaces.splice(0)) {
-      w.cleanup()
-    }
-  })
-
-  function workspace(): IntegrationWorkspace {
-    const w = createIntegrationWorkspace()
-    workspaces.push(w)
-    return w
-  }
+describe('direct CSV-load mapping through real workers', () => {
+  const workspace = useWorkspaces()
 
   it('binds each CSV row to its own file across a concurrent batch', async () => {
     const { inputDir, outputDir } = workspace()

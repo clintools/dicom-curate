@@ -4,6 +4,19 @@ import { defineConfig } from 'vitest/config'
 
 const repoRoot = fileURLToPath(new URL('.', import.meta.url))
 
+const COMMON_EXCLUDE = ['**/node_modules/**', '**/dist/**']
+
+/** Inlined so vitest transforms its ESM rather than failing to require it. */
+const inlineDeps = (...extra: string[]) => ({
+  deps: { inline: ['@noble/hashes', ...extra] },
+})
+
+/** Suites that build and drive the real dist/esm workers need longer limits. */
+const REAL_WORKER_TIMEOUTS = {
+  testTimeout: 120_000,
+  hookTimeout: 30_000,
+}
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -43,19 +56,14 @@ export default defineConfig({
           name: 'unit',
           include: ['src/**/*.test.ts'],
           exclude: [
-            '**/node_modules/**',
-            '**/dist/**',
+            ...COMMON_EXCLUDE,
             'e2e/**',
             'conformance/**',
             // Runs in the 'integration' project instead: needs the dist/esm
             // build, so it cannot run in the fast unit pass.
             'src/**/*.integration.test.ts',
           ],
-          server: {
-            deps: {
-              inline: ['@noble/hashes'],
-            },
-          },
+          server: inlineDeps(),
         },
       },
       {
@@ -63,14 +71,9 @@ export default defineConfig({
         test: {
           name: 'e2e',
           include: ['e2e/**/*.test.ts'],
-          exclude: ['**/node_modules/**', '**/dist/**'],
-          testTimeout: 120_000,
-          hookTimeout: 30_000,
-          server: {
-            deps: {
-              inline: ['@noble/hashes'],
-            },
-          },
+          exclude: COMMON_EXCLUDE,
+          ...REAL_WORKER_TIMEOUTS,
+          server: inlineDeps(),
         },
       },
       {
@@ -79,14 +82,9 @@ export default defineConfig({
           // Cross-module flows driven through real workers from dist/esm.
           name: 'integration',
           include: ['src/**/*.integration.test.ts'],
-          exclude: ['**/node_modules/**', '**/dist/**'],
-          testTimeout: 120_000,
-          hookTimeout: 30_000,
-          server: {
-            deps: {
-              inline: ['@noble/hashes'],
-            },
-          },
+          exclude: COMMON_EXCLUDE,
+          ...REAL_WORKER_TIMEOUTS,
+          server: inlineDeps(),
         },
       },
       {
@@ -94,13 +92,9 @@ export default defineConfig({
         test: {
           name: 'conformance',
           include: ['conformance/**/*.test.ts'],
-          exclude: ['**/node_modules/**', '**/dist/**'],
+          exclude: COMMON_EXCLUDE,
           testTimeout: 120_000,
-          server: {
-            deps: {
-              inline: ['@noble/hashes', 'dcmjs', 'dicom-synth'],
-            },
-          },
+          server: inlineDeps('dcmjs', 'dicom-synth'),
         },
       },
     ],
