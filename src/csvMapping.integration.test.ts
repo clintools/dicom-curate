@@ -16,8 +16,7 @@ import {
   writeImages,
 } from '../testutils/integrationHarness'
 
-/** `writeImages` assigns PatientID `PID-0000`, `PID-0001`, … in order. */
-const sourceId = (i: number) => `PID-${String(i).padStart(4, '0')}`
+/** Target ids this suite maps onto; source ids come from `writeImages`. */
 const mappedId = (i: number) => `NEW-${String(i).padStart(4, '0')}`
 
 describe('two-pass CSV mapping through real workers', () => {
@@ -38,10 +37,10 @@ describe('two-pass CSV mapping through real workers', () => {
   it('binds each CSV row to its own file across a concurrent batch', async () => {
     const { inputDir, outputDir } = workspace()
     const count = 12
-    await writeImages(inputDir, count)
+    const written = await writeImages(inputDir, count)
 
-    const table = Array.from({ length: count }, (_, i) => ({
-      oldId: sourceId(i),
+    const table = written.map((w, i) => ({
+      oldId: w.patientId,
       newId: mappedId(i),
     }))
 
@@ -83,10 +82,10 @@ describe('two-pass CSV mapping through real workers', () => {
     const { inputDir, outputDir } = workspace()
     const count = 6
     const mappedCount = 4
-    await writeImages(inputDir, count)
+    const written = await writeImages(inputDir, count)
 
-    const table = Array.from({ length: mappedCount }, (_, i) => ({
-      oldId: sourceId(i),
+    const table = written.slice(0, mappedCount).map((w, i) => ({
+      oldId: w.patientId,
       newId: mappedId(i),
     }))
 

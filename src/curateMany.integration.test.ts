@@ -13,8 +13,8 @@ import {
   integrationOptions,
   integrationSpec,
   runCapturingProgress,
-  writeImage,
 } from '../testutils/integrationHarness'
+import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/synthFixtures'
 
 describe('curateMany driven through real workers', () => {
   const workspaces: IntegrationWorkspace[] = []
@@ -33,8 +33,14 @@ describe('curateMany driven through real workers', () => {
 
   it('reports progress incrementally before the run completes', async () => {
     const { inputDir, outputDir } = workspace()
-    for (const n of ['a', 'b', 'c']) {
-      await writeImage(join(inputDir, 'study', 'subject', `${n}.dcm`))
+    // Distinct index per file: output filenames derive from SOPInstanceUID, so
+    // identical instances would collapse onto a single output path.
+    for (const [i, n] of ['a', 'b', 'c'].entries()) {
+      await writeSynthFile(
+        join(inputDir, 'study', 'subject', `${n}.dcm`),
+        VALID_CT_IMAGE,
+        { index: i },
+      )
     }
 
     const { result, progress } = await runCapturingProgress(
@@ -61,8 +67,9 @@ describe('curateMany driven through real workers', () => {
 
   it('surfaces per-file mapping results through the progress stream', async () => {
     const { inputDir, outputDir } = workspace()
-    await writeImage(join(inputDir, 'study', 'subject', 'only.dcm'), {
-      PatientID: 'INTEGRATION-PID',
+    await writeSynthFile(join(inputDir, 'study', 'subject', 'only.dcm'), {
+      ...VALID_CT_IMAGE,
+      tags: { PatientID: 'INTEGRATION-PID' },
     })
 
     const { result, progress } = await runCapturingProgress(

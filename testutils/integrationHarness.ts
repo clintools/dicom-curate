@@ -6,23 +6,16 @@
  * its workers from `new URL('./*.js', import.meta.url)` and offers no
  * injection seam.
  */
-import {
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { curateMany } from 'dicom-curate'
-import { type DicomTagOverrides, generateFile } from 'dicom-synth'
 import type {
   OrganizeOptions,
   TCurationSpecification,
   TProgressMessage,
 } from '../src/types'
+import { VALID_CT_IMAGE, writeSynthFile } from './synthFixtures'
 
 export type IntegrationWorkspace = {
   inputDir: string
@@ -53,44 +46,41 @@ export function createIntegrationWorkspace(): IntegrationWorkspace {
   }
 }
 
-/**
- * Write one valid CT instance to an exact path.
- *
- * Generated directly from dicom-synth so this layer does not depend on the
- * fixture helpers in minimalDicom.ts, which are being reworked in parallel.
- * Collapse into that module's `writeSynthFile` once the two land together.
- */
-export async function writeImage(
-  filePath: string,
-  tags?: DicomTagOverrides,
-): Promise<void> {
-  const { buffer } = await generateFile({
-    type: 'valid-image',
-    modality: 'CT',
-    ...(tags ? { tags } : {}),
-  })
-  mkdirSync(join(filePath, '..'), { recursive: true })
-  writeFileSync(filePath, buffer)
+export type WrittenImage = {
+  /** Leaf filename under `study/subject/`. */
+  name: string
+  /** PatientID written into the instance, for matching results to sources. */
+  patientId: string
 }
 
 /**
- * Write `count` distinct instances into `study/subject/` under `inputDir`.
- * Each gets a unique PatientID so results can be matched back to their source.
- * Returns the leaf filenames written.
+ * Write `count` instances into `study/subject/` under `inputDir`.
+ *
+ * Each gets a unique PatientID so results can be matched back to their source,
+ * and a distinct `index` so the generated SOPInstanceUIDs differ — output
+ * filenames derive from that UID, so identical instances would collapse onto
+ * one path.
+ *
+ * Returns what was written: read the ids from here rather than re-deriving the
+ * naming convention, so callers cannot silently drift from it.
  */
 export async function writeImages(
   inputDir: string,
   count: number,
-): Promise<string[]> {
-  const names: string[] = []
+): Promise<WrittenImage[]> {
+  const written: WrittenImage[] = []
   for (let i = 0; i < count; i++) {
-    const name = `instance-${String(i).padStart(4, '0')}.dcm`
-    await writeImage(join(inputDir, 'study', 'subject', name), {
-      PatientID: `PID-${String(i).padStart(4, '0')}`,
-    })
-    names.push(name)
+    const id = String(i).padStart(4, '0')
+    const name = `instance-${id}.dcm`
+    const patientId = `PID-${id}`
+    await writeSynthFile(
+      join(inputDir, 'study', 'subject', name),
+      { ...VALID_CT_IMAGE, tags: { PatientID: patientId } },
+      { index: i },
+    )
+    written.push({ name, patientId })
   }
-  return names
+  return written
 }
 
 /** Every file under `dir`, recursively, as paths relative to `dir`. */

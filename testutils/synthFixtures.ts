@@ -39,12 +39,20 @@ const FIXTURE_SEED = 1
  * Exists because dicom-synth has no equivalent: `generateFile` performs no
  * I/O, and `writeCollectionFromSpec` derives its own filenames and layout, so
  * neither can target the caller-chosen paths these tests assert on.
+ *
+ * `index` varies the generated UIDs while keeping the seed pinned, so a test
+ * writing several files gets distinct instances that are still reproducible.
+ * Omit it whenever one file is enough.
  */
 export async function writeSynthFile(
   filePath: string,
   spec: FileSpec,
+  options?: { index?: number },
 ): Promise<void> {
-  const { buffer } = await generateFile(spec, { seed: FIXTURE_SEED })
+  const { buffer } = await generateFile(spec, {
+    seed: FIXTURE_SEED,
+    index: options?.index,
+  })
   mkdirSync(join(filePath, '..'), { recursive: true })
   writeFileSync(filePath, buffer)
 }
