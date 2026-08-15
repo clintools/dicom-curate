@@ -37,6 +37,10 @@ const INDISTINGUISHABLE_FROM_CLEAN: Partial<
     'dciodvfy reports identical dataset findings with and without the meta header',
 }
 
+// Not exempt, but worth knowing: missing-type1-tag nets -22 findings against
+// the clean fixture, because dciodvfy stops resolving the IOD once the tag is
+// gone. It passes the checks below on a much shallower surface than the rest.
+
 await describeSyntheticConformance({
   title: 'dciodvfy declared-violation conformance',
   prefix: 'dc-violation',
