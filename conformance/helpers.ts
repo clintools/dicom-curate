@@ -1,7 +1,11 @@
 import { readFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { type DatasetSpec, writeCollectionFromSpec } from 'dicom-synth'
+import {
+  type DatasetSpec,
+  type ViolationClass,
+  writeCollectionFromSpec,
+} from 'dicom-synth'
 import { curateOne } from '../src/curateOne'
 import type { TCurationSpecification, TMappingOptions } from '../src/types'
 
@@ -91,7 +95,61 @@ export const CONFORMANCE_SPEC: DatasetSpec = {
 export async function writeSyntheticConformanceFixtures(
   dir: string,
 ): Promise<ConformanceFixtureCase[]> {
-  const manifest = await writeCollectionFromSpec(CONFORMANCE_SPEC, dir)
+  return writeFixturesFromSpec(CONFORMANCE_SPEC, dir)
+}
+
+/**
+ * dicom-synth's full declared violation vocabulary.
+ *
+ * These are the *enumerable* deviations — the classes a generator can produce
+ * on purpose. They shrink, but do not remove, the need for a corpus of real
+ * dirty files: that exists for the deviations nobody thought to name.
+ */
+export const VIOLATION_CLASSES = [
+  'uid-too-long',
+  'non-conformant-uid',
+  'missing-meta-header',
+  'malformed-sq-delimiter',
+  'vr-max-length-exceeded',
+  'missing-type1-tag',
+] as const satisfies readonly ViolationClass[]
+
+// `satisfies` above only proves every listed name is a real class, not that
+// every real class is listed. This fails to compile if dicom-synth adds one:
+// the conditional collapses to `never` and `= true` is then unassignable.
+const _violationVocabularyIsExhaustive: ViolationClass extends (typeof VIOLATION_CLASSES)[number]
+  ? true
+  : never = true
+
+/**
+ * One fixture per violation class: a valid image carrying exactly one
+ * deliberate deviation.
+ *
+ * Uses `tree` rather than `entries` so each file is named for its class. With
+ * `entries` every one would be `valid-image-N`, putting the class in the
+ * ordinal alone — reordering the list would then repoint each committed
+ * baseline at a different violation without changing a filename.
+ */
+export const VIOLATION_SPEC: DatasetSpec = {
+  seed: 1,
+  tree: VIOLATION_CLASSES.map((violation) => ({
+    type: 'valid-image',
+    violations: [violation],
+    name: `violation-${violation}.dcm`,
+  })),
+}
+
+export async function writeSyntheticViolationFixtures(
+  dir: string,
+): Promise<ConformanceFixtureCase[]> {
+  return writeFixturesFromSpec(VIOLATION_SPEC, dir)
+}
+
+async function writeFixturesFromSpec(
+  spec: DatasetSpec,
+  dir: string,
+): Promise<ConformanceFixtureCase[]> {
+  const manifest = await writeCollectionFromSpec(spec, dir)
   return manifest.map(({ path, relativePath }) => {
     const id = basename(relativePath).replace(/\.dcm$/, '')
     return {
