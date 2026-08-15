@@ -23,6 +23,7 @@ import { runDciodvfy, violationSet } from '../conformance/dciodvfy'
 import {
   publicBaselinePath,
   writeSyntheticConformanceFixtures,
+  writeSyntheticViolationFixtures,
 } from '../conformance/helpers'
 import { resolveLocalConformanceCases } from '../conformance/localFixtures'
 import { loadPublicCases } from '../conformance/publicCases'
@@ -30,7 +31,11 @@ import { resolveConformanceBin } from '../conformance/resolveBin'
 
 async function buildSyntheticTargets() {
   const syntheticDir = mkdtempSync(join(tmpdir(), 'dc-baseline-synth-'))
-  const cases = await writeSyntheticConformanceFixtures(syntheticDir)
+  const violationDir = mkdtempSync(join(tmpdir(), 'dc-baseline-violations-'))
+  const cases = [
+    ...(await writeSyntheticConformanceFixtures(syntheticDir)),
+    ...(await writeSyntheticViolationFixtures(violationDir)),
+  ]
   return cases.map((c) => ({
     label: `${c.id}.dcm`,
     dicomPath: c.dicomPath,
