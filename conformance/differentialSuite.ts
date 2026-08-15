@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { copyFile, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import {
   baselineDrift,
   baselineViolationSet,
@@ -13,7 +13,11 @@ import {
   isConformanceNonRegression,
   runDciodvfy,
 } from './dciodvfy'
-import { resolveConformanceBin, runPassthroughCurate } from './helpers'
+import {
+  type ConformanceFixtureCase,
+  resolveConformanceBin,
+  runPassthroughCurate,
+} from './helpers'
 
 export type DifferentialFixture = {
   id: string
@@ -37,6 +41,50 @@ function assertPassthroughNonRegression(
     ...new Set([...vsBefore.introduced, ...vsBaseline.introduced]),
   ]
   return { ok: vsBefore.ok && vsBaseline.ok, introduced }
+}
+
+/**
+ * Generate spec-driven fixtures into a temp dir, then register the standard
+ * differential tests over them.
+ *
+ * Fixtures are only written when `dciodvfy` is present. Without it every test
+ * is `skipIf`-ed, and Vitest runs no file-level hook for a fully skipped file —
+ * so an `afterAll` cleanup would never fire and the temp dir would leak. The
+ * skipped placeholder keeps the file non-empty; Vitest fails a suite that
+ * registers no tests at all.
+ *
+ * `extraTests` runs inside the suite, before the per-fixture tests.
+ */
+export async function describeSyntheticConformance({
+  title,
+  prefix,
+  writeFixtures,
+  extraTests,
+}: {
+  title: string
+  /** Names the fixture dir and the per-test scratch dirs. */
+  prefix: string
+  writeFixtures: (dir: string) => Promise<ConformanceFixtureCase[]>
+  extraTests?: (cases: ConformanceFixtureCase[]) => void
+}): Promise<void> {
+  if (!resolveConformanceBin()) {
+    describe.skip(title, () => {
+      it('requires dciodvfy on PATH', () => {})
+    })
+    return
+  }
+
+  const dir = mkdtempSync(join(tmpdir(), `${prefix}-fixtures-`))
+  const cases = await writeFixtures(dir)
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  describe(title, () => {
+    extraTests?.(cases)
+    registerDifferentialConformanceTests(cases, prefix)
+  })
 }
 
 /** Register the four standard dciodvfy differential tests per fixture. */
