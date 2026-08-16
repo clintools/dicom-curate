@@ -12,10 +12,12 @@
  *
  * See README.md — "Test files" and "How to read results".
  */
+import { existsSync } from 'node:fs'
 import { expect, it } from 'vitest'
 import { baselineViolationSet } from './baseline'
 import { describeSyntheticConformance } from './differentialSuite'
 import {
+  CLEAN_FIXTURE_ID,
   syntheticBaselinePath,
   VIOLATION_CLASSES,
   writeSyntheticViolationFixtures,
@@ -24,7 +26,9 @@ import {
 /**
  * Classes whose deviation is real in the bytes but invisible to dciodvfy's
  * *normalised* violation set, so their baseline cannot differ from the clean
- * fixture's. Exempted from the discrimination check below, with the reason.
+ * fixture's. The discrimination check below inverts for these — asserting
+ * equality with the clean baseline — so the exemption fails loudly the moment
+ * it stops being true.
  */
 const INDISTINGUISHABLE_FROM_CLEAN: Partial<
   Record<(typeof VIOLATION_CLASSES)[number], string>
@@ -58,26 +62,46 @@ await describeSyntheticConformance({
     // registers four passing tests while pinning nothing — the same vacuous
     // shape the four checks exist to catch. Compare each against the clean
     // baseline so a neutered fixture fails loudly instead of going green.
-    const cleanBaseline = syntheticBaselinePath('valid-image-0')
+    const cleanBaseline = syntheticBaselinePath(CLEAN_FIXTURE_ID)
+
+    it('clean baseline exists for the discrimination checks', () => {
+      expect(
+        existsSync(cleanBaseline),
+        `${cleanBaseline} is missing — CLEAN_FIXTURE_ID must name a ` +
+          'CONFORMANCE_SPEC fixture with a committed baseline',
+      ).toBe(true)
+    })
 
     for (const violation of VIOLATION_CLASSES) {
       const exemptReason = INDISTINGUISHABLE_FROM_CLEAN[violation]
 
-      it.skipIf(exemptReason)(
-        `${violation} changes what dciodvfy reports`,
-        () => {
-          const clean = baselineViolationSet(cleanBaseline)
-          const dirty = baselineViolationSet(
-            syntheticBaselinePath(`violation-${violation}`),
-          )
-          const added = [...dirty].filter((v) => !clean.has(v))
-          const removed = [...clean].filter((v) => !dirty.has(v))
+      const diffFromClean = () => {
+        const clean = baselineViolationSet(cleanBaseline)
+        const dirty = baselineViolationSet(
+          syntheticBaselinePath(`violation-${violation}`),
+        )
+        const added = [...dirty].filter((v) => !clean.has(v))
+        const removed = [...clean].filter((v) => !dirty.has(v))
+        return added.length + removed.length
+      }
+
+      if (exemptReason) {
+        it(`${violation} is indistinguishable from clean (exempt)`, () => {
           expect(
-            added.length + removed.length,
+            diffFromClean(),
+            `exemption no longer holds (${exemptReason}) — the baseline now ` +
+              'differs from the clean fixture, so remove this class from ' +
+              'INDISTINGUISHABLE_FROM_CLEAN',
+          ).toBe(0)
+        })
+      } else {
+        it(`${violation} changes what dciodvfy reports`, () => {
+          expect(
+            diffFromClean(),
             'baseline is identical to the clean fixture — this pins nothing',
           ).toBeGreaterThan(0)
-        },
-      )
+        })
+      }
     }
   },
 })

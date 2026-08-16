@@ -79,7 +79,7 @@ Normalised violation keys look like `Error::</TagName(gggg,eeee)>::message` (fil
 | File | Tests | Default CI |
 |------|-------|------------|
 | `dciodvfy.differential.test.ts` | Per synthetic variant: baseline drift; identity; byte copy; passthrough curate | Yes |
-| `dciodvfy.violations.test.ts` | Same four checks per declared violation class, plus guards that one fixture exists per class and that each differs from the clean baseline | Yes |
+| `dciodvfy.violations.test.ts` | Same four checks per declared violation class, plus guards that one fixture exists per class and that each differs from the clean baseline (declared exemptions assert equality instead, so they fail when no longer true) | Yes |
 | `dciodvfy.normalise.test.ts` | Parser normalisation only (no `dciodvfy` binary) | Yes |
 | `dciodvfy.public.test.ts` | Catalog validation + baseline presence (always); shared four-test differential suite per public case after a `beforeAll` prefetch (`RUN_PUBLIC_CONFORMANCE=1`) | Yes (env set in workflow) |
 | `dciodvfy.local.test.ts` | Optional local file or directory (env) | Local test: no |

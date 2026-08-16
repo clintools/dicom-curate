@@ -75,7 +75,15 @@ export async function describeSyntheticConformance({
   }
 
   const dir = mkdtempSync(join(tmpdir(), `${prefix}-fixtures-`))
-  const cases = await writeFixtures(dir)
+  let cases: ConformanceFixtureCase[]
+  try {
+    cases = await writeFixtures(dir)
+  } catch (err) {
+    // A rejection here fails the file at collection, before afterAll below is
+    // registered — clean up eagerly so the temp dir does not leak.
+    rmSync(dir, { recursive: true, force: true })
+    throw err
+  }
 
   afterAll(() => {
     rmSync(dir, { recursive: true, force: true })
