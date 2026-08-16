@@ -81,10 +81,27 @@ export type ConformanceFixtureCase = {
   baselinePath: string
 }
 
+/**
+ * Shared by CONFORMANCE_SPEC and VIOLATION_SPEC. The discrimination check in
+ * dciodvfy.violations.test.ts compares each violation baseline against the
+ * clean fixture's, which is only meaningful while both specs generate the same
+ * base image — diverging seeds would add unrelated baseline differences that
+ * let a neutered violation fixture pass vacuously.
+ */
+const SYNTHETIC_SEED = 1
+
+/**
+ * The clean `valid-image` fixture that violation baselines are compared
+ * against. Must name a CONFORMANCE_SPEC fixture: the spec uses `entries`, so
+ * dicom-synth derives ids as `<type>-<ordinal>` — reordering or renaming
+ * entries changes this id and must be reflected here.
+ */
+export const CLEAN_FIXTURE_ID = 'valid-image-0'
+
 // Deterministic conformance fixture set — one of each image conformance
 // flavour. Generated inline from a dicom-synth DatasetSpec
 export const CONFORMANCE_SPEC: DatasetSpec = {
-  seed: 1,
+  seed: SYNTHETIC_SEED,
   entries: [
     { type: 'valid-image' },
     { type: 'invalid-uid-image' },
@@ -131,7 +148,7 @@ const _violationVocabularyIsExhaustive: ViolationClass extends (typeof VIOLATION
  * baseline at a different violation without changing a filename.
  */
 export const VIOLATION_SPEC: DatasetSpec = {
-  seed: 1,
+  seed: SYNTHETIC_SEED,
   tree: VIOLATION_CLASSES.map((violation) => ({
     type: 'valid-image',
     violations: [violation],
