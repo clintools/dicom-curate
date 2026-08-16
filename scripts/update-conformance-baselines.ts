@@ -14,7 +14,13 @@
  *
  *   SKIP_PUBLIC_CONFORMANCE_BASELINES=1  — skip pydicom public fetch/write
  */
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fetchPublicCaseToCache } from 'dicom-synth'
@@ -22,6 +28,7 @@ import type { ConformanceBaseline } from '../conformance/baseline'
 import { runDciodvfy, violationSet } from '../conformance/dciodvfy'
 import {
   publicBaselinePath,
+  syntheticBaselinesDir,
   writeSyntheticConformanceFixtures,
   writeSyntheticViolationFixtures,
 } from '../conformance/helpers'
@@ -71,6 +78,17 @@ async function main() {
       violations,
       notes: 'Regenerate with pnpm update:conformance-baselines',
     })
+  }
+
+  // Prune baselines for fixtures no longer generated (e.g. a violation class
+  // removed from dicom-synth's vocabulary) — nothing else would notice them.
+  const currentSynthetic = new Set(syntheticTargets.map((t) => t.baselinePath))
+  for (const name of readdirSync(syntheticBaselinesDir)) {
+    if (!name.endsWith('.dciodvfy-baseline.json')) continue
+    const path = join(syntheticBaselinesDir, name)
+    if (currentSynthetic.has(path)) continue
+    rmSync(path)
+    console.log(`pruned ${path} (no matching synthetic fixture)`)
   }
 
   if (!process.env.SKIP_PUBLIC_CONFORMANCE_BASELINES) {
