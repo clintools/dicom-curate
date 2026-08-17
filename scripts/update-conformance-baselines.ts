@@ -13,6 +13,9 @@
  *   pnpm update:conformance-baselines
  *
  *   SKIP_PUBLIC_CONFORMANCE_BASELINES=1  — skip pydicom public fetch/write
+ *   PRUNE_STALE_BASELINES=1              — delete synthetic baselines that no
+ *                                          longer have a fixture (reported,
+ *                                          not deleted, without this)
  */
 import {
   mkdirSync,
@@ -36,9 +39,10 @@ import { resolveLocalConformanceCases } from '../conformance/localFixtures'
 import { loadPublicCases } from '../conformance/publicCases'
 import { resolveConformanceBin } from '../conformance/resolveBin'
 
-async function buildSyntheticTargets() {
-  const syntheticDir = mkdtempSync(join(tmpdir(), 'dc-baseline-synth-'))
-  const violationDir = mkdtempSync(join(tmpdir(), 'dc-baseline-violations-'))
+async function buildSyntheticTargets(
+  syntheticDir: string,
+  violationDir: string,
+) {
   const cases = [
     ...(await writeSyntheticConformanceFixtures(syntheticDir)),
     ...(await writeSyntheticViolationFixtures(violationDir)),
@@ -48,6 +52,32 @@ async function buildSyntheticTargets() {
     dicomPath: c.dicomPath,
     baselinePath: c.baselinePath,
   }))
+}
+
+/**
+ * A synthetic baseline with no matching fixture is stale (e.g. a violation
+ * class dropped from dicom-synth's vocabulary) and nothing else would notice
+ * it. Deleting is opt-in: the generated set is whatever the spec constants say
+ * *right now*, and this script is bundled with esbuild rather than typechecked,
+ * so a local experiment that trims VIOLATION_CLASSES reaches this loop without
+ * tripping the exhaustiveness check in helpers.ts.
+ */
+function reportStaleSyntheticBaselines(currentPaths: string[]) {
+  const current = new Set(currentPaths)
+  const prune = !!process.env.PRUNE_STALE_BASELINES
+  for (const name of readdirSync(syntheticBaselinesDir)) {
+    if (!name.endsWith('.dciodvfy-baseline.json')) continue
+    const path = join(syntheticBaselinesDir, name)
+    if (current.has(path)) continue
+    if (!prune) {
+      console.warn(
+        `stale ${path} (no matching synthetic fixture) — delete it with PRUNE_STALE_BASELINES=1`,
+      )
+      continue
+    }
+    rmSync(path)
+    console.log(`pruned ${path} (no matching synthetic fixture)`)
+  }
 }
 
 function writeBaseline(path: string, baseline: ConformanceBaseline) {
@@ -69,26 +99,27 @@ async function main() {
     process.exit(1)
   }
 
-  const syntheticTargets = await buildSyntheticTargets()
+  const syntheticDir = mkdtempSync(join(tmpdir(), 'dc-baseline-synth-'))
+  const violationDir = mkdtempSync(join(tmpdir(), 'dc-baseline-violations-'))
+  try {
+    const syntheticTargets = await buildSyntheticTargets(
+      syntheticDir,
+      violationDir,
+    )
 
-  for (const t of syntheticTargets) {
-    const violations = [...violationSet(runDciodvfy(t.dicomPath, bin))].sort()
-    writeBaseline(t.baselinePath, {
-      label: t.label,
-      violations,
-      notes: 'Regenerate with pnpm update:conformance-baselines',
-    })
-  }
+    for (const t of syntheticTargets) {
+      const violations = [...violationSet(runDciodvfy(t.dicomPath, bin))].sort()
+      writeBaseline(t.baselinePath, {
+        label: t.label,
+        violations,
+        notes: 'Regenerate with pnpm update:conformance-baselines',
+      })
+    }
 
-  // Prune baselines for fixtures no longer generated (e.g. a violation class
-  // removed from dicom-synth's vocabulary) — nothing else would notice them.
-  const currentSynthetic = new Set(syntheticTargets.map((t) => t.baselinePath))
-  for (const name of readdirSync(syntheticBaselinesDir)) {
-    if (!name.endsWith('.dciodvfy-baseline.json')) continue
-    const path = join(syntheticBaselinesDir, name)
-    if (currentSynthetic.has(path)) continue
-    rmSync(path)
-    console.log(`pruned ${path} (no matching synthetic fixture)`)
+    reportStaleSyntheticBaselines(syntheticTargets.map((t) => t.baselinePath))
+  } finally {
+    rmSync(syntheticDir, { recursive: true, force: true })
+    rmSync(violationDir, { recursive: true, force: true })
   }
 
   if (!process.env.SKIP_PUBLIC_CONFORMANCE_BASELINES) {
