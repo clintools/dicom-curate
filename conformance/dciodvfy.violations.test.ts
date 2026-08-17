@@ -13,13 +13,19 @@
  * See README.md — "Test files" and "How to read results".
  */
 import { existsSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { baselineViolationSet } from './baseline'
+import { runDciodvfy, violationSet } from './dciodvfy'
 import { describeSyntheticConformance } from './differentialSuite'
 import {
   CLEAN_FIXTURE_ID,
+  resolveConformanceBin,
   syntheticBaselinePath,
   VIOLATION_CLASSES,
+  writeSyntheticViolationControlFixtures,
   writeSyntheticViolationFixtures,
 } from './helpers'
 
@@ -39,6 +45,20 @@ const INDISTINGUISHABLE_FROM_CLEAN: Partial<
   // that curateOne introduces nothing new given a header-less file.
   'missing-meta-header':
     'dciodvfy reports identical dataset findings with and without the meta header',
+}
+
+/**
+ * A missing baseline is the drift this suite exists to catch — a new violation
+ * class, or a rename that repointed one. Report it as that rather than letting
+ * `readFileSync` surface a bare ENOENT.
+ */
+function readBaseline(path: string): Set<string> {
+  expect(
+    existsSync(path),
+    `${path} is missing — run pnpm update:conformance-baselines (on the CI ` +
+      'platform, see README.md) and commit the result',
+  ).toBe(true)
+  return baselineViolationSet(path)
 }
 
 // Not exempt, but worth knowing: missing-type1-tag nets -22 findings against
@@ -72,12 +92,41 @@ await describeSyntheticConformance({
       ).toBe(true)
     })
 
+    // The comparison above is only sound while stripping a fixture's violation
+    // reproduces the clean fixture's findings. Same seed is not enough — UIDs
+    // are position-derived, so only index 0 matches the clean fixture byte for
+    // byte (see SYNTHETIC_SEED in helpers.ts). Pin the property directly.
+    it.skipIf(!resolveConformanceBin())(
+      'unviolated control fixtures match the clean baseline',
+      async () => {
+        const bin = resolveConformanceBin()!
+        const clean = readBaseline(cleanBaseline)
+        const dir = await mkdtemp(join(tmpdir(), 'dc-violation-control-'))
+        try {
+          const controls = await writeSyntheticViolationControlFixtures(dir)
+          for (const control of controls) {
+            const live = violationSet(runDciodvfy(control.dicomPath, bin))
+            const added = [...live].filter((v) => !clean.has(v))
+            const removed = [...clean].filter((v) => !live.has(v))
+            expect(
+              [...added, ...removed],
+              `${control.id} differs from ${CLEAN_FIXTURE_ID} with no ` +
+                'violation applied — the discrimination checks below can no ' +
+                'longer attribute a baseline difference to the violation',
+            ).toEqual([])
+          }
+        } finally {
+          await rm(dir, { recursive: true, force: true })
+        }
+      },
+    )
+
     for (const violation of VIOLATION_CLASSES) {
       const exemptReason = INDISTINGUISHABLE_FROM_CLEAN[violation]
 
       const diffFromClean = () => {
-        const clean = baselineViolationSet(cleanBaseline)
-        const dirty = baselineViolationSet(
+        const clean = readBaseline(cleanBaseline)
+        const dirty = readBaseline(
           syntheticBaselinePath(`violation-${violation}`),
         )
         const added = [...dirty].filter((v) => !clean.has(v))
