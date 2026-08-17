@@ -12,7 +12,7 @@ Checks that **curation does not make DICOM header conformance worse** according 
 | `public-cases.json` | Public dirty corpus catalog: sha256-pinned quirky files fetched from upstream (see [Public dirty corpus](#public-dirty-corpus)) |
 | `publicCases.ts` | Loads `public-cases.json` |
 | `localFixtures.ts` | `CONFORMANCE_LOCAL_PATH` discovery and baseline paths for personalised test datasets |
-| `differentialSuite.ts` | Shared four-test dciodvfy differential registration |
+| `differentialSuite.ts` | Shared synthetic fixture scaffold (generate, clean up) and four-test dciodvfy differential registration |
 | `allowlist.ts` | Suppressed violation patterns |
 | `baselines/` | Committed expected `dciodvfy` output (akin to 'snapshots') |
 | `*.test.ts` | Vitest (`conformance` project) |
@@ -56,7 +56,7 @@ Normalised violation keys look like `Error::</TagName(gggg,eeee)>::message` (fil
 
 ```json
 {
-  "label": "minimal-ct-0.dcm",
+  "label": "valid-image-0.dcm",
   "violations": [
     "Error::</StudyDate(0008,0020)>::Missing attribute …",
     "…"
@@ -74,12 +74,14 @@ Normalised violation keys look like `Error::</TagName(gggg,eeee)>::message` (fil
 
 **When to update:** After upgrading `dicom3tools`, or after an intentional change to `dicom-synth` fixtures. Run `pnpm update:conformance-baselines` and commit the JSON diff.
 
+**Stale synthetic baselines** (a committed `baselines/synthetic/*.json` with no fixture generating it any more — e.g. a violation class dropped from `dicom-synth`'s vocabulary) are **reported, not deleted**. The script prints `stale <path> …` for each; delete them with `PRUNE_STALE_BASELINES=1 pnpm update:conformance-baselines`. Deletion is opt-in because the fixture set is whatever `CONFORMANCE_SPEC`/`VIOLATION_CLASSES` say at that moment, and the script is bundled rather than typechecked — a local experiment that trims a class would otherwise silently remove committed files.
+
 ## Test files
 
 | File | Tests | Default CI |
 |------|-------|------------|
 | `dciodvfy.differential.test.ts` | Per synthetic variant: baseline drift; identity; byte copy; passthrough curate | Yes |
-| `dciodvfy.violations.test.ts` | Same four checks per declared violation class, plus guards that one fixture exists per class and that each differs from the clean baseline (declared exemptions assert equality instead, so they fail when no longer true) | Yes |
+| `dciodvfy.violations.test.ts` | Same four checks per declared violation class, plus guards that one fixture exists per class, that unviolated control fixtures still match the clean baseline, and that each violation baseline differs from it (declared exemptions assert equality instead, so they fail when no longer true) | Yes |
 | `dciodvfy.normalise.test.ts` | Parser normalisation only (no `dciodvfy` binary) | Yes |
 | `dciodvfy.public.test.ts` | Catalog validation + baseline presence (always); shared four-test differential suite per public case after a `beforeAll` prefetch (`RUN_PUBLIC_CONFORMANCE=1`) | Yes (env set in workflow) |
 | `dciodvfy.local.test.ts` | Optional local file or directory (env) | Local test: no |
@@ -282,6 +284,9 @@ CONFORMANCE_LOCAL_PATH=/path/to/corpus \
   pnpm test:conformance
 
 DCIODVFY_PATH=/path/to/dciodvfy pnpm update:conformance-baselines
+
+# Also delete synthetic baselines with no fixture (reported otherwise):
+PRUNE_STALE_BASELINES=1 pnpm update:conformance-baselines
 
 # Local baselines only (no network for public pydicom case):
 SKIP_PUBLIC_CONFORMANCE_BASELINES=1 \
