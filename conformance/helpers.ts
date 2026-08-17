@@ -3,6 +3,7 @@ import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   type DatasetSpec,
+  type TreeFileNode,
   type ViolationClass,
   writeCollectionFromSpec,
 } from 'dicom-synth'
@@ -84,9 +85,15 @@ export type ConformanceFixtureCase = {
 /**
  * Shared by CONFORMANCE_SPEC and VIOLATION_SPEC. The discrimination check in
  * dciodvfy.violations.test.ts compares each violation baseline against the
- * clean fixture's, which is only meaningful while both specs generate the same
- * base image — diverging seeds would add unrelated baseline differences that
- * let a neutered violation fixture pass vacuously.
+ * clean fixture's, which is only meaningful while the violation fixtures'
+ * unviolated base image yields the clean fixture's findings — otherwise
+ * unrelated differences let a neutered violation fixture pass vacuously.
+ *
+ * A shared seed is necessary but not sufficient: dicom-synth derives UIDs from
+ * a file's position in the collection, so only the fixture at index 0 shares
+ * the clean fixture's UIDs. What must hold is the weaker property that those
+ * differences never reach dciodvfy's *normalised* violation set —
+ * VIOLATION_CONTROL_SPEC exists so a test pins that rather than assuming it.
  */
 const SYNTHETIC_SEED = 1
 
@@ -139,27 +146,51 @@ const _violationVocabularyIsExhaustive: ViolationClass extends (typeof VIOLATION
   : never = true
 
 /**
- * One fixture per violation class: a valid image carrying exactly one
- * deliberate deviation.
- *
  * Uses `tree` rather than `entries` so each file is named for its class. With
  * `entries` every one would be `valid-image-N`, putting the class in the
  * ordinal alone — reordering the list would then repoint each committed
  * baseline at a different violation without changing a filename.
  */
+function violationTree(kind: 'violation' | 'control'): TreeFileNode[] {
+  return VIOLATION_CLASSES.map((violation) => ({
+    type: 'valid-image',
+    name: `${kind}-${violation}.dcm`,
+    ...(kind === 'violation' ? { violations: [violation] } : {}),
+  }))
+}
+
+/**
+ * One fixture per violation class: a valid image carrying exactly one
+ * deliberate deviation.
+ */
 export const VIOLATION_SPEC: DatasetSpec = {
   seed: SYNTHETIC_SEED,
-  tree: VIOLATION_CLASSES.map((violation) => ({
-    type: 'valid-image',
-    violations: [violation],
-    name: `violation-${violation}.dcm`,
-  })),
+  tree: violationTree('violation'),
+}
+
+/**
+ * The same tree with the deviations omitted: same seed, same tree positions, so
+ * each control is the base image its violation fixture was built from. Exists
+ * only for the control assertion in dciodvfy.violations.test.ts — these
+ * fixtures have no committed baseline, and are compared against the clean
+ * fixture's (see SYNTHETIC_SEED).
+ */
+export const VIOLATION_CONTROL_SPEC: DatasetSpec = {
+  seed: SYNTHETIC_SEED,
+  tree: violationTree('control'),
 }
 
 export async function writeSyntheticViolationFixtures(
   dir: string,
 ): Promise<ConformanceFixtureCase[]> {
   return writeFixturesFromSpec(VIOLATION_SPEC, dir)
+}
+
+export async function writeSyntheticViolationControlFixtures(
+  dir: string,
+): Promise<{ id: string; dicomPath: string }[]> {
+  const cases = await writeFixturesFromSpec(VIOLATION_CONTROL_SPEC, dir)
+  return cases.map(({ id, dicomPath }) => ({ id, dicomPath }))
 }
 
 async function writeFixturesFromSpec(
