@@ -1,3 +1,10 @@
+## [0.41.2](https://github.com/clintools/dicom-curate/compare/v0.41.1...v0.41.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* stop leaking fixture temp dirs and make the baseline prune opt-in ([189bc12](https://github.com/clintools/dicom-curate/commit/189bc1219ed3e3b58a428ae5f1e1dac1410f55f7))
+
 ## [0.41.1](https://github.com/clintools/dicom-curate/compare/v0.41.0...v0.41.1) (2026-08-13)
 
 
