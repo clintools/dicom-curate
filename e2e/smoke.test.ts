@@ -172,10 +172,18 @@ describe('E2E smoke: curateMany', () => {
     )
     expect(withAnomalies.length).toBeGreaterThanOrEqual(2)
 
-    const validResult = (result.mapResultsList ?? []).find((r) =>
-      r.outputFilePath?.includes('valid.dcm'),
+    // Match on the source name: the leaf is renamed to <Modality>_<UID>.dcm,
+    // so matching outputFilePath on 'valid.dcm' silently finds nothing.
+    const validResult = (result.mapResultsList ?? []).find(
+      (r) => r.fileInfo?.name === 'valid.dcm',
     )
+    expect(validResult).toBeDefined()
     expect(validResult?.errors ?? []).toEqual([])
+    // Pins the spec's inputPathPattern: a pattern missing the input dir
+    // basename shifts every lookup by one and lands this under 'study'.
+    expect(validResult?.outputFilePath).toMatch(
+      /^curated\/subject\/CT_.+\.dcm$/,
+    )
 
     expect(
       listFilesRecursive(outputDir).filter((p) => p.endsWith('.dcm')),
@@ -219,9 +227,11 @@ describe('E2E smoke: curateMany', () => {
       // The run completes despite the unreadable file, and the readable file
       // is fully processed.
       expect(result.response).toBe('done')
-      const validResult = (result.mapResultsList ?? []).find((r) =>
-        r.outputFilePath?.includes('valid.dcm'),
+      // By source name, not output path — see the note in the anomalies test.
+      const validResult = (result.mapResultsList ?? []).find(
+        (r) => r.fileInfo?.name === 'valid.dcm',
       )
+      expect(validResult).toBeDefined()
       expect(validResult?.errors ?? []).toEqual([])
 
       const readErrorResults = (result.mapResultsList ?? []).filter(
