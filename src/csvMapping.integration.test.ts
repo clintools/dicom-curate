@@ -53,20 +53,20 @@ describe('direct CSV-load mapping through real workers', () => {
 
     // The join must be per-file: every source id maps to its own new id, and
     // concurrency must not shuffle rows between files.
-    const pairs = results
-      .map((r) => {
+    //
+    // Keyed on fileInfo.name because a result's `from` and `to` both come from
+    // the same parser — comparing them to each other passes even when the
+    // result is attributed to the wrong file.
+    const expected = new Map(
+      written.map((w, i) => [w.name, { from: w.patientId, to: mappedId(i) }]),
+    )
+    const actual = new Map(
+      results.map((r) => {
         const mapping = r.mappings?.PatientID
-        return { from: mapping?.[0], to: mapping?.[3] }
-      })
-      .filter((p) => typeof p.from === 'string')
-    expect(pairs).toHaveLength(count)
-
-    const expected = new Map(table.map((row) => [row.oldId, row.newId]))
-    for (const { from, to } of pairs) {
-      expect(to).toBe(expected.get(String(from)))
-    }
-    // Every row was consumed exactly once — no duplicates, none skipped.
-    expect(new Set(pairs.map((p) => p.to)).size).toBe(count)
+        return [r.fileInfo?.name, { from: mapping?.[0], to: mapping?.[3] }]
+      }),
+    )
+    expect(actual).toEqual(expected)
   })
 
   it('fails only the unmapped files and still writes the mapped ones', async () => {
@@ -93,8 +93,20 @@ describe('direct CSV-load mapping through real workers', () => {
     const failed = results.filter((r) => (r.errors ?? []).length > 0)
     const succeeded = results.filter((r) => (r.errors ?? []).length === 0)
 
-    expect(succeeded).toHaveLength(mappedCount)
-    expect(failed).toHaveLength(count - mappedCount)
+    // Which files failed, not just how many: the unmapped ones and only those.
+    const names = (rs: typeof results) => rs.map((r) => r.fileInfo?.name).sort()
+    expect(names(succeeded)).toEqual(
+      written
+        .slice(0, mappedCount)
+        .map((w) => w.name)
+        .sort(),
+    )
+    expect(names(failed)).toEqual(
+      written
+        .slice(mappedCount)
+        .map((w) => w.name)
+        .sort(),
+    )
 
     // Partial coverage is a per-file failure, not a run failure.
     expect(result.response).toBe('done')
