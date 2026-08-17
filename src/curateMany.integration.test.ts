@@ -39,10 +39,10 @@ describe('curateMany driven through real workers', () => {
 
     // The point of this layer: work is observable while in flight, which only
     // holds when the workers genuinely round-trip.
-    const beforeDone = progress.slice(
-      0,
-      progress.findIndex((m) => m.response === 'done'),
-    )
+    const doneIndex = progress.findIndex((m) => m.response === 'done')
+    // Guard the slice below: -1 would silently drop the last message instead.
+    expect(doneIndex).toBeGreaterThan(-1)
+    const beforeDone = progress.slice(0, doneIndex)
     expect(beforeDone.length).toBeGreaterThan(0)
     expect(beforeDone.every((m) => m.response === 'progress')).toBe(true)
 
