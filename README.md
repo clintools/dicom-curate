@@ -458,6 +458,7 @@ Other scripts:
 | Script | Purpose |
 |--------|---------|
 | `pnpm test:coverage` | Unit project with coverage |
+| `pnpm test:watch` | Unit project in watch mode (unit only — the other projects need a `dist/esm` build per change) |
 | `pnpm update:conformance-baselines` | Regenerate committed `dciodvfy` baseline JSON |
 
 Conformance tests require the external `dciodvfy` binary from [dicom3tools](https://www.dclunie.com/dicom3tools.html). See [conformance/README.md](conformance/README.md) for install, CI behaviour, baseline refresh, and optional `RUN_PUBLIC_CONFORMANCE` / `CONFORMANCE_LOCAL_*` env vars.

@@ -45,10 +45,10 @@ describe('curateMany orchestration with real workers', () => {
     expect(listFilesRecursive(outputDir)).toHaveLength(count)
 
     // Each source file is represented exactly once.
-    const patientIds = (result.mapResultsList ?? [])
+    const sourceNames = (result.mapResultsList ?? [])
       .map((r) => r.fileInfo?.name)
       .filter((n): n is string => typeof n === 'string')
-    expect(new Set(patientIds).size).toBe(count)
+    expect(new Set(sourceNames).size).toBe(count)
   })
 
   it('completes correctly on a queue deep enough to trigger scan backpressure', async () => {
@@ -116,11 +116,14 @@ describe('curateMany orchestration with real workers', () => {
     // Real workers were hard-terminated. A fresh run over the same input must
     // still complete — partial output from the aborted run is re-processed.
     //
-    // KNOWN RACE: mappingWorkerPool holds its state at module level and the
-    // next run resets `aborted` to false. A message still in flight from a
+    // KNOWN RACE (#302): mappingWorkerPool holds its state at module level and
+    // the next run resets `aborted` to false. A message still in flight from a
     // terminated run-1 worker can therefore pass the `if (aborted) return`
-    // guard and mutate run-2 counters. If this assertion ever flakes, that is
-    // the cause — it is a product bug, not a test bug.
+    // guard in the message handler and act on run-2 state — not just the
+    // counters, but pushing the terminated worker back onto
+    // availableMappingWorkers, so run 2 may dispatch to a dead thread and
+    // stall. If this assertion ever flakes, that is the cause — it is a
+    // product bug, not a test bug.
     const { result } = await runCapturingProgress(
       integrationOptions(inputDir, outputDir, integrationSpec(), {
         workerCount: 2,
