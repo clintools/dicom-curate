@@ -47,11 +47,10 @@ function assertPassthroughNonRegression(
  * Generate spec-driven fixtures into a temp dir, then register the standard
  * differential tests over them.
  *
- * Fixtures are only written when `dciodvfy` is present. Without it every test
- * is `skipIf`-ed, and Vitest runs no file-level hook for a fully skipped file —
- * so an `afterAll` cleanup would never fire and the temp dir would leak. The
- * skipped placeholder keeps the file non-empty; Vitest fails a suite that
- * registers no tests at all.
+ * Fixtures are written whether or not `dciodvfy` is present: generation needs
+ * only dicom-synth, and `extraTests` guards (fixture inventory, committed
+ * baseline comparisons) are worth running without the binary. Only the
+ * per-fixture differential tests are `skipIf`-ed on it.
  *
  * `extraTests` runs inside the suite, before the per-fixture tests.
  */
@@ -67,27 +66,28 @@ export async function describeSyntheticConformance({
   writeFixtures: (dir: string) => Promise<ConformanceFixtureCase[]>
   extraTests?: (cases: ConformanceFixtureCase[]) => void
 }): Promise<void> {
-  if (!resolveConformanceBin()) {
-    describe.skip(title, () => {
-      it('requires dciodvfy on PATH', () => {})
-    })
-    return
-  }
-
   const dir = mkdtempSync(join(tmpdir(), `${prefix}-fixtures-`))
   let cases: ConformanceFixtureCase[]
   try {
     cases = await writeFixtures(dir)
   } catch (err) {
-    // A rejection here fails the file at collection, before afterAll below is
-    // registered — clean up eagerly so the temp dir does not leak.
+    // A rejection here fails the file at collection, before the cleanup below
+    // is registered — clean up eagerly so the temp dir does not leak.
     rmSync(dir, { recursive: true, force: true })
     throw err
   }
 
-  afterAll(() => {
+  if (resolveConformanceBin()) {
+    afterAll(() => {
+      rmSync(dir, { recursive: true, force: true })
+    })
+  } else {
+    // Vitest runs no file-level hook for a file whose every test is skipped, so
+    // an afterAll would never fire. Nothing left to register reads the bytes —
+    // the per-fixture tests are all skipped and extraTests works off ids and
+    // committed baselines — so drop the dir now rather than leak it.
     rmSync(dir, { recursive: true, force: true })
-  })
+  }
 
   describe(title, () => {
     extraTests?.(cases)
