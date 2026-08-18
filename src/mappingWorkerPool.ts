@@ -84,6 +84,15 @@ let poolInitialized = false
 // can ever drain the queue and 'done' is unreachable.
 let rejectRunCallback: ((reason: Error) => void) | undefined
 
+// Files whose dispatch failed back to back. Header resolution is the usual
+// cause and it runs per file, so one expired token fails every file in turn:
+// unbounded, a 100k-file run turns the whole queue into error results and
+// reports 'done' within seconds, which an operator cannot tell apart from a
+// genuine mass failure. High enough that a handful of individually bad files
+// still just error and the run continues.
+const MAX_CONSECUTIVE_DISPATCH_FAILURES = 20
+let consecutiveDispatchFailures = 0
+
 // Number of replacement workers currently being created asynchronously.
 // The termination condition in dispatchMappingJobs() waits for this to reach 0
 // before finishing, to avoid orphaning in-flight replacements.
@@ -218,6 +227,7 @@ export function terminateAllWorkers(): void {
   filesToProcess.length = 0
   workersActive = 0
   pendingReplacements = 0
+  consecutiveDispatchFailures = 0
   doneEmitted = false
   directoryScanFinished = false
   scanPaused = false
@@ -247,6 +257,7 @@ export async function initializeMappingWorkers(
   poolInitialized = false
   initFailedWorkers.clear()
   lastInitErrorMessage = ''
+  consecutiveDispatchFailures = 0
   rejectRunCallback = rejectCb
   mapResultsList = skipCollectingMappings ? undefined : []
   filesMapped = 0
@@ -317,6 +328,7 @@ export async function dispatchMappingJobs(): Promise<void> {
         hashPartSize,
         serializedMappingOptions: serializeMappingOptions(mappingOptions),
       } satisfies MappingRequest)
+      consecutiveDispatchFailures = 0
     } catch (error) {
       // Same double-recovery guard as recoverCrashedWorker, and for the same
       // reason: this await can outlive its file. The stall watchdog may have
@@ -332,11 +344,21 @@ export async function dispatchMappingJobs(): Promise<void> {
         error,
         `File: ${fileInfo.path}/${fileInfo.name}`,
       )
-      failFileAndReturnWorker(
-        mappingWorker,
-        fileInfo,
-        error instanceof Error ? error.message : String(error),
-      )
+      const message = error instanceof Error ? error.message : String(error)
+      failFileAndReturnWorker(mappingWorker, fileInfo, message)
+
+      // Reported once per streak (a success resets the count). The run owner
+      // decides what to do: its rejection tears the pool down, which empties
+      // the queue and ends this loop. With no callback wired the run drains
+      // into error results as before.
+      consecutiveDispatchFailures += 1
+      if (consecutiveDispatchFailures === MAX_CONSECUTIVE_DISPATCH_FAILURES) {
+        rejectRunCallback?.(
+          new Error(
+            `Dispatch failed for ${MAX_CONSECUTIVE_DISPATCH_FAILURES} consecutive files, last: ${message}`,
+          ),
+        )
+      }
     }
   }
 

@@ -11,9 +11,13 @@ let pauseHeaders = false
 let resumeHeaders: (() => void) | null = null
 let failPausedHeaders: (() => void) | null = null
 let rejectNextHeaders = false
+let rejectAllHeaders = false
 
 vi.doMock('./httpHeaders', () => ({
   getHttpInputHeaders: vi.fn(async (fileInfo: any) => {
+    if (rejectAllHeaders) {
+      throw new Error('Header provider unavailable')
+    }
     if (rejectNextHeaders) {
       rejectNextHeaders = false
       throw new Error('Header provider unavailable')
@@ -77,6 +81,7 @@ describe('dispatchMappingJobs', () => {
     resumeHeaders = null
     failPausedHeaders = null
     rejectNextHeaders = false
+    rejectAllHeaders = false
     resetMockWorkers()
   })
 
@@ -198,6 +203,68 @@ describe('dispatchMappingJobs', () => {
     )
     expect(mapped.errors).toEqual([])
     expect(pool.getWorkersActive()).toBe(0)
+  })
+
+  it('fails the run once dispatch has failed for a long enough streak', async () => {
+    // getHttpOutputHeaders runs per file, so one expired token fails every
+    // file in turn. Erroring each of them keeps 'done' reachable but turns a
+    // systemic failure into a successful run full of errors, which reads the
+    // same as a genuine mass failure -- so the pool reports it upward.
+    rejectAllHeaders = true
+    configureMockMappingWorkers(['normal'])
+
+    const rejections: Error[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      () => {},
+      1,
+      (reason: Error) => rejections.push(reason),
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(true)
+    for (let i = 0; i < 40; i++) {
+      pool.filesToProcess.push(queueFile(`f${i}.dcm`))
+    }
+
+    await pool.dispatchMappingJobs()
+    await settle()
+
+    // Once per streak, not once per failed file: the run owner tears the pool
+    // down on the first report, and a success would reset the count.
+    expect(rejections).toHaveLength(1)
+    expect(rejections[0].message).toMatch(
+      /Dispatch failed for 20 consecutive files/,
+    )
+  })
+
+  it('does not report a streak when dispatches succeed in between', async () => {
+    configureMockMappingWorkers(['normal'])
+
+    const rejections: Error[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      () => {},
+      1,
+      (reason: Error) => rejections.push(reason),
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(true)
+
+    // Individually bad files, each followed by a good one: the count resets,
+    // so a run with scattered failures still completes.
+    for (let i = 0; i < 30; i++) {
+      rejectNextHeaders = true
+      pool.filesToProcess.push(queueFile(`bad${i}.dcm`))
+      await pool.dispatchMappingJobs()
+      await settle()
+      pool.filesToProcess.push(queueFile(`good${i}.dcm`))
+      await pool.dispatchMappingJobs()
+      await settle()
+    }
+
+    expect(rejections).toHaveLength(0)
   })
 
   it('does not free a still-busy worker on an unrecognised message', async () => {
