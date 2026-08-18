@@ -389,6 +389,9 @@ export async function dispatchMappingJobs(): Promise<void> {
       mapResultsList: mapResultsList,
       processedFiles: filesMapped,
       totalFiles: filesMapped,
+      // Always true here -- the termination condition requires it -- but set
+      // explicitly so a consumer never reads `undefined` on the final message.
+      scanComplete: true,
     })
   }
 }
@@ -449,6 +452,7 @@ function failFileAndReturnWorker(
     totalFiles:
       totalDiscoveredFiles ??
       filesToProcess.length + filesMapped + workersActive,
+    scanComplete: directoryScanFinished,
   })
 }
 
@@ -519,6 +523,7 @@ function recoverCrashedWorker(
     totalFiles:
       totalDiscoveredFiles ??
       filesToProcess.length + filesMapped + workersActive,
+    scanComplete: directoryScanFinished,
   })
 
   // Counted before dispatching: with an empty queue dispatchMappingJobs() runs
@@ -668,6 +673,7 @@ async function createMappingWorker(): Promise<Worker> {
           totalFiles:
             totalDiscoveredFiles ??
             filesToProcess.length + filesMapped + workersActive,
+          scanComplete: directoryScanFinished,
         })
 
         dispatchMappingJobs()
