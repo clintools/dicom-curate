@@ -267,6 +267,18 @@ export async function initializeMappingWorkers(
   workerCount?: number,
   rejectCb?: (reason: Error) => void,
 ): Promise<void> {
+  // A count below one builds an empty pool, which can neither dispatch nor
+  // reach the termination condition while files are queued. Rejected rather
+  // than clamped: silently running with one worker would hide the caller bug.
+  if (
+    workerCount !== undefined &&
+    (!Number.isInteger(workerCount) || workerCount < 1)
+  ) {
+    throw new Error(
+      `workerCount must be a positive integer, received ${workerCount}`,
+    )
+  }
+
   mappingWorkerOptions = {}
   workersActive = 0
   poolInitialized = false
