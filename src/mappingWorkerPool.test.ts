@@ -312,18 +312,30 @@ describe('dispatchMappingJobs', () => {
       (reason: Error) => rejections.push(reason),
     )
     pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
-    pool.setDirectoryScanFinished(true)
+    // Left unfinished: with the scan complete the first good file empties the
+    // queue, which emits 'done' and drains the pool, and every later pair is
+    // then a no-op that proves nothing.
+    pool.setDirectoryScanFinished(false)
 
     // Individually bad files, each followed by a good one: the count resets,
-    // so a run with scattered failures still completes.
-    for (let i = 0; i < 30; i++) {
-      rejectNextHeaders = true
-      pool.filesToProcess.push(queueFile(`bad${i}.dcm`))
-      await pool.dispatchMappingJobs()
-      await settle()
-      pool.filesToProcess.push(queueFile(`good${i}.dcm`))
-      await pool.dispatchMappingJobs()
-      await settle()
+    // so a run with scattered failures still completes. More pairs than
+    // MAX_CONSECUTIVE_DISPATCH_FAILURES, so an unreset count would report.
+    // Fake timers because each failure costs a retry delay.
+    vi.useFakeTimers()
+    try {
+      for (let i = 0; i < 25; i++) {
+        rejectNextHeaders = true
+        pool.filesToProcess.push(queueFile(`bad${i}.dcm`))
+        const failing = pool.dispatchMappingJobs()
+        await vi.advanceTimersByTimeAsync(1_000)
+        await failing
+        pool.filesToProcess.push(queueFile(`good${i}.dcm`))
+        const succeeding = pool.dispatchMappingJobs()
+        await vi.advanceTimersByTimeAsync(1_000)
+        await succeeding
+      }
+    } finally {
+      vi.useRealTimers()
     }
 
     expect(rejections).toHaveLength(0)
