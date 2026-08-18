@@ -232,6 +232,39 @@ describe('dispatchMappingJobs', () => {
     expect(pool.availableMappingWorkers).toHaveLength(1)
   })
 
+  it('reports whether the scan has finished on every progress message', async () => {
+    configureMockMappingWorkers(['normal'])
+
+    const progressMessages: any[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => progressMessages.push(msg),
+      1,
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+    pool.filesToProcess.push(queueFile('a.dcm'))
+
+    await pool.dispatchMappingJobs()
+    await waitFor(() => progressMessages.length > 0)
+
+    // Still scanning: totalFiles is a lower bound, which is what a consumer
+    // needs to know before rendering it as a percentage.
+    expect(progressMessages[0].scanComplete).toBe(false)
+
+    pool.setDirectoryScanFinished(true)
+    pool.filesToProcess.push(queueFile('b.dcm'))
+    await pool.dispatchMappingJobs()
+    await waitFor(() => progressMessages.some((m) => m.response === 'done'))
+
+    expect(progressMessages[1].scanComplete).toBe(true)
+    expect(progressMessages.at(-1)).toMatchObject({
+      response: 'done',
+      scanComplete: true,
+    })
+  })
+
   it('leaves the pool clean when the run is aborted during header resolution', async () => {
     pauseHeaders = true
     configureMockMappingWorkers(['normal'])

@@ -422,6 +422,9 @@ export type TCurationSpecification<THost extends HostProps = HostProps> = {
 type TProgressMessageBase = {
   totalFiles?: number
   processedFiles?: number
+  // Whether the directory scan has finished. Until it has, `totalFiles` is a
+  // lower bound the scanner is still revising, not an exact denominator.
+  scanComplete?: boolean
 }
 
 type TProgressMessageProgress = TProgressMessageBase & {

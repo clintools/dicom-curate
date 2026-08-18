@@ -70,6 +70,14 @@ describe('curateMany orchestration with real workers', () => {
     expect(result.processedFiles).toBe(count)
     expect(listFilesRecursive(outputDir)).toHaveLength(count)
 
+    // Truthful end to end: the scanner is still running when the first files
+    // come back, so totalFiles is provisional at that point and exact at 'done'.
+    expect(progress[0].scanComplete).toBe(false)
+    expect(progress.at(-1)).toMatchObject({
+      response: 'done',
+      scanComplete: true,
+    })
+
     // The count must never overshoot the discovered total, in any message —
     // a pause/resume that lost or replayed a file would break this.
     for (const msg of progress) {
