@@ -451,6 +451,44 @@ describe('worker crash recovery', () => {
     errorSpy.mockRestore()
   }, 30_000)
 
+  // The mirror image of the test above: a scanner that stops reporting has
+  // nothing for the watchdog to recover and nothing to re-dispatch, so
+  // detecting the stall is all it can do -- and detection alone leaves the run
+  // waiting forever.
+  it('rejects the run when the scanner stops reporting', async () => {
+    vi.useFakeTimers()
+
+    configureMockMappingWorkers(['normal'])
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: 1,
+      },
+      () => {},
+    )
+
+    await flushMicrotasks(20)
+
+    // Kill the scanner before it emits anything: no files queued, no worker
+    // active, no 'done' -- the run is left waiting on a scanner that will
+    // never speak again. (A real one wedges rather than dies, which is why the
+    // 'exit' handler cannot cover this.)
+    scanWorkerInstance!.terminate()
+
+    for (let i = 0; i < 11; i++) {
+      vi.advanceTimersByTime(60 * 1000)
+      await flushMicrotasks()
+    }
+
+    await expect(curatePromise).rejects.toThrow(
+      /Scan worker stopped reporting progress/,
+    )
+  }, 30_000)
+
   it('rejects the run when every mapping worker fails to initialize', async () => {
     configureMockMappingWorkers(Array(WORKER_COUNT).fill('init-error'))
 

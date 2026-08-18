@@ -12,7 +12,6 @@ import {
   getWorkerCurrentFile,
   getWorkersActive,
   initializeMappingWorkers,
-  isAborted,
   isDirectoryScanFinished,
   markScanPaused,
   type ProgressCallback,
@@ -81,6 +80,7 @@ function requiresDateOffset(
 // TODO: implement a buffering stream to request fileHandles in batches
 async function initializeFileListWorker(
   rejectCallback: (reason: Error) => void,
+  isRunOver: () => boolean,
 ) {
   const fileListWorker = await createWorker(
     new URL('./scanDirectoryWorker.js', import.meta.url),
@@ -111,8 +111,11 @@ async function initializeFileListWorker(
       }
     ).on('exit', (code: number) => {
       // Code 0 is a normal exit; a non-zero code after the scan finished, or
-      // after an abort's terminate(), is intentional.
-      if (code === 0 || isDirectoryScanFinished() || isAborted()) return
+      // after this run ended (its own abort terminated the worker), is
+      // intentional. `isRunOver` is scoped to the run that owns this worker:
+      // the pool's abort flag is module-global, so a later run resetting it
+      // would make a dead run's exit look live again.
+      if (code === 0 || isDirectoryScanFinished() || isRunOver()) return
       console.error(`Scan worker exited unexpectedly with code ${code}`)
       rejectCallback(
         new Error(`Scan worker exited unexpectedly with code ${code}`),
@@ -387,6 +390,20 @@ async function curateMany(
         `Stall detected: no ${mappingWorkOutstanding ? 'mapping' : 'scan'} progress for 10 minutes (${workersActive} worker(s) active, ${queueLength} file(s) queued, ${pendingReplacements} replacement(s) pending, scan ${scanFinished ? 'finished' : 'in progress'}).`,
       )
 
+      if (!mappingWorkOutstanding) {
+        // Waiting on a scanner that has gone quiet, with nothing dispatched
+        // and nothing queued: there is no worker to recover and no file to
+        // re-dispatch, so the loop below and the re-pump can do nothing. The
+        // scanner is not paused either — backpressure only pauses it while the
+        // queue is full, which would have made mapping work outstanding. Ten
+        // minutes of silence in that state means it is never coming back, and
+        // waiting forever is the failure this watchdog exists to end.
+        failRun(
+          new Error('Scan worker stopped reporting progress for 10 minutes'),
+        )
+        return
+      }
+
       const workerCurrentFile = getWorkerCurrentFile()
       // Recover all stuck workers. Iterate over a copy since
       // recoverCrashedWorker modifies workerCurrentFile.
@@ -527,7 +544,10 @@ async function curateMany(
           // rejects the run, and a scan worker started for it would run the
           // whole tree with nothing left able to terminate it.
           if (settled) return
-          fileListWorker = await initializeFileListWorker(failRun)
+          fileListWorker = await initializeFileListWorker(
+            failRun,
+            () => settled,
+          )
 
           // Wire up backpressure resume: when the dispatch loop drains the
           // queue below the low-water mark, it calls this to resume scanning.
