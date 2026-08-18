@@ -169,10 +169,11 @@ export class MockWorker {
         setTimeout(() => {
           if (this.terminated) return
           this.emitMessage({ response: 'heartbeat' })
+          // Emitted even though the pool has terminated this worker by now:
+          // models a reply already queued on the parent's port when terminate
+          // landed, which is what the pool's completion guards exist for.
           setTimeout(() => {
-            if (!this.terminated) {
-              this.emitMessage({ response: 'finished', mapResults })
-            }
+            this.emitMessage({ response: 'finished', mapResults })
           }, 0)
         }, 0)
         break
