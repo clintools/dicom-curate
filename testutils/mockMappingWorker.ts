@@ -13,6 +13,9 @@ export type MockWorkerBehavior =
   | 'crash-onerror-and-exit'
   | 'hang'
   | 'unknown-response'
+  // Emits an unrecognised message while sitting idle in the pool, before it
+  // has been given any file.
+  | 'unknown-response-idle'
   // Emits 'initError' shortly after creation, while idle in the pool.
   | 'init-error'
   // Emits 'initError' as the pool attaches its message listener, i.e. while
@@ -54,6 +57,16 @@ export class MockWorker {
 
   constructor(behavior: MockWorkerBehavior) {
     this.behavior = behavior
+
+    if (behavior === 'unknown-response-idle') {
+      // Same setTimeout(0) reason as 'init-error' below: the pool attaches its
+      // message listener synchronously inside createMappingWorker.
+      setTimeout(() => {
+        if (!this.terminated) {
+          this.emitMessage({ response: 'heartbeat' })
+        }
+      }, 0)
+    }
 
     if (behavior === 'init-error') {
       // setTimeout(0) so the pool has attached its message listener (that
