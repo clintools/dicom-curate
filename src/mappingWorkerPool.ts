@@ -287,7 +287,9 @@ export async function initializeMappingWorkers(
     ...workers.filter((worker) => !initFailedWorkers.has(worker)),
   )
   poolInitialized = true
-  rejectIfNoWorkersLeft()
+  rejectIfNoWorkersLeft(
+    `All mapping workers failed to initialize: ${lastInitErrorMessage}`,
+  )
 }
 
 /**
@@ -588,12 +590,44 @@ function recoverCrashedWorker(
   // straight through to the termination check, so incrementing afterwards lets
   // 'done' fire while this replacement is in flight -- orphaning the worker it
   // creates and re-entering the termination block once it joins the pool.
-  pendingReplacements += 1
+  spawnReplacementWorker()
 
   dispatchMappingJobs()
+}
 
-  // Spawn a replacement worker so the pool doesn't shrink permanently.
-  // A directory with many problematic files could otherwise kill all workers.
+/**
+ * Drop an idle worker that broke the message protocol and replace it. It holds
+ * no file, so there is nothing to account -- but leaving it in the pool means
+ * handing it the next one.
+ */
+function retireIdleWorker(mappingWorker: Worker): void {
+  if (aborted) return
+
+  const index = availableMappingWorkers.indexOf(mappingWorker)
+  if (index !== -1) availableMappingWorkers.splice(index, 1)
+  try {
+    mappingWorker.terminate()
+  } catch {
+    // Worker may already be terminated
+  }
+
+  // Before the dispatch, for the reason spelled out in recoverCrashedWorker.
+  spawnReplacementWorker()
+
+  dispatchMappingJobs()
+}
+
+/**
+ * Spawn a replacement for a worker that has left the pool, so the pool doesn't
+ * shrink permanently -- a directory with many problematic files could otherwise
+ * kill every worker.
+ *
+ * Increments pendingReplacements synchronously, so callers must call this
+ * before any dispatch that could otherwise reach the termination check.
+ */
+function spawnReplacementWorker(): void {
+  pendingReplacements += 1
+
   void createMappingWorker()
     .then((worker) => {
       pendingReplacements -= 1
@@ -606,20 +640,33 @@ function recoverCrashedWorker(
       availableMappingWorkers.push(worker)
       dispatchMappingJobs()
     })
-    .catch((error) => {
+    .catch((error: unknown) => {
       console.error('Failed to create replacement worker:', error)
       pendingReplacements -= 1
       dispatchMappingJobs()
+      // Whatever killed the worker can equally stop a new one being built (an
+      // OOM kill takes the thread and the memory to replace it), and this may
+      // have been the last worker. Nothing else notices: the queue keeps its
+      // files and no dispatch can ever run again.
+      rejectIfNoWorkersLeft(
+        `No mapping workers left: a replacement could not be created (${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      )
     })
 }
 
 /**
- * Reject the run once no mapping worker is left to do any work. Only
- * meaningful after an initialization failure: a busy pool can still recover,
- * and an empty pool during initializeMappingWorkers is just not assembled yet.
+ * Reject the run once no mapping worker is left to do any work. Dispatch needs
+ * an available worker and the termination condition needs an empty queue, so
+ * an empty pool with files still queued can satisfy neither: nothing would
+ * ever settle the run again.
+ *
+ * Not meaningful while initializeMappingWorkers is still assembling the pool
+ * (an empty pool then is just one not built yet), nor once the run is over.
  */
-function rejectIfNoWorkersLeft(): void {
-  if (!poolInitialized || initFailedWorkers.size === 0) return
+function rejectIfNoWorkersLeft(reason: string): void {
+  if (!poolInitialized || aborted || doneEmitted) return
   if (
     availableMappingWorkers.length > 0 ||
     workersActive > 0 ||
@@ -627,11 +674,7 @@ function rejectIfNoWorkersLeft(): void {
   ) {
     return
   }
-  rejectRunCallback?.(
-    new Error(
-      `All mapping workers failed to initialize: ${lastInitErrorMessage}`,
-    ),
-  )
+  rejectRunCallback?.(new Error(reason))
 }
 
 /**
@@ -669,7 +712,9 @@ function handleWorkerInitFailure(mappingWorker: Worker, error: string): void {
     // Worker may already be terminated
   }
 
-  rejectIfNoWorkersLeft()
+  rejectIfNoWorkersLeft(
+    `All mapping workers failed to initialize: ${lastInitErrorMessage}`,
+  )
 }
 
 /**
@@ -826,13 +871,19 @@ async function createMappingWorker(): Promise<Worker> {
       default:
         // An unrecognised message says nothing about whether the worker is
         // still busy, so returning it to the pool risks double-counting its
-        // file when it does reply. Treating the protocol violation as a crash
-        // terminates and replaces it, accounting the file exactly once.
+        // file when it does reply. A busy worker is recovered like a crash,
+        // which accounts its file exactly once; an idle one has no file to
+        // account but must still go, since recoverCrashedWorker would ignore
+        // it and leave it in the pool to be handed the next file.
         console.error(`Unknown response from worker ${event.data.response}`)
-        recoverCrashedWorker(
-          mappingWorker,
-          `Unknown response from worker: ${String(event.data.response)}`,
-        )
+        if (workerCurrentFile.has(mappingWorker)) {
+          recoverCrashedWorker(
+            mappingWorker,
+            `Unknown response from worker: ${String(event.data.response)}`,
+          )
+        } else {
+          retireIdleWorker(mappingWorker)
+        }
         break
     }
   })

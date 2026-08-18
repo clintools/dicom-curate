@@ -12,6 +12,7 @@ let resumeHeaders: (() => void) | null = null
 let failPausedHeaders: (() => void) | null = null
 let rejectNextHeaders = false
 let rejectAllHeaders = false
+let failWorkerCreation = false
 
 vi.doMock('./httpHeaders', () => ({
   getHttpInputHeaders: vi.fn(async (fileInfo: any) => {
@@ -36,6 +37,9 @@ vi.doMock('./httpHeaders', () => ({
 
 vi.doMock('./worker', () => ({
   createWorker: vi.fn(async () => {
+    if (failWorkerCreation) {
+      throw new Error('Worker construction failed')
+    }
     const mock = new MockWorker(getNextMockBehavior())
     registerMockWorker(mock)
     return mock as unknown as Worker
@@ -82,6 +86,7 @@ describe('dispatchMappingJobs', () => {
     failPausedHeaders = null
     rejectNextHeaders = false
     rejectAllHeaders = false
+    failWorkerCreation = false
     resetMockWorkers()
   })
 
@@ -89,6 +94,10 @@ describe('dispatchMappingJobs', () => {
     // Unblock any pending header awaits so the event loop is clean.
     resumeHeaders?.()
     resumeHeaders = null
+    // availableMappingWorkers is module-global and initializeMappingWorkers
+    // only pushes to it, so a worker one test leaves behind is dispatchable in
+    // the next.
+    pool.terminateAllWorkers()
   })
 
   it('increments workersActive before yielding for header resolution, preventing premature done', async () => {
@@ -265,6 +274,53 @@ describe('dispatchMappingJobs', () => {
     }
 
     expect(rejections).toHaveLength(0)
+  })
+
+  // recoverCrashedWorker ignores a worker holding no file, so without a path
+  // of its own the offender stays in the pool and is handed the next file.
+  it('drops an idle worker that breaks the protocol and replaces it', async () => {
+    configureMockMappingWorkers(['unknown-response-idle'])
+
+    await pool.initializeMappingWorkers(false, undefined, () => {}, 1)
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    // Left unfinished so the termination block cannot drain the pool instead.
+    pool.setDirectoryScanFinished(false)
+
+    const offender = getMockWorkersCreated()[0]
+    await waitFor(() => offender.terminated)
+    await settle()
+
+    expect(pool.availableMappingWorkers).toHaveLength(1)
+    expect(pool.availableMappingWorkers[0]).not.toBe(
+      offender as unknown as Worker,
+    )
+    expect(pool.getPendingReplacements()).toBe(0)
+  })
+
+  // An OOM kill takes the worker and the memory to build another. With no
+  // worker left, dispatch can never run and the queue can never drain, so the
+  // run has to be told rather than left waiting on work that cannot happen.
+  it('fails the run when the last worker cannot be replaced', async () => {
+    configureMockMappingWorkers(['crash-onerror'])
+
+    const rejections: Error[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      () => {},
+      1,
+      (reason: Error) => rejections.push(reason),
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+    pool.filesToProcess.push(queueFile('a.dcm'), queueFile('b.dcm'))
+
+    failWorkerCreation = true
+    await pool.dispatchMappingJobs()
+    await waitFor(() => rejections.length > 0)
+
+    expect(rejections[0].message).toMatch(/No mapping workers left/)
+    expect(pool.availableMappingWorkers).toHaveLength(0)
   })
 
   it('does not free a still-busy worker on an unrecognised message', async () => {
