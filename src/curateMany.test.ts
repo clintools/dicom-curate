@@ -37,6 +37,8 @@ describe('curateMany', () => {
       dispatchMappingJobs: vi.fn(),
       filesToProcess: [],
       getLastWorkerProgressTime: vi.fn(() => Date.now()),
+      getPendingReplacements: vi.fn(() => 0),
+      getQueueLength: vi.fn(() => 0),
       getWorkerCurrentFile: vi.fn(() => new Map()),
       getWorkersActive: vi.fn(() => 0),
       initializeMappingWorkers: vi.fn(
@@ -48,7 +50,9 @@ describe('curateMany', () => {
           capturedProgressCallback = progressCallback
         },
       ),
+      isDirectoryScanFinished: vi.fn(() => true),
       markScanPaused: vi.fn(),
+      resetWorkerProgressTime: vi.fn(),
       scanAnomalies: [],
       setDirectoryScanFinished: vi.fn(),
       setAbortSignal: vi.fn(),
@@ -263,6 +267,27 @@ describe('curateMany', () => {
     expect(mappingWorkerPool.filesToProcess).toHaveLength(2)
   })
 
+  it('resolves on the happy path for files input', async () => {
+    const promise = curateMany({
+      inputType: 'files',
+      inputFiles: [new File(['a'], 'file1.dcm'), new File(['b'], 'file2.dcm')],
+      curationSpec: 'none',
+    } as any)
+
+    await flushAsyncSetup()
+
+    emitDone({ fileCount: 2 })
+
+    await expect(promise).resolves.toMatchObject({ response: 'done' })
+
+    expect(mappingWorkerPool.filesToProcess).toHaveLength(2)
+    // Nothing scans for this input type, so this is the only thing that can
+    // make the termination condition reachable.
+    expect(mappingWorkerPool.setDirectoryScanFinished).toHaveBeenCalledWith(
+      true,
+    )
+  })
+
   it('forwards progress messages to the caller before resolving', async () => {
     const onProgress = vi.fn()
 
@@ -304,5 +329,142 @@ describe('curateMany', () => {
     expect(onProgress).toHaveBeenCalledWith(
       expect.objectContaining({ response: 'done' }),
     )
+  })
+
+  it('resolves when the caller throws from the done callback', async () => {
+    const onProgress = vi.fn(() => {
+      throw new Error('consumer callback exploded')
+    })
+
+    const promise = curateMany(
+      {
+        inputType: 'http',
+        inputUrls: ['https://example.com/file.dcm'],
+        curationSpec: 'none',
+      } as any,
+      onProgress,
+    )
+
+    await flushAsyncSetup()
+
+    // The pool calls this synchronously from its termination block, so a throw
+    // that escapes here would take the pump down with it.
+    expect(() => emitDone({ fileCount: 1 })).not.toThrow()
+
+    await expect(promise).resolves.toMatchObject({
+      response: 'done',
+      fileCount: 1,
+    })
+    expect(onProgress).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the stall watchdog armed while a replacement worker is pending', async () => {
+    vi.useFakeTimers()
+    try {
+      // Idle in every respect the watchdog checks except the one that matters:
+      // a replacement is still being created, so the run is not finished.
+      const pool = mappingWorkerPool as unknown as Record<
+        string,
+        MockedFunction<() => number | boolean>
+      >
+      pool.getLastWorkerProgressTime.mockReturnValue(0)
+      pool.getWorkersActive.mockReturnValue(0)
+      pool.getQueueLength.mockReturnValue(0)
+      pool.isDirectoryScanFinished.mockReturnValue(true)
+      pool.getPendingReplacements.mockReturnValue(1)
+
+      const controller = new AbortController()
+      const promise = curateMany({
+        inputType: 'http',
+        inputUrls: ['https://example.com/file.dcm'],
+        curationSpec: 'none',
+        signal: controller.signal,
+      } as any)
+
+      await flushAsyncSetup()
+      const dispatchesBeforeTick = (
+        mappingWorkerPool.dispatchMappingJobs as MockedFunction<
+          typeof mappingWorkerPool.dispatchMappingJobs
+        >
+      ).mock.calls.length
+
+      vi.advanceTimersByTime(60_000)
+
+      // Re-pumped rather than written off as a completed run.
+      expect(mappingWorkerPool.dispatchMappingJobs).toHaveBeenCalledTimes(
+        dispatchesBeforeTick + 1,
+      )
+
+      controller.abort()
+      await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('treats a genuinely finished run as no stall', async () => {
+    vi.useFakeTimers()
+    try {
+      const pool = mappingWorkerPool as unknown as Record<
+        string,
+        MockedFunction<() => number | boolean>
+      >
+      pool.getLastWorkerProgressTime.mockReturnValue(0)
+      pool.getWorkersActive.mockReturnValue(0)
+      pool.getQueueLength.mockReturnValue(0)
+      pool.isDirectoryScanFinished.mockReturnValue(true)
+      pool.getPendingReplacements.mockReturnValue(0)
+
+      const controller = new AbortController()
+      const promise = curateMany({
+        inputType: 'http',
+        inputUrls: ['https://example.com/file.dcm'],
+        curationSpec: 'none',
+        signal: controller.signal,
+      } as any)
+
+      await flushAsyncSetup()
+      const dispatchesBeforeTick = (
+        mappingWorkerPool.dispatchMappingJobs as MockedFunction<
+          typeof mappingWorkerPool.dispatchMappingJobs
+        >
+      ).mock.calls.length
+
+      vi.advanceTimersByTime(60_000)
+
+      expect(mappingWorkerPool.dispatchMappingJobs).toHaveBeenCalledTimes(
+        dispatchesBeforeTick,
+      )
+
+      controller.abort()
+      await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('forwards done to the caller at most once', async () => {
+    const onProgress = vi.fn()
+
+    const promise = curateMany(
+      {
+        inputType: 'http',
+        inputUrls: ['https://example.com/file.dcm'],
+        curationSpec: 'none',
+      } as any,
+      onProgress,
+    )
+
+    await flushAsyncSetup()
+
+    emitDone({ fileCount: 1 })
+    emitDone({ fileCount: 99 })
+
+    await expect(promise).resolves.toMatchObject({ fileCount: 1 })
+
+    const doneCalls = onProgress.mock.calls.filter(
+      ([msg]) => msg.response === 'done',
+    )
+    expect(doneCalls).toHaveLength(1)
   })
 })

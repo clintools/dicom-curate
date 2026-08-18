@@ -68,6 +68,11 @@ let lastWorkerProgressTime = 0
 // before finishing, to avoid orphaning in-flight replacements.
 let pendingReplacements = 0
 
+// Set once the termination condition has emitted 'done'. Guards the whole
+// termination block: re-entering it appends the scan findings a second time to
+// a mapResultsList the consumer already holds a reference to.
+let doneEmitted = false
+
 // Set to true when curateMany is aborted via AbortSignal. Guards dispatch,
 // crash recovery, and worker message handlers against acting on stale state
 // after teardown.
@@ -219,6 +224,7 @@ export async function initializeMappingWorkers(
   mapResultsList = skipCollectingMappings ? undefined : []
   filesMapped = 0
   pendingReplacements = 0
+  doneEmitted = false
   aborted = false
   workerCurrentFile.clear()
   lastWorkerProgressTime = Date.now()
@@ -263,15 +269,39 @@ export async function dispatchMappingJobs(): Promise<void> {
     const { outputTarget, hashMethod, hashPartSize, ...mappingOptions } =
       // Not partial anymore.
       mappingWorkerOptions as TMappingWorkerOptions
-    mappingWorker.postMessage({
-      request: 'apply',
-      fileInfo: await getHttpInputHeaders(fileInfo),
-      outputTarget: await getHttpOutputHeaders(outputTarget),
-      previousFileInfo,
-      hashMethod,
-      hashPartSize,
-      serializedMappingOptions: serializeMappingOptions(mappingOptions),
-    } satisfies MappingRequest)
+
+    // A header provider that rejects (expired credentials, a network failure)
+    // would otherwise leave this file popped and this worker slot consumed for
+    // the rest of the run, so the termination condition could never be met.
+    try {
+      mappingWorker.postMessage({
+        request: 'apply',
+        fileInfo: await getHttpInputHeaders(fileInfo),
+        outputTarget: await getHttpOutputHeaders(outputTarget),
+        previousFileInfo,
+        hashMethod,
+        hashPartSize,
+        serializedMappingOptions: serializeMappingOptions(mappingOptions),
+      } satisfies MappingRequest)
+    } catch (error) {
+      // Same double-recovery guard as recoverCrashedWorker, and for the same
+      // reason: this await can outlive its file. The stall watchdog may have
+      // already recovered the worker, or an abort may have cleared the map --
+      // accounting again would double-count the file, return a terminated
+      // worker to the pool, and drive workersActive to -1.
+      if (!workerCurrentFile.has(mappingWorker)) return
+
+      console.error(
+        'Failed to dispatch file to mapping worker:',
+        error,
+        `File: ${fileInfo.path}/${fileInfo.name}`,
+      )
+      failFileAndReturnWorker(
+        mappingWorker,
+        fileInfo,
+        error instanceof Error ? error.message : String(error),
+      )
+    }
   }
 
   // Backpressure: resume the scan worker when the queue drains below the
@@ -287,11 +317,14 @@ export async function dispatchMappingJobs(): Promise<void> {
   }
 
   if (
+    !doneEmitted &&
     workersActive === 0 &&
     pendingReplacements === 0 &&
     directoryScanFinished &&
     filesToProcess.length === 0
   ) {
+    doneEmitted = true
+
     // End and remove all workers
     while (availableMappingWorkers.length) {
       availableMappingWorkers.pop()!.terminate()
@@ -351,7 +384,7 @@ export async function dispatchMappingJobs(): Promise<void> {
       }
     })
 
-    progressCallback({
+    safeProgress({
       response: 'done',
       mapResultsList: mapResultsList,
       processedFiles: filesMapped,
@@ -363,6 +396,61 @@ export async function dispatchMappingJobs(): Promise<void> {
 // -------------------------------------------------------------------------
 // Internal helpers
 // -------------------------------------------------------------------------
+
+/**
+ * Report progress without letting a consumer throw escape into the pool.
+ *
+ * Reporting sits between `workersActive -= 1` and `dispatchMappingJobs()`,
+ * which is the only place backpressure is released and 'done' is emitted, so an
+ * escaping throw wedges the run -- or, from the 'done' site, becomes an
+ * unhandled rejection, since dispatch is always called unawaited.
+ */
+function safeProgress(message: TProgressMessage): void {
+  try {
+    progressCallback(message)
+  } catch (error) {
+    console.error('Progress callback threw; continuing:', error)
+  }
+}
+
+/**
+ * Account for a file that could not be mapped and return its worker to the
+ * pool, reporting it in the same shape as a worker-reported error.
+ *
+ * Shared by every non-crash failure path, so the pool's invariant holds in one
+ * place: each popped file ends up mapped or errored exactly once, and each
+ * popped worker goes back to the pool.
+ */
+function failFileAndReturnWorker(
+  mappingWorker: Worker,
+  fileInfo: TFileInfo | undefined,
+  errorMessage: string,
+): void {
+  const errorMapResults: TMapResults = {
+    sourceInstanceUID: `error_${filesMapped + 1}`,
+    outputFilePath: '',
+    mappings: {},
+    anomalies: [],
+    errors: [errorMessage],
+    quarantine: {},
+    fileInfo,
+  }
+
+  availableMappingWorkers.push(mappingWorker)
+  workerCurrentFile.delete(mappingWorker)
+  mapResultsList?.push(errorMapResults)
+  workersActive -= 1
+  filesMapped += 1
+
+  safeProgress({
+    response: 'progress',
+    mapResults: errorMapResults,
+    processedFiles: filesMapped,
+    totalFiles:
+      totalDiscoveredFiles ??
+      filesToProcess.length + filesMapped + workersActive,
+  })
+}
 
 /**
  * Return the number of logical CPUs available, working in both browser and
@@ -424,7 +512,7 @@ function recoverCrashedWorker(
   workersActive -= 1
   filesMapped += 1
 
-  progressCallback({
+  safeProgress({
     response: 'progress',
     mapResults: errorMapResults,
     processedFiles: filesMapped,
@@ -433,11 +521,16 @@ function recoverCrashedWorker(
       filesToProcess.length + filesMapped + workersActive,
   })
 
+  // Counted before dispatching: with an empty queue dispatchMappingJobs() runs
+  // straight through to the termination check, so incrementing afterwards lets
+  // 'done' fire while this replacement is in flight -- orphaning the worker it
+  // creates and re-entering the termination block once it joins the pool.
+  pendingReplacements += 1
+
   dispatchMappingJobs()
 
   // Spawn a replacement worker so the pool doesn't shrink permanently.
   // A directory with many problematic files could otherwise kill all workers.
-  pendingReplacements += 1
   void createMappingWorker()
     .then((worker) => {
       pendingReplacements -= 1
@@ -498,6 +591,11 @@ async function createMappingWorker(): Promise<Worker> {
     // Ignore messages from workers after abort — the pool is torn down.
     if (aborted) return
 
+    // Any message from a worker means progress is being made. Recorded before
+    // the lookup/upload branches below so that a consumer upload slower than
+    // the stall timeout is not mistaken for a hung worker.
+    lastWorkerProgressTime = Date.now()
+
     // Handle lookup requests from the worker. The worker sends these when
     // curateOne needs to check if a mapped file was already uploaded
     // (previousMappedFileInfo). The index is kept on the main thread to
@@ -552,12 +650,9 @@ async function createMappingWorker(): Promise<Worker> {
       return
     }
 
-    // Any message from a worker means progress is being made.
-    lastWorkerProgressTime = Date.now()
-    workerCurrentFile.delete(mappingWorker)
-
     switch (event.data.response) {
       case 'finished':
+        workerCurrentFile.delete(mappingWorker)
         availableMappingWorkers.push(mappingWorker)
 
         // Insert null if skipping mapping collection
@@ -566,7 +661,7 @@ async function createMappingWorker(): Promise<Worker> {
         workersActive -= 1
 
         // Report progress
-        progressCallback({
+        safeProgress({
           response: 'progress',
           mapResults: event.data.mapResults,
           processedFiles: filesMapped,
@@ -582,36 +677,26 @@ async function createMappingWorker(): Promise<Worker> {
         break
       case 'error': {
         console.error('Error in mapping worker:', event.data.error)
-        availableMappingWorkers.push(mappingWorker)
-
-        const errorMapResults: TMapResults = {
-          sourceInstanceUID: `error_${filesMapped + 1}`,
-          outputFilePath: '',
-          mappings: {},
-          anomalies: [],
-          errors: [event.data.error.toString()],
-          quarantine: {},
-          fileInfo: event.data.fileInfo,
-        }
-
-        mapResultsList?.push(errorMapResults)
-        workersActive -= 1
-        filesMapped += 1
-
-        progressCallback({
-          response: 'progress',
-          mapResults: errorMapResults,
-          processedFiles: filesMapped,
-          totalFiles:
-            totalDiscoveredFiles ??
-            filesToProcess.length + filesMapped + workersActive,
-        })
+        failFileAndReturnWorker(
+          mappingWorker,
+          event.data.fileInfo,
+          event.data.error.toString(),
+        )
         dispatchMappingJobs()
 
         break
       }
       default:
+        // An unrecognised message says nothing about whether the worker is
+        // still busy, so returning it to the pool risks double-counting its
+        // file when it does reply. Treating the protocol violation as a crash
+        // terminates and replaces it, accounting the file exactly once.
         console.error(`Unknown response from worker ${event.data.response}`)
+        recoverCrashedWorker(
+          mappingWorker,
+          `Unknown response from worker: ${String(event.data.response)}`,
+        )
+        break
     }
   })
 
@@ -638,4 +723,38 @@ export function getWorkersActive(): number {
  */
 export function getLastWorkerProgressTime(): number {
   return lastWorkerProgressTime
+}
+
+/**
+ * Number of replacement workers still being created. Used by the stall
+ * watchdog: the pool's termination condition waits on this, so a run with a
+ * replacement in flight is not finished no matter how idle it looks.
+ */
+export function getPendingReplacements(): number {
+  return pendingReplacements
+}
+
+/**
+ * Number of files still queued for dispatch. Used by the stall watchdog: a
+ * wedged pump leaves work queued with no worker active to drain it.
+ */
+export function getQueueLength(): number {
+  return filesToProcess.length
+}
+
+/**
+ * Whether the directory scan has finished. Used by the stall watchdog to tell
+ * an idle-but-unfinished run from a completed one.
+ */
+export function isDirectoryScanFinished(): boolean {
+  return directoryScanFinished
+}
+
+/**
+ * Restart the stall watchdog's progress baseline after it has taken recovery
+ * action, so a run that stays stuck reports once per timeout rather than once
+ * per watchdog tick.
+ */
+export function resetWorkerProgressTime(): void {
+  lastWorkerProgressTime = Date.now()
 }
