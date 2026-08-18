@@ -322,8 +322,10 @@ export async function dispatchMappingJobs(): Promise<void> {
       // reason: this await can outlive its file. The stall watchdog may have
       // already recovered the worker, or an abort may have cleared the map --
       // accounting again would double-count the file, return a terminated
-      // worker to the pool, and drive workersActive to -1.
-      if (!workerCurrentFile.has(mappingWorker)) return
+      // worker to the pool, and drive workersActive to -1. Continue rather
+      // than return: the queue drain, the backpressure resume and the
+      // termination check below still belong to this pass.
+      if (!workerCurrentFile.has(mappingWorker)) continue
 
       console.error(
         'Failed to dispatch file to mapping worker:',
@@ -753,6 +755,11 @@ async function createMappingWorker(): Promise<Worker> {
 
     switch (event.data.response) {
       case 'finished':
+        // A reply that arrives after this worker was already recovered (stall
+        // watchdog, or the default: branch below) would count its file twice,
+        // push a terminated worker back into the pool, and drive workersActive
+        // to -1 -- past which the termination condition can never hold.
+        if (!workerCurrentFile.has(mappingWorker)) break
         workerCurrentFile.delete(mappingWorker)
         availableMappingWorkers.push(mappingWorker)
 
@@ -779,6 +786,9 @@ async function createMappingWorker(): Promise<Worker> {
         break
       case 'error': {
         console.error('Error in mapping worker:', event.data.error)
+        // Same guard as 'finished': the file may already have been accounted
+        // by a recovery that ran while this reply was in flight.
+        if (!workerCurrentFile.has(mappingWorker)) break
         failFileAndReturnWorker(
           mappingWorker,
           event.data.fileInfo,
