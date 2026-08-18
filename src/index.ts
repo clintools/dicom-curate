@@ -277,11 +277,12 @@ function queueFilesForMapping(
       scanAnomalies: [],
     })
   })
+  // No scan runs for this input type, so nothing else would ever satisfy the
+  // termination condition and curateMany would never settle. Set before
+  // dispatching so settling never depends on a dispatch call elsewhere.
+  setDirectoryScanFinished(true)
   // Dispatch jobs once after all files are queued to prevent race conditions
   dispatchMappingJobs()
-  // No scan runs for this input type, so nothing else would ever satisfy the
-  // termination condition and curateMany would never settle.
-  setDirectoryScanFinished(true)
 }
 
 function queueUrlsForMapping(
@@ -302,8 +303,10 @@ function queueUrlsForMapping(
     })
   })
 
-  dispatchMappingJobs()
+  // No scan runs for this input type either; set before dispatching for the
+  // same reason as queueFilesForMapping above.
   setDirectoryScanFinished(true)
+  dispatchMappingJobs()
 }
 
 async function curateMany(
