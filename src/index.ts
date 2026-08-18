@@ -6,16 +6,17 @@ import {
   availableMappingWorkers,
   dispatchMappingJobs,
   filesToProcess,
-  getLastWorkerProgressTime,
+  getLastMappingProgressTime,
+  getLastScanProgressTime,
   getPendingReplacements,
-  getQueueLength,
   getWorkerCurrentFile,
   getWorkersActive,
   initializeMappingWorkers,
   isDirectoryScanFinished,
   markScanPaused,
   type ProgressCallback,
-  resetWorkerProgressTime,
+  resetProgressTimestamps,
+  resetScanProgressTime,
   scanAnomalies,
   setAbortSignal,
   setCustomUploader,
@@ -101,11 +102,12 @@ async function initializeFileListWorker(
   fileListWorker.addEventListener(
     'message',
     (event: MessageEvent<FileScanMsg>) => {
-      // A live scanner is progress too: without this, any long stretch that
-      // yields no mappable files -- a deep tree of excluded filetypes, a slow
-      // remote listing -- is reported as a stall. A wedged pump still trips the
-      // watchdog, because the scanner pauses on backpressure and goes quiet.
-      resetWorkerProgressTime()
+      // A live scanner is progress too: without this, a long stretch that
+      // yields no mappable files (deep excluded tree, slow remote listing)
+      // reads as a stall. Refreshes only the scan baseline: the file counter
+      // runs even while paused for backpressure, so it must never be able to
+      // mask a wedged mapping pump.
+      resetScanProgressTime()
 
       switch (event.data.response) {
         case 'file': {
@@ -326,14 +328,12 @@ async function curateMany(
 
     const signal = organizeOptions.signal
 
-    // Stall watchdog: if nothing has reported back for 10 minutes while work
-    // is still outstanding, recover any stuck workers (counting their in-flight
+    // Stall watchdog: if there's outstanding work and no progress relevant to
+    // it for 10 minutes, recover any stuck workers (counting their in-flight
     // files as mapping errors) and re-pump the dispatch loop. Guards against
     // crashes no handler sees (e.g. OOM kills) and against a lost dispatch.
     const STALL_TIMEOUT_MS = 10 * 60 * 1000
     const stallWatchdog = setInterval(() => {
-      if (Date.now() - getLastWorkerProgressTime() <= STALL_TIMEOUT_MS) return
-
       // Gating on active workers alone misses the worst case: a dispatch loop
       // killed between `workersActive -= 1` and the re-dispatch leaves zero
       // workers active with the queue still full and the scanner paused, since
@@ -343,20 +343,27 @@ async function curateMany(
       // a run that otherwise looks complete, and dropping that term here would
       // silence the one signal that reports it.
       const workersActive = getWorkersActive()
-      const queueLength = getQueueLength()
+      const queueLength = filesToProcess.length
       const scanFinished = isDirectoryScanFinished()
       const pendingReplacements = getPendingReplacements()
-      if (
-        workersActive === 0 &&
-        queueLength === 0 &&
-        scanFinished &&
-        pendingReplacements === 0
-      ) {
+      const mappingWorkOutstanding =
+        workersActive > 0 || queueLength > 0 || pendingReplacements > 0
+      if (!mappingWorkOutstanding && scanFinished) {
         return
       }
 
+      // With mapping work outstanding, only mapping activity counts: the
+      // scanner's file counter runs even while paused for backpressure, so
+      // scan activity could mask a dead pump for the rest of the scan. Fall
+      // back to the scan timestamp only when the run is purely waiting on
+      // the scanner to surface more files.
+      const relevantProgressTime = mappingWorkOutstanding
+        ? getLastMappingProgressTime()
+        : getLastScanProgressTime()
+      if (Date.now() - relevantProgressTime <= STALL_TIMEOUT_MS) return
+
       console.error(
-        `Stall detected: no mapping progress for 10 minutes (${workersActive} worker(s) active, ${queueLength} file(s) queued, ${pendingReplacements} replacement(s) pending, scan ${scanFinished ? 'finished' : 'in progress'}).`,
+        `Stall detected: no ${mappingWorkOutstanding ? 'mapping' : 'scan'} progress for 10 minutes (${workersActive} worker(s) active, ${queueLength} file(s) queued, ${pendingReplacements} replacement(s) pending, scan ${scanFinished ? 'finished' : 'in progress'}).`,
       )
 
       const workerCurrentFile = getWorkerCurrentFile()
@@ -380,7 +387,7 @@ async function curateMany(
       // only call that drains the queue and releases scanner backpressure.
       void dispatchMappingJobs()
 
-      resetWorkerProgressTime()
+      resetProgressTimestamps()
     }, 60_000)
 
     // Progress callback wraps the user's callback and handles lifecycle
