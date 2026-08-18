@@ -27,6 +27,7 @@ export class MockScanWorker {
   public terminated = false
 
   private messageListeners: ((event: { data: any }) => void)[] = []
+  private exitListeners: ((code: number) => void)[] = []
   private pendingEmitTimeout: ReturnType<typeof setTimeout> | null = null
 
   addEventListener(event: string, listener: any): void {
@@ -38,6 +39,21 @@ export class MockScanWorker {
   on(event: string, listener: any): void {
     if (event === 'message') {
       this.messageListeners.push(listener)
+    } else if (event === 'exit') {
+      this.exitListeners.push(listener)
+    }
+  }
+
+  /** Emit a 'count' message, as the real scanner does while counting ahead. */
+  emitCount(totalDiscovered: number): void {
+    if (this.terminated) return
+    this.emit({ response: 'count', totalDiscovered })
+  }
+
+  /** Simulate the worker thread exiting, as Node's 'exit' event reports it. */
+  emitExit(code: number): void {
+    for (const listener of this.exitListeners) {
+      listener(code)
     }
   }
 

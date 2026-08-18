@@ -553,6 +553,54 @@ describe('worker crash recovery', () => {
     expect(getMockWorkersCreated().length).toBeGreaterThan(WORKER_COUNT)
   })
 
+  it('rejects the run when the scan worker exits without an error event', async () => {
+    vi.useFakeTimers()
+
+    configureMockMappingWorkers(Array(WORKER_COUNT).fill('normal'))
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    // Setup finishes without advancing timers, so the scan has emitted
+    // nothing -- then kill the thread as an OOM does: 'exit' and nothing more.
+    await flushMicrotasks(20)
+    scanWorkerInstance!.emitExit(1)
+
+    await expect(curatePromise).rejects.toThrow(
+      /Scan worker exited unexpectedly with code 1/,
+    )
+  })
+
+  it('ignores a normal scan worker exit', async () => {
+    configureMockMappingWorkers(Array(WORKER_COUNT).fill('normal'))
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    await waitFor(() => scanWorkerInstance !== undefined)
+    scanWorkerInstance!.emitExit(0)
+
+    const result = await curatePromise
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(10)
+  })
+
   it('emits done once when the last worker crashes at end of run', async () => {
     const singleFileDir = createTestDicomDir(1)
 

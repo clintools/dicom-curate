@@ -12,6 +12,7 @@ import {
   getWorkerCurrentFile,
   getWorkersActive,
   initializeMappingWorkers,
+  isAborted,
   isDirectoryScanFinished,
   markScanPaused,
   type ProgressCallback,
@@ -97,6 +98,26 @@ async function initializeFileListWorker(
         `Scan worker crashed: ${'message' in error ? (error as { message: string }).message : String(error)}`,
       ),
     )
+  }
+
+  // Node worker_threads reports some deaths (OOM kill, unhandled rejection in
+  // the thread) only via 'exit', never onerror. Without this the run waits
+  // forever on a scanner that no longer exists: the watchdog can log the stall
+  // but has nothing to recover and no way to settle.
+  if ('on' in fileListWorker) {
+    ;(
+      fileListWorker as unknown as {
+        on(event: string, cb: (code: number) => void): void
+      }
+    ).on('exit', (code: number) => {
+      // Code 0 is a normal exit; a non-zero code after the scan finished, or
+      // after an abort's terminate(), is intentional.
+      if (code === 0 || isDirectoryScanFinished() || isAborted()) return
+      console.error(`Scan worker exited unexpectedly with code ${code}`)
+      rejectCallback(
+        new Error(`Scan worker exited unexpectedly with code ${code}`),
+      )
+    })
   }
 
   fileListWorker.addEventListener(
