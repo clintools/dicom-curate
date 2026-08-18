@@ -91,7 +91,18 @@ let rejectRunCallback: ((reason: Error) => void) | undefined
 // genuine mass failure. High enough that a handful of individually bad files
 // still just error and the run continues.
 const MAX_CONSECUTIVE_DISPATCH_FAILURES = 20
+
+// ...and the streak has to have lasted this long. A failed dispatch returns
+// the worker to the pool immediately, so the loop retries at full speed and a
+// rejecting header provider reaches twenty files in milliseconds: on the count
+// alone, a token refresh that blips for a second would tear down a run that
+// used to heal itself. Failures during the window still surface per file, and
+// a consumer that retries them (as the runCuration orchestrator does) loses
+// nothing.
+const MIN_DISPATCH_FAILURE_STREAK_MS = 10_000
 let consecutiveDispatchFailures = 0
+let dispatchFailureStreakStart = 0
+let dispatchFailureReported = false
 
 // Number of replacement workers currently being created asynchronously.
 // The termination condition in dispatchMappingJobs() waits for this to reach 0
@@ -258,6 +269,8 @@ export async function initializeMappingWorkers(
   initFailedWorkers.clear()
   lastInitErrorMessage = ''
   consecutiveDispatchFailures = 0
+  dispatchFailureStreakStart = 0
+  dispatchFailureReported = false
   rejectRunCallback = rejectCb
   mapResultsList = skipCollectingMappings ? undefined : []
   filesMapped = 0
@@ -331,6 +344,7 @@ export async function dispatchMappingJobs(): Promise<void> {
         serializedMappingOptions: serializeMappingOptions(mappingOptions),
       } satisfies MappingRequest)
       consecutiveDispatchFailures = 0
+      dispatchFailureReported = false
     } catch (error) {
       // Same double-recovery guard as recoverCrashedWorker, and for the same
       // reason: this await can outlive its file. The stall watchdog may have
@@ -349,15 +363,24 @@ export async function dispatchMappingJobs(): Promise<void> {
       const message = error instanceof Error ? error.message : String(error)
       failFileAndReturnWorker(mappingWorker, fileInfo, message)
 
-      // Reported once per streak (a success resets the count). The run owner
-      // decides what to do: its rejection tears the pool down, which empties
-      // the queue and ends this loop. With no callback wired the run drains
-      // into error results as before.
+      // Reported once per streak (a success resets it). The run owner decides
+      // what to do: its rejection tears the pool down, which empties the queue
+      // and ends this loop. With no callback wired the run drains into error
+      // results as before.
+      if (consecutiveDispatchFailures === 0) {
+        dispatchFailureStreakStart = Date.now()
+      }
       consecutiveDispatchFailures += 1
-      if (consecutiveDispatchFailures === MAX_CONSECUTIVE_DISPATCH_FAILURES) {
+      const streakDuration = Date.now() - dispatchFailureStreakStart
+      if (
+        !dispatchFailureReported &&
+        consecutiveDispatchFailures >= MAX_CONSECUTIVE_DISPATCH_FAILURES &&
+        streakDuration >= MIN_DISPATCH_FAILURE_STREAK_MS
+      ) {
+        dispatchFailureReported = true
         rejectRunCallback?.(
           new Error(
-            `Dispatch failed for ${MAX_CONSECUTIVE_DISPATCH_FAILURES} consecutive files, last: ${message}`,
+            `Dispatch failed for ${consecutiveDispatchFailures} consecutive files over ${Math.round(streakDuration / 1000)}s, last: ${message}`,
           ),
         )
       }

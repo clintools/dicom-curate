@@ -236,15 +236,55 @@ describe('dispatchMappingJobs', () => {
       pool.filesToProcess.push(queueFile(`f${i}.dcm`))
     }
 
-    await pool.dispatchMappingJobs()
-    await settle()
+    // A failed dispatch returns the worker immediately, so the whole queue
+    // burns in milliseconds. The clock has to move for the streak to count as
+    // sustained rather than as one bad moment.
+    const realNow = Date.now
+    let clock = realNow()
+    vi.spyOn(Date, 'now').mockImplementation(() => {
+      clock += 1_000
+      return clock
+    })
+    try {
+      await pool.dispatchMappingJobs()
+      await settle()
+    } finally {
+      Date.now = realNow
+    }
 
     // Once per streak, not once per failed file: the run owner tears the pool
     // down on the first report, and a success would reset the count.
     expect(rejections).toHaveLength(1)
     expect(rejections[0].message).toMatch(
-      /Dispatch failed for 20 consecutive files/,
+      /Dispatch failed for 2\d+ consecutive/,
     )
+  })
+
+  // A token refresh that blips for a second fails a burst of files, all of
+  // which surface individually and are retried by the consumer. Tearing the
+  // whole run down over it costs hours of completed work.
+  it('does not fail the run when a failure burst is over quickly', async () => {
+    rejectAllHeaders = true
+    configureMockMappingWorkers(['normal'])
+
+    const rejections: Error[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      () => {},
+      1,
+      (reason: Error) => rejections.push(reason),
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(true)
+    for (let i = 0; i < 40; i++) {
+      pool.filesToProcess.push(queueFile(`f${i}.dcm`))
+    }
+
+    await pool.dispatchMappingJobs()
+    await settle()
+
+    expect(rejections).toEqual([])
   })
 
   it('does not report a streak when dispatches succeed in between', async () => {
