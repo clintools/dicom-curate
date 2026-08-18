@@ -223,33 +223,34 @@ describe('dispatchMappingJobs', () => {
     configureMockMappingWorkers(['normal'])
 
     const rejections: Error[] = []
+    const progressMessages: any[] = []
     await pool.initializeMappingWorkers(
       false,
       undefined,
-      () => {},
+      (msg: any) => progressMessages.push(msg),
       1,
-      (reason: Error) => rejections.push(reason),
+      // What the run owner does with the report: the teardown is what stops
+      // the loop, so the file count below is the damage a streak really does.
+      (reason: Error) => {
+        rejections.push(reason)
+        pool.terminateAllWorkers()
+      },
     )
     pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
     pool.setDirectoryScanFinished(true)
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 200; i++) {
       pool.filesToProcess.push(queueFile(`f${i}.dcm`))
     }
 
-    // A failed dispatch returns the worker immediately, so the whole queue
-    // burns in milliseconds. The clock has to move for the streak to count as
-    // sustained rather than as one bad moment.
-    const realNow = Date.now
-    let clock = realNow()
-    vi.spyOn(Date, 'now').mockImplementation(() => {
-      clock += 1_000
-      return clock
-    })
+    // The streak is timed off the same clock as the retry delays, so under
+    // fake timers the delays are what age it into a report.
+    vi.useFakeTimers()
     try {
-      await pool.dispatchMappingJobs()
-      await settle()
+      const dispatchPromise = pool.dispatchMappingJobs()
+      await vi.advanceTimersByTimeAsync(30_000)
+      await dispatchPromise
     } finally {
-      Date.now = realNow
+      vi.useRealTimers()
     }
 
     // Once per streak, not once per failed file: the run owner tears the pool
@@ -258,11 +259,15 @@ describe('dispatchMappingJobs', () => {
     expect(rejections[0].message).toMatch(
       /Dispatch failed for 2\d+ consecutive/,
     )
+    // The point of the retry delay: a 200-file queue loses about twenty files,
+    // not all of them, before the run is failed.
+    expect(progressMessages.length).toBeLessThanOrEqual(25)
+    expect(pool.filesToProcess).toHaveLength(0)
   })
 
-  // A token refresh that blips for a second fails a burst of files, all of
-  // which surface individually and are retried by the consumer. Tearing the
-  // whole run down over it costs hours of completed work.
+  // A token refresh that blips for a few seconds fails a burst of files. The
+  // provider comes back before the streak is old enough to count, and tearing
+  // the whole run down over it would cost hours of completed work.
   it('does not fail the run when a failure burst is over quickly', async () => {
     rejectAllHeaders = true
     configureMockMappingWorkers(['normal'])
@@ -281,8 +286,16 @@ describe('dispatchMappingJobs', () => {
       pool.filesToProcess.push(queueFile(`f${i}.dcm`))
     }
 
-    await pool.dispatchMappingJobs()
-    await settle()
+    vi.useFakeTimers()
+    try {
+      const dispatchPromise = pool.dispatchMappingJobs()
+      await vi.advanceTimersByTimeAsync(4_000)
+      rejectAllHeaders = false
+      await vi.advanceTimersByTimeAsync(4_000)
+      await dispatchPromise
+    } finally {
+      vi.useRealTimers()
+    }
 
     expect(rejections).toEqual([])
   })
