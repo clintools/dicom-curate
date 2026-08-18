@@ -350,6 +350,103 @@ describe('worker crash recovery', () => {
     expect(result.processedFiles).toBe(2)
   }, 30_000)
 
+  it('does not let scan activity mask a stalled mapping pump', async () => {
+    vi.useFakeTimers()
+
+    configureMockMappingWorkers(['normal'])
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: 1,
+      },
+      () => {},
+    )
+
+    await flushMicrotasks(20)
+
+    // Same injected wedge as the test above -- work queued, nothing active,
+    // no dispatch pending -- but this time the scanner keeps reporting in
+    // throughout the stall. In reality the file counter runs even while
+    // paused for backpressure, so it must not be able to stand in for
+    // mapping progress: with work outstanding, only mapping activity counts.
+    scanWorkerInstance!.terminate()
+    pool.filesToProcess.push(
+      queuedFile('wedged-1.dcm'),
+      queuedFile('wedged-2.dcm'),
+    )
+    pool.setDirectoryScanFinished(true)
+
+    for (let i = 0; i < 12; i++) {
+      vi.advanceTimersByTime(60 * 1000)
+      pool.resetScanProgressTime()
+      await flushMicrotasks()
+    }
+
+    // Let the re-pumped dispatch and the worker responses drain.
+    for (let i = 0; i < 50; i++) {
+      vi.advanceTimersByTime(1)
+      await flushMicrotasks()
+    }
+
+    const result = await curatePromise
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(2)
+  }, 30_000)
+
+  it('does not false-fire on a healthy scan with nothing dispatched yet', async () => {
+    vi.useFakeTimers()
+    const errorSpy = vi.spyOn(console, 'error')
+
+    configureMockMappingWorkers(['normal'])
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: 1,
+      },
+      () => {},
+    )
+
+    await flushMicrotasks(20)
+
+    // Nothing queued, nothing active, scan not finished -- purely waiting on
+    // the scanner. A deep tree of excluded files or a slow remote listing
+    // looks exactly like this, and must not be reported as a stall as long
+    // as the scanner keeps reporting in.
+    for (let i = 0; i < 12; i++) {
+      vi.advanceTimersByTime(60 * 1000)
+      pool.resetScanProgressTime()
+      await flushMicrotasks()
+    }
+
+    expect(
+      errorSpy.mock.calls.some((call) =>
+        String(call[0]).includes('Stall detected'),
+      ),
+    ).toBe(false)
+
+    // Let the scan actually finish so the run can settle.
+    scanWorkerInstance!.terminate()
+    pool.setDirectoryScanFinished(true)
+    for (let i = 0; i < 50; i++) {
+      vi.advanceTimersByTime(1)
+      await flushMicrotasks()
+    }
+
+    const result = await curatePromise
+    expect(result.response).toBe('done')
+
+    errorSpy.mockRestore()
+  }, 30_000)
+
   it('emits done once when the last worker crashes at end of run', async () => {
     const singleFileDir = createTestDicomDir(1)
 
@@ -374,7 +471,7 @@ describe('worker crash recovery', () => {
       // so recovery runs with an empty queue - the end-of-run case where the
       // termination condition is already satisfied.
       await waitFor(
-        () => pool.directoryScanFinished && pool.getWorkersActive() === 1,
+        () => pool.isDirectoryScanFinished() && pool.getWorkersActive() === 1,
       )
 
       // A hard scan read-failure is reported from the termination block, so a

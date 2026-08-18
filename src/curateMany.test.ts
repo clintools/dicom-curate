@@ -36,9 +36,9 @@ describe('curateMany', () => {
       availableMappingWorkers: [],
       dispatchMappingJobs: vi.fn(),
       filesToProcess: [],
-      getLastWorkerProgressTime: vi.fn(() => Date.now()),
+      getLastMappingProgressTime: vi.fn(() => Date.now()),
+      getLastScanProgressTime: vi.fn(() => Date.now()),
       getPendingReplacements: vi.fn(() => 0),
-      getQueueLength: vi.fn(() => 0),
       getWorkerCurrentFile: vi.fn(() => new Map()),
       getWorkersActive: vi.fn(() => 0),
       initializeMappingWorkers: vi.fn(
@@ -52,7 +52,8 @@ describe('curateMany', () => {
       ),
       isDirectoryScanFinished: vi.fn(() => true),
       markScanPaused: vi.fn(),
-      resetWorkerProgressTime: vi.fn(),
+      resetProgressTimestamps: vi.fn(),
+      resetScanProgressTime: vi.fn(),
       scanAnomalies: [],
       setDirectoryScanFinished: vi.fn(),
       setAbortSignal: vi.fn(),
@@ -367,9 +368,9 @@ describe('curateMany', () => {
         string,
         MockedFunction<() => number | boolean>
       >
-      pool.getLastWorkerProgressTime.mockReturnValue(0)
+      pool.getLastMappingProgressTime.mockReturnValue(0)
+      pool.getLastScanProgressTime.mockReturnValue(0)
       pool.getWorkersActive.mockReturnValue(0)
-      pool.getQueueLength.mockReturnValue(0)
       pool.isDirectoryScanFinished.mockReturnValue(true)
       pool.getPendingReplacements.mockReturnValue(1)
 
@@ -382,6 +383,9 @@ describe('curateMany', () => {
       } as any)
 
       await flushAsyncSetup()
+      // Drain the URL queued at setup: the watchdog reads the live queue, and
+      // this scenario needs it empty.
+      mappingWorkerPool.filesToProcess.length = 0
       const dispatchesBeforeTick = (
         mappingWorkerPool.dispatchMappingJobs as MockedFunction<
           typeof mappingWorkerPool.dispatchMappingJobs
@@ -409,9 +413,9 @@ describe('curateMany', () => {
         string,
         MockedFunction<() => number | boolean>
       >
-      pool.getLastWorkerProgressTime.mockReturnValue(0)
+      pool.getLastMappingProgressTime.mockReturnValue(0)
+      pool.getLastScanProgressTime.mockReturnValue(0)
       pool.getWorkersActive.mockReturnValue(0)
-      pool.getQueueLength.mockReturnValue(0)
       pool.isDirectoryScanFinished.mockReturnValue(true)
       pool.getPendingReplacements.mockReturnValue(0)
 
@@ -424,6 +428,9 @@ describe('curateMany', () => {
       } as any)
 
       await flushAsyncSetup()
+      // Drain the URL queued at setup: the watchdog reads the live queue, and
+      // a genuinely finished run has it empty.
+      mappingWorkerPool.filesToProcess.length = 0
       const dispatchesBeforeTick = (
         mappingWorkerPool.dispatchMappingJobs as MockedFunction<
           typeof mappingWorkerPool.dispatchMappingJobs

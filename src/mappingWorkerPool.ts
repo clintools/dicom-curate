@@ -60,8 +60,13 @@ let filesMapped = 0
 // the failing file and include it in the error report.
 const workerCurrentFile = new Map<Worker, TFileInfo>()
 
-// Track the last time any worker reported progress, used by the stall watchdog.
-let lastWorkerProgressTime = 0
+// Track the last time a mapping worker, and separately the scanner, reported
+// progress. Used by the stall watchdog. Kept apart because the scanner's file
+// counter runs even while it is paused for backpressure (see ScanController
+// in scanCore.ts), so scan activity must never be treated as evidence that
+// the mapping pump itself is still alive.
+let lastMappingProgressTime = 0
+let lastScanProgressTime = 0
 
 // Number of replacement workers currently being created asynchronously.
 // The termination condition in dispatchMappingJobs() waits for this to reach 0
@@ -89,14 +94,14 @@ let currentUploader: TCustomUploader | undefined
 let currentSignal: AbortSignal | undefined
 
 // Shared state accessed by both scan worker (in index.ts) and dispatch (here).
-// Exported so index.ts can push items and set the scan-finished flag.
+// Exported so index.ts can push items and read the queue length.
 export let filesToProcess: {
   fileInfo: TFileInfo
   scanAnomalies: string[]
   previousFileInfo?: { size?: number; mtime?: string; preMappedHash?: string }
 }[] = []
 
-export let directoryScanFinished = false
+let directoryScanFinished = false
 
 export function setDirectoryScanFinished(value: boolean): void {
   directoryScanFinished = value
@@ -197,6 +202,7 @@ export function terminateAllWorkers(): void {
   filesToProcess.length = 0
   workersActive = 0
   pendingReplacements = 0
+  doneEmitted = false
   directoryScanFinished = false
   scanPaused = false
   scanResumeCallback = null
@@ -227,7 +233,8 @@ export async function initializeMappingWorkers(
   doneEmitted = false
   aborted = false
   workerCurrentFile.clear()
-  lastWorkerProgressTime = Date.now()
+  lastMappingProgressTime = Date.now()
+  lastScanProgressTime = Date.now()
   currentFileInfoIndex = fileInfoIndex
   currentUploader = undefined
   filesToProcess = []
@@ -596,10 +603,13 @@ async function createMappingWorker(): Promise<Worker> {
     // Ignore messages from workers after abort — the pool is torn down.
     if (aborted) return
 
-    // Any message from a worker means progress is being made. Recorded before
-    // the lookup/upload branches below so that a consumer upload slower than
-    // the stall timeout is not mistaken for a hung worker.
-    lastWorkerProgressTime = Date.now()
+    // Any message from a worker means mapping progress is being made.
+    // Recorded before the lookup/upload branches below so a consumer upload
+    // that generates message traffic isn't mistaken for a hung worker -- a
+    // single upload that stays completely silent for the full 10 minutes
+    // still trips the watchdog, since there's no per-upload progress signal
+    // to hook here.
+    lastMappingProgressTime = Date.now()
 
     // Handle lookup requests from the worker. The worker sends these when
     // curateOne needs to check if a mapped file was already uploaded
@@ -725,10 +735,20 @@ export function getWorkersActive(): number {
 }
 
 /**
- * Get the last time a worker reported progress. Used by the stall watchdog.
+ * Get the last time a mapping worker reported progress. Used by the stall
+ * watchdog while mapping work is outstanding.
  */
-export function getLastWorkerProgressTime(): number {
-  return lastWorkerProgressTime
+export function getLastMappingProgressTime(): number {
+  return lastMappingProgressTime
+}
+
+/**
+ * Get the last time the scanner reported progress, including its
+ * backpressure-immune file counter. Used by the stall watchdog only once
+ * there is no mapping work outstanding and it is waiting on the scan itself.
+ */
+export function getLastScanProgressTime(): number {
+  return lastScanProgressTime
 }
 
 /**
@@ -741,14 +761,6 @@ export function getPendingReplacements(): number {
 }
 
 /**
- * Number of files still queued for dispatch. Used by the stall watchdog: a
- * wedged pump leaves work queued with no worker active to drain it.
- */
-export function getQueueLength(): number {
-  return filesToProcess.length
-}
-
-/**
  * Whether the directory scan has finished. Used by the stall watchdog to tell
  * an idle-but-unfinished run from a completed one.
  */
@@ -757,10 +769,20 @@ export function isDirectoryScanFinished(): boolean {
 }
 
 /**
- * Restart the stall watchdog's progress baseline after it has taken recovery
- * action, so a run that stays stuck reports once per timeout rather than once
- * per watchdog tick.
+ * Refresh the scan progress baseline. Called on every scan-worker message,
+ * including the backpressure-immune file counter -- so this must only ever
+ * stand as evidence the scanner is alive, never the mapping pump.
  */
-export function resetWorkerProgressTime(): void {
-  lastWorkerProgressTime = Date.now()
+export function resetScanProgressTime(): void {
+  lastScanProgressTime = Date.now()
+}
+
+/**
+ * Restart both stall watchdog baselines after it has taken recovery action,
+ * so a run that stays stuck reports once per timeout rather than once per
+ * watchdog tick.
+ */
+export function resetProgressTimestamps(): void {
+  lastMappingProgressTime = Date.now()
+  lastScanProgressTime = Date.now()
 }
