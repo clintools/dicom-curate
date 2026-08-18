@@ -68,6 +68,22 @@ const workerCurrentFile = new Map<Worker, TFileInfo>()
 let lastMappingProgressTime = 0
 let lastScanProgressTime = 0
 
+// Workers that reported 'initError'. Tracked because the failure can land
+// while initializeMappingWorkers is still assembling the pool, and those
+// workers must not be pushed as dispatchable afterwards.
+const initFailedWorkers = new Set<Worker>()
+let lastInitErrorMessage = ''
+
+// False while initializeMappingWorkers is still assembling the pool: an
+// availableMappingWorkers of zero means nothing then, so the no-workers-left
+// rejection must wait until the pool is complete.
+let poolInitialized = false
+
+// Rejects the whole run. Set by curateMany via initializeMappingWorkers; used
+// when every mapping worker has failed to initialize, since then no dispatch
+// can ever drain the queue and 'done' is unreachable.
+let rejectRunCallback: ((reason: Error) => void) | undefined
+
 // Number of replacement workers currently being created asynchronously.
 // The termination condition in dispatchMappingJobs() waits for this to reach 0
 // before finishing, to avoid orphaning in-flight replacements.
@@ -224,9 +240,14 @@ export async function initializeMappingWorkers(
   fileInfoIndex?: TFileInfoIndex,
   progressCb?: ProgressCallback,
   workerCount?: number,
+  rejectCb?: (reason: Error) => void,
 ): Promise<void> {
   mappingWorkerOptions = {}
   workersActive = 0
+  poolInitialized = false
+  initFailedWorkers.clear()
+  lastInitErrorMessage = ''
+  rejectRunCallback = rejectCb
   mapResultsList = skipCollectingMappings ? undefined : []
   filesMapped = 0
   pendingReplacements = 0
@@ -249,7 +270,13 @@ export async function initializeMappingWorkers(
   const workers = await Promise.all(
     Array.from({ length: effectiveWorkerCount }, () => createMappingWorker()),
   )
-  availableMappingWorkers.push(...workers)
+  // A worker whose 'initError' already arrived was terminated by
+  // handleWorkerInitFailure before this push and must not become dispatchable.
+  availableMappingWorkers.push(
+    ...workers.filter((worker) => !initFailedWorkers.has(worker)),
+  )
+  poolInitialized = true
+  rejectIfNoWorkersLeft()
 }
 
 /**
@@ -563,6 +590,65 @@ function recoverCrashedWorker(
 }
 
 /**
+ * Reject the run once no mapping worker is left to do any work. Only
+ * meaningful after an initialization failure: a busy pool can still recover,
+ * and an empty pool during initializeMappingWorkers is just not assembled yet.
+ */
+function rejectIfNoWorkersLeft(): void {
+  if (!poolInitialized || initFailedWorkers.size === 0) return
+  if (
+    availableMappingWorkers.length > 0 ||
+    workersActive > 0 ||
+    pendingReplacements > 0
+  ) {
+    return
+  }
+  rejectRunCallback?.(
+    new Error(
+      `All mapping workers failed to initialize: ${lastInitErrorMessage}`,
+    ),
+  )
+}
+
+/**
+ * Handle a worker that reported 'initError': its environment never
+ * initialized, so it can never answer a dispatch. Distinct from a crash
+ * because the common case is an idle worker -- the pool has no ready
+ * handshake, so workers become dispatchable before their module has loaded.
+ */
+function handleWorkerInitFailure(mappingWorker: Worker, error: string): void {
+  if (aborted) return
+
+  console.error('Mapping worker failed to initialize:', error)
+  lastInitErrorMessage = error
+  initFailedWorkers.add(mappingWorker)
+
+  // A file was dispatched before the failure surfaced: recover it like any
+  // crash. A pool-wide breakage makes the replacement fail the same way, but
+  // fast, so this converges on the idle path below rather than stalling.
+  if (workerCurrentFile.has(mappingWorker)) {
+    recoverCrashedWorker(
+      mappingWorker,
+      `Mapping worker failed to initialize: ${error}`,
+    )
+    return
+  }
+
+  // Idle worker: remove it so it can never receive a file, and spawn no
+  // replacement -- an environment that cannot initialize a worker will not
+  // do better on retry.
+  const index = availableMappingWorkers.indexOf(mappingWorker)
+  if (index !== -1) availableMappingWorkers.splice(index, 1)
+  try {
+    mappingWorker.terminate()
+  } catch {
+    // Worker may already be terminated
+  }
+
+  rejectIfNoWorkersLeft()
+}
+
+/**
  * Create a single mapping worker with all error/exit/message handlers attached.
  * Used by both initializeMappingWorkers (initial pool) and recoverCrashedWorker
  * (replacement after crash).
@@ -702,6 +788,9 @@ async function createMappingWorker(): Promise<Worker> {
 
         break
       }
+      case 'initError':
+        handleWorkerInitFailure(mappingWorker, event.data.error)
+        break
       default:
         // An unrecognised message says nothing about whether the worker is
         // still busy, so returning it to the pool risks double-counting its
