@@ -82,6 +82,28 @@ describe('curateMany orchestration with real workers', () => {
     }
   })
 
+  it('completes under backpressure when the consumer callback throws on every message', async () => {
+    const { inputDir, outputDir } = workspace()
+    // The full deadlock: a consumer throw lands between `workersActive -= 1`
+    // and the re-dispatch, and dispatch is the only thing that resumes a
+    // scanner paused on backpressure. One throw used to strand the run.
+    const count = 250
+    await writeImages(inputDir, count)
+
+    const { result } = await runCapturingProgress(
+      integrationOptions(inputDir, outputDir, integrationSpec(), {
+        workerCount: 1,
+      }),
+      () => {
+        throw new Error('consumer callback exploded')
+      },
+    )
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(count)
+    expect(listFilesRecursive(outputDir)).toHaveLength(count)
+  })
+
   it('aborts a live run and leaves the input reusable by the next run', async () => {
     const { inputDir, outputDir } = workspace()
     const count = 120

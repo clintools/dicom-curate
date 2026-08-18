@@ -12,6 +12,7 @@ export type MockWorkerBehavior =
   | 'crash-exit'
   | 'crash-onerror-and-exit'
   | 'hang'
+  | 'unknown-response'
 
 let mockBehaviors: MockWorkerBehavior[] = []
 let mockWorkerIndex = 0
@@ -121,6 +122,30 @@ export class MockWorker {
               listener(1)
             }
           }
+        }, 0)
+        break
+      }
+      // Replies with a message the pool has no case for, then finishes the
+      // file normally. Models a worker that is still busy when the unknown
+      // message arrives, so returning it to the pool would double-count.
+      case 'unknown-response': {
+        const mapResults = {
+          sourceInstanceUID: fileInfo?.name || 'unknown',
+          outputFilePath: `output/${fileInfo?.name || 'unknown'}`,
+          mappings: {},
+          anomalies: [],
+          errors: [],
+          quarantine: {},
+          fileInfo,
+        }
+        setTimeout(() => {
+          if (this.terminated) return
+          this.emitMessage({ response: 'heartbeat' })
+          setTimeout(() => {
+            if (!this.terminated) {
+              this.emitMessage({ response: 'finished', mapResults })
+            }
+          }, 0)
         }, 0)
         break
       }

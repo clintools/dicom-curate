@@ -7,11 +7,15 @@ import {
   dispatchMappingJobs,
   filesToProcess,
   getLastWorkerProgressTime,
+  getPendingReplacements,
+  getQueueLength,
   getWorkerCurrentFile,
   getWorkersActive,
   initializeMappingWorkers,
+  isDirectoryScanFinished,
   markScanPaused,
   type ProgressCallback,
+  resetWorkerProgressTime,
   scanAnomalies,
   setAbortSignal,
   setCustomUploader,
@@ -97,6 +101,12 @@ async function initializeFileListWorker(
   fileListWorker.addEventListener(
     'message',
     (event: MessageEvent<FileScanMsg>) => {
+      // A live scanner is progress too: without this, any long stretch that
+      // yields no mappable files -- a deep tree of excluded filetypes, a slow
+      // remote listing -- is reported as a stall. A wedged pump still trips the
+      // watchdog, because the scanner pauses on backpressure and goes quiet.
+      resetWorkerProgressTime()
+
       switch (event.data.response) {
         case 'file': {
           const { fileInfo, previousFileInfo } = event.data
@@ -269,6 +279,9 @@ function queueFilesForMapping(
   })
   // Dispatch jobs once after all files are queued to prevent race conditions
   dispatchMappingJobs()
+  // No scan runs for this input type, so nothing else would ever satisfy the
+  // termination condition and curateMany would never settle.
+  setDirectoryScanFinished(true)
 }
 
 function queueUrlsForMapping(
@@ -310,46 +323,81 @@ async function curateMany(
 
     const signal = organizeOptions.signal
 
-    // Stall watchdog: if no mapping worker at all has reported back for 10
-    // minutes (i.e., all active workers are stuck), terminate them and count
-    // their in-flight files as mapping errors. This guards against undetectable
-    // worker crashes (e.g., OOM kills that don't trigger onerror or on('exit')).
+    // Stall watchdog: if nothing has reported back for 10 minutes while work
+    // is still outstanding, recover any stuck workers (counting their in-flight
+    // files as mapping errors) and re-pump the dispatch loop. Guards against
+    // crashes no handler sees (e.g. OOM kills) and against a lost dispatch.
     const STALL_TIMEOUT_MS = 10 * 60 * 1000
     const stallWatchdog = setInterval(() => {
+      if (Date.now() - getLastWorkerProgressTime() <= STALL_TIMEOUT_MS) return
+
+      // Gating on active workers alone misses the worst case: a dispatch loop
+      // killed between `workersActive -= 1` and the re-dispatch leaves zero
+      // workers active with the queue still full and the scanner paused, since
+      // backpressure is only released from inside dispatchMappingJobs().
+      // Mirrors the pool's 4-way termination condition exactly, replacements
+      // included: a replacement worker that never finishes being created stalls
+      // a run that otherwise looks complete, and dropping that term here would
+      // silence the one signal that reports it.
+      const workersActive = getWorkersActive()
+      const queueLength = getQueueLength()
+      const scanFinished = isDirectoryScanFinished()
+      const pendingReplacements = getPendingReplacements()
       if (
-        getWorkersActive() > 0 &&
-        Date.now() - getLastWorkerProgressTime() > STALL_TIMEOUT_MS
+        workersActive === 0 &&
+        queueLength === 0 &&
+        scanFinished &&
+        pendingReplacements === 0
       ) {
-        console.error(
-          `Stall detected: ${getWorkersActive()} mapping worker(s) have not responded for 10 minutes.`,
-        )
-        const workerCurrentFile = getWorkerCurrentFile()
-        // Recover all stuck workers. Iterate over a copy since
-        // recoverCrashedWorker modifies workerCurrentFile.
-        for (const [worker] of [...workerCurrentFile]) {
-          // Import recoverCrashedWorker indirectly via the worker's onerror.
-          // The onerror handler calls recoverCrashedWorker internally.
-          if (worker.onerror) {
-            // Synthetic error event -- avoid ErrorEvent constructor which is
-            // unavailable in Node.js < 23. The onerror handler only reads
-            // event.message via duck-typing so a plain object suffices.
-            worker.onerror({
-              message: 'Worker stalled (no response for 10 minutes)',
-            } as unknown as ErrorEvent)
-          }
+        return
+      }
+
+      console.error(
+        `Stall detected: no mapping progress for 10 minutes (${workersActive} worker(s) active, ${queueLength} file(s) queued, ${pendingReplacements} replacement(s) pending, scan ${scanFinished ? 'finished' : 'in progress'}).`,
+      )
+
+      const workerCurrentFile = getWorkerCurrentFile()
+      // Recover all stuck workers. Iterate over a copy since
+      // recoverCrashedWorker modifies workerCurrentFile.
+      for (const [worker] of [...workerCurrentFile]) {
+        // Import recoverCrashedWorker indirectly via the worker's onerror.
+        // The onerror handler calls recoverCrashedWorker internally.
+        if (worker.onerror) {
+          // Synthetic error event -- avoid ErrorEvent constructor which is
+          // unavailable in Node.js < 23. The onerror handler only reads
+          // event.message via duck-typing so a plain object suffices.
+          worker.onerror({
+            message: 'Worker stalled (no response for 10 minutes)',
+          } as unknown as ErrorEvent)
         }
       }
+
+      // Unconditional: when the stall is a lost dispatch rather than a stuck
+      // worker there is nothing for the loop above to recover, and this is the
+      // only call that drains the queue and releases scanner backpressure.
+      void dispatchMappingJobs()
+
+      resetWorkerProgressTime()
     }, 60_000)
 
     // Progress callback wraps the user's callback and handles lifecycle
     const progressCallback: ProgressCallback = (msg) => {
-      onProgress?.(msg)
-
-      if (msg.response === 'done' && !settled) {
+      if (msg.response === 'done') {
+        // Settle first: a consumer that throws must not be able to stop
+        // curateMany from resolving, and 'done' is forwarded at most once.
+        if (settled) return
         settled = true
         clearInterval(stallWatchdog)
         signal?.removeEventListener('abort', onAbort)
         resolve(msg)
+      }
+
+      // resolve() only queues the awaiter as a microtask, so a synchronous
+      // consumer still observes 'done' before the caller of curateMany resumes.
+      try {
+        onProgress?.(msg)
+      } catch (error) {
+        console.error('Error in curateMany progress callback:', error)
       }
     }
 
