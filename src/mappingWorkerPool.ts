@@ -92,14 +92,18 @@ let rejectRunCallback: ((reason: Error) => void) | undefined
 // still just error and the run continues.
 const MAX_CONSECUTIVE_DISPATCH_FAILURES = 20
 
-// ...and the streak has to have lasted this long. A failed dispatch returns
-// the worker to the pool immediately, so the loop retries at full speed and a
-// rejecting header provider reaches twenty files in milliseconds: on the count
-// alone, a token refresh that blips for a second would tear down a run that
-// used to heal itself. Failures during the window still surface per file, and
-// a consumer that retries them (as the runCuration orchestrator does) loses
-// nothing.
+// ...and the streak has to have lasted this long, so that on the count alone a
+// token refresh that blips for a second cannot tear a run down. Files failed
+// during the window surface as plain error results, indistinguishable from a
+// genuinely bad file, so the retry delay below is what bounds the loss.
 const MIN_DISPATCH_FAILURE_STREAK_MS = 10_000
+
+// How long to wait after a failed dispatch while a streak is live. A failed
+// dispatch returns its worker to the pool immediately, so without this the
+// loop burns the whole queue before the streak is old enough to report. At
+// this delay both gates above are reached together, which bounds the damage
+// at roughly MAX_CONSECUTIVE_DISPATCH_FAILURES files per streak.
+const DISPATCH_FAILURE_RETRY_DELAY_MS = 500
 let consecutiveDispatchFailures = 0
 let dispatchFailureStreakStart = 0
 let dispatchFailureReported = false
@@ -383,6 +387,16 @@ export async function dispatchMappingJobs(): Promise<void> {
             `Dispatch failed for ${consecutiveDispatchFailures} consecutive files over ${Math.round(streakDuration / 1000)}s, last: ${message}`,
           ),
         )
+      }
+
+      // Reporting tears the pool down, which clears the queue and ends this
+      // loop, so only an unreported streak is worth slowing down.
+      if (!dispatchFailureReported) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, DISPATCH_FAILURE_RETRY_DELAY_MS),
+        )
+        // The run can be torn down during that wait.
+        if (aborted) return
       }
     }
   }
