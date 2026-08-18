@@ -44,6 +44,24 @@ fixupNodeWorkerEnvironment()
   })
   .catch((error) => {
     // If fixupNodeWorkerEnvironment() fails, the worker can never process
-    // messages. Log the error so it's visible in the console.
-    console.error('Failed to initialize mapping worker environment:', error)
+    // messages: dispatched files vanish silently until the stall watchdog
+    // notices up to 10 minutes later. Log here (worker-thread console, the
+    // only place the detailed reason is visible) and tell the pool: a
+    // response tag outside the normal union routes through its default:
+    // branch, which terminates and replaces the worker and accounts any
+    // in-flight file. Only effective if a file was already dispatched:
+    // recoverCrashedWorker bails for an idle worker (a pre-existing gap),
+    // leaving the watchdog as the only cover.
+    const message = `Failed to initialize mapping worker environment: ${
+      error instanceof Error ? error.message : String(error)
+    }`
+    console.error(message, error)
+    try {
+      emit({
+        response: 'initError',
+        error: message,
+      } as unknown as MappingResponse)
+    } catch {
+      // postMessage unavailable -- already logged above.
+    }
   })
