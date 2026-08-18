@@ -447,6 +447,112 @@ describe('worker crash recovery', () => {
     errorSpy.mockRestore()
   }, 30_000)
 
+  it('rejects the run when every mapping worker fails to initialize', async () => {
+    configureMockMappingWorkers(Array(WORKER_COUNT).fill('init-error'))
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    await expect(curatePromise).rejects.toThrow(
+      /All mapping workers failed to initialize/,
+    )
+
+    expect(getMockWorkersCreated().every((w) => w.terminated)).toBe(true)
+    expect(pool.availableMappingWorkers.length).toBe(0)
+
+    // Here the failures land after setup created the scan worker, so failRun
+    // is what tears it down.
+    expect(scanWorkerInstance?.terminated ?? true).toBe(true)
+  })
+
+  it('starts no scan when the pool fails during assembly', async () => {
+    configureMockMappingWorkers(
+      Array(WORKER_COUNT).fill('init-error-immediate'),
+    )
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    await expect(curatePromise).rejects.toThrow(
+      /All mapping workers failed to initialize/,
+    )
+
+    // The rejection lands before setup reaches the scan worker. Since failRun
+    // and the abort handler are both settled-guarded, a worker created past
+    // that point could never be terminated -- it would scan the whole tree
+    // for a dead run and hold the Node event loop open.
+    expect(scanWorkerInstance).toBeUndefined()
+  })
+
+  it('drops an idle worker that fails to initialize and completes with the rest', async () => {
+    configureMockMappingWorkers(makeBehaviors('init-error'))
+
+    const result = await curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(10)
+
+    // The failed worker never received a file, so nothing was errored, and
+    // no replacement was spawned for it (total created == initial pool).
+    const errors = result.mapResultsList!.filter(
+      (r) => r.errors && r.errors.length > 0,
+    )
+    expect(errors).toHaveLength(0)
+    expect(getMockWorkersCreated().length).toBe(WORKER_COUNT)
+  })
+
+  it('recovers a worker whose init failure surfaces after a file was dispatched', async () => {
+    configureMockMappingWorkers(makeBehaviors('init-error-on-apply'))
+
+    const result = await curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(10)
+
+    // The in-flight file was accounted exactly once, as a crash-style error.
+    const initErrors = result.mapResultsList!.filter((r) =>
+      r.errors?.some((e) => e.includes('failed to initialize')),
+    )
+    expect(initErrors).toHaveLength(1)
+
+    // The broken worker was replaced so the pool did not shrink.
+    expect(getMockWorkersCreated().length).toBeGreaterThan(WORKER_COUNT)
+  })
+
   it('emits done once when the last worker crashes at end of run', async () => {
     const singleFileDir = createTestDicomDir(1)
 

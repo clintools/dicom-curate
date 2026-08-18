@@ -51,6 +51,9 @@ type MapResults = Awaited<ReturnType<typeof curateOne>>
 /** Everything the mapping worker sends back to the main thread. */
 export type MappingResponse =
   | { response: 'error'; error: string; fileInfo: TFileInfo }
+  // Sent by applyMappingsWorker.ts, not this handler: the environment never
+  // initialized, so the pool must stop dispatching to this worker.
+  | { response: 'initError'; error: string }
   | { response: 'lookup'; outputPath: string }
   | {
       response: 'upload'

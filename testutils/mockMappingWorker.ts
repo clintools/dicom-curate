@@ -13,6 +13,13 @@ export type MockWorkerBehavior =
   | 'crash-onerror-and-exit'
   | 'hang'
   | 'unknown-response'
+  // Emits 'initError' shortly after creation, while idle in the pool.
+  | 'init-error'
+  // Emits 'initError' as the pool attaches its message listener, i.e. while
+  // initializeMappingWorkers is still assembling the pool.
+  | 'init-error-immediate'
+  // Emits 'initError' in response to the first file it is given.
+  | 'init-error-on-apply'
 
 let mockBehaviors: MockWorkerBehavior[] = []
 let mockWorkerIndex = 0
@@ -47,11 +54,32 @@ export class MockWorker {
 
   constructor(behavior: MockWorkerBehavior) {
     this.behavior = behavior
+
+    if (behavior === 'init-error') {
+      // setTimeout(0) so the pool has attached its message listener (that
+      // happens synchronously within createMappingWorker) before this fires.
+      setTimeout(() => {
+        if (!this.terminated) {
+          this.emitMessage({
+            response: 'initError',
+            error: 'Simulated worker init failure',
+          })
+        }
+      }, 0)
+    }
   }
 
   addEventListener(event: string, listener: any): void {
     if (event === 'message') {
       this.messageListeners.push(listener)
+      if (this.behavior === 'init-error-immediate') {
+        listener({
+          data: {
+            response: 'initError',
+            error: 'Simulated worker init failure',
+          },
+        })
+      }
     }
   }
 
@@ -146,6 +174,17 @@ export class MockWorker {
               this.emitMessage({ response: 'finished', mapResults })
             }
           }, 0)
+        }, 0)
+        break
+      }
+      case 'init-error-on-apply': {
+        setTimeout(() => {
+          if (!this.terminated) {
+            this.emitMessage({
+              response: 'initError',
+              error: 'Simulated worker init failure',
+            })
+          }
         }, 0)
         break
       }

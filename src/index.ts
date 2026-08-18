@@ -423,6 +423,20 @@ async function curateMany(
     // terminate it. Assigned later when a directory/path/s3 input is used.
     let fileListWorker: Worker | undefined
 
+    // For failures that leave nothing to wait for (scan worker death, every
+    // mapping worker failing to initialize). Guarded on settled so a stale
+    // event from a finished run cannot tear down a newer one's pool state.
+    const failRun = (reason: Error) => {
+      if (settled) return
+      try {
+        fileListWorker?.terminate()
+      } catch {
+        /* already terminated */
+      }
+      terminateAllWorkers()
+      rejectCallback(reason)
+    }
+
     const onAbort = () => {
       // Terminate the scan worker if it exists
       try {
@@ -460,7 +474,13 @@ async function curateMany(
           organizeOptions.fileInfoIndex,
           progressCallback,
           organizeOptions.workerCount,
+          failRun,
         )
+
+        // The pool can reject the run from inside that call (every worker
+        // failed to initialize). Both failRun and onAbort are settled-guarded,
+        // so anything created past this point could never be torn down.
+        if (settled) return
 
         // Set global mappingWorkerOptions
         setMappingWorkerOptions(
@@ -482,7 +502,11 @@ async function curateMany(
           organizeOptions.inputType === 'path' ||
           organizeOptions.inputType === 's3'
         ) {
-          fileListWorker = await initializeFileListWorker(rejectCallback)
+          // Checked again: an initError landing during the awaits above
+          // rejects the run, and a scan worker started for it would run the
+          // whole tree with nothing left able to terminate it.
+          if (settled) return
+          fileListWorker = await initializeFileListWorker(failRun)
 
           // Wire up backpressure resume: when the dispatch loop drains the
           // queue below the low-water mark, it calls this to resume scanning.
