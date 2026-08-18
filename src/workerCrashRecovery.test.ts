@@ -353,7 +353,7 @@ describe('worker crash recovery', () => {
   it('does not let scan activity mask a stalled mapping pump', async () => {
     vi.useFakeTimers()
 
-    configureMockMappingWorkers(['normal'])
+    configureMockMappingWorkers(['hang'])
 
     const curatePromise = curateMany(
       {
@@ -368,26 +368,26 @@ describe('worker crash recovery', () => {
 
     await flushMicrotasks(20)
 
-    // Same injected wedge as the test above -- work queued, nothing active,
-    // no dispatch pending -- but this time the scanner keeps reporting in
-    // throughout the stall. In reality the file counter runs even while
-    // paused for backpressure, so it must not be able to stand in for
-    // mapping progress: with work outstanding, only mapping activity counts.
-    scanWorkerInstance!.terminate()
-    pool.filesToProcess.push(
-      queuedFile('wedged-1.dcm'),
-      queuedFile('wedged-2.dcm'),
-    )
-    pool.setDirectoryScanFinished(true)
-
-    for (let i = 0; i < 12; i++) {
-      vi.advanceTimersByTime(60 * 1000)
-      pool.resetScanProgressTime()
+    // Let the scan emit its files and the single (hanging) worker swallow the
+    // first one: mapping work is now outstanding and no mapping message will
+    // ever arrive.
+    for (let i = 0; i < 200; i++) {
+      vi.advanceTimersByTime(1)
       await flushMicrotasks()
     }
 
-    // Let the re-pumped dispatch and the worker responses drain.
-    for (let i = 0; i < 50; i++) {
+    // The scanner keeps reporting in every minute, as real 'count' messages
+    // through the scan-worker message handler. Its file counter runs even
+    // while paused for backpressure, so it must never stand in for mapping
+    // progress: with work outstanding, only mapping activity counts.
+    for (let i = 0; i < 12; i++) {
+      vi.advanceTimersByTime(60 * 1000)
+      scanWorkerInstance!.emitCount(10)
+      await flushMicrotasks()
+    }
+
+    // Let the recovery, replacement worker, and remaining files drain.
+    for (let i = 0; i < 100; i++) {
       vi.advanceTimersByTime(1)
       await flushMicrotasks()
     }
@@ -395,7 +395,11 @@ describe('worker crash recovery', () => {
     const result = await curatePromise
 
     expect(result.response).toBe('done')
-    expect(result.processedFiles).toBe(2)
+    expect(result.processedFiles).toBe(10)
+    const stallErrors = result.mapResultsList!.filter((r) =>
+      r.errors?.some((e) => e.includes('stalled')),
+    )
+    expect(stallErrors.length).toBe(1)
   }, 30_000)
 
   it('does not false-fire on a healthy scan with nothing dispatched yet', async () => {
@@ -423,7 +427,7 @@ describe('worker crash recovery', () => {
     // as the scanner keeps reporting in.
     for (let i = 0; i < 12; i++) {
       vi.advanceTimersByTime(60 * 1000)
-      pool.resetScanProgressTime()
+      scanWorkerInstance!.emitCount(0)
       await flushMicrotasks()
     }
 
