@@ -552,3 +552,24 @@ describe('dispatchMappingJobs', () => {
     expect(doneMessages[0].mapResultsList).toHaveLength(1)
   })
 })
+
+describe('initializeMappingWorkers', () => {
+  beforeEach(() => {
+    resetMockWorkers()
+  })
+
+  afterEach(() => {
+    pool.terminateAllWorkers()
+  })
+
+  // An empty pool blames the workers for it: "All mapping workers failed to
+  // initialize: " with nothing after the colon, none having been created.
+  it('rejects a workerCount below one', async () => {
+    configureMockMappingWorkers(['normal'])
+
+    await expect(
+      pool.initializeMappingWorkers(false, undefined, () => {}, 0),
+    ).rejects.toThrow('workerCount must be a positive integer, received 0')
+    expect(getMockWorkersCreated()).toHaveLength(0)
+  })
+})

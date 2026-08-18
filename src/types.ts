@@ -60,7 +60,7 @@ export type OrganizeOptions = {
   // Example: ['**/logs/**'] excludes any file under a 'logs' directory.
   // Uses picomatch glob syntax.
   excludedPathGlobs?: string[]
-  // Maximum number of concurrent mapping workers.
+  // Maximum number of concurrent mapping workers. Must be a positive integer.
   // Defaults to the platform's hardware concurrency (capped at 8).
   // Reducing this limits peak memory usage at the cost of slower throughput.
   workerCount?: number
