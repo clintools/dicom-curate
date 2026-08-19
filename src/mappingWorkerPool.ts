@@ -84,6 +84,11 @@ let poolInitialized = false
 // can ever drain the queue and 'done' is unreachable.
 let rejectRunCallback: ((reason: Error) => void) | undefined
 
+// Ceiling on an explicitly requested worker count. The default path caps itself
+// at 8; this only has to stop a caller's bad arithmetic from spawning threads
+// until the process dies, so it sits well above any real request.
+const MAX_WORKER_COUNT = 64
+
 // Files whose dispatch failed back to back. Header resolution is the usual
 // cause and it runs per file, so one expired token fails every file in turn:
 // unbounded, a 100k-file run turns the whole queue into error results and
@@ -267,18 +272,6 @@ export async function initializeMappingWorkers(
   workerCount?: number,
   rejectCb?: (reason: Error) => void,
 ): Promise<void> {
-  // A count below one builds an empty pool, which can neither dispatch nor
-  // reach the termination condition while files are queued. Rejected rather
-  // than clamped: silently running with one worker would hide the caller bug.
-  if (
-    workerCount !== undefined &&
-    (!Number.isInteger(workerCount) || workerCount < 1)
-  ) {
-    throw new Error(
-      `workerCount must be a positive integer, received ${workerCount}`,
-    )
-  }
-
   mappingWorkerOptions = {}
   workersActive = 0
   poolInitialized = false
@@ -304,6 +297,25 @@ export async function initializeMappingWorkers(
   totalDiscoveredFiles = undefined
 
   if (progressCb) progressCallback = progressCb
+
+  // Validated after the reset above, not before: throwing first left the
+  // previous run's rejectRunCallback and poolInitialized in place, so a
+  // finished run's failure path stayed armed against a pool that no longer
+  // exists. A count below one builds an empty pool, which can neither dispatch
+  // nor reach the termination condition while files are queued; an absurd count
+  // spawns that many threads before the run does any work at all. Rejected
+  // rather than clamped: silently running with a different count would hide the
+  // caller bug.
+  if (
+    workerCount !== undefined &&
+    (!Number.isInteger(workerCount) ||
+      workerCount < 1 ||
+      workerCount > MAX_WORKER_COUNT)
+  ) {
+    throw new Error(
+      `workerCount must be an integer between 1 and ${MAX_WORKER_COUNT}, received ${workerCount}`,
+    )
+  }
 
   const effectiveWorkerCount =
     workerCount ?? Math.min(await getHardwareConcurrency(), 8)
