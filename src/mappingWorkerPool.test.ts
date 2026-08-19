@@ -221,6 +221,33 @@ describe('dispatchMappingJobs', () => {
     expect(pool.getWorkersActive()).toBe(0)
   })
 
+  // The stall watchdog's only evidence that the mapping pump is alive. A pool
+  // erroring files through the dispatch-failure path reaches none of the
+  // handlers that refresh it, so without this it reads as dead and the watchdog
+  // reports a stall against a pool that is working perfectly hard.
+  it('counts a failed dispatch as mapping progress', async () => {
+    rejectAllHeaders = true
+    configureMockMappingWorkers(['normal'])
+
+    await pool.initializeMappingWorkers(false, undefined, () => {}, 1)
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+
+    vi.useFakeTimers()
+    try {
+      await vi.advanceTimersByTimeAsync(60_000)
+      const before = pool.getLastMappingProgressTime()
+
+      pool.filesToProcess.push(queueFile('bad.dcm'))
+      void pool.dispatchMappingJobs()
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      expect(pool.getLastMappingProgressTime()).toBeGreaterThan(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('fails the run once dispatch has failed for a long enough streak', async () => {
     // getHttpOutputHeaders runs per file, so one expired token fails every
     // file in turn. Erroring each of them keeps 'done' reachable but turns a

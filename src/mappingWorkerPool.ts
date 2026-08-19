@@ -566,6 +566,12 @@ function failFileAndReturnWorker(
   workersActive -= 1
   filesMapped += 1
 
+  // Erroring a file is progress. The worker message listener refreshes this for
+  // its own callers, but the dispatch-failure path never reaches the listener,
+  // so without this a pool steadily turning files into error results looks
+  // completely dead to the stall watchdog.
+  lastMappingProgressTime = Date.now()
+
   safeProgress({
     response: 'progress',
     mapResults: errorMapResults,
