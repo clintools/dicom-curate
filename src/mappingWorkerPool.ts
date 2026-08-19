@@ -12,6 +12,7 @@ import type {
   UploadResult,
 } from './applyMappingsWorker'
 import { safeSerializeError } from './applyMappingsWorker'
+import { delay } from './delay'
 import { phiSafeToken } from './hash'
 import { getHttpInputHeaders, getHttpOutputHeaders } from './httpHeaders'
 import { serializeMappingOptions } from './serializeMappingOptions'
@@ -95,23 +96,42 @@ const MAX_WORKER_COUNT = 64
 // reports 'done' within seconds, which an operator cannot tell apart from a
 // genuine mass failure. High enough that a handful of individually bad files
 // still just error and the run continues.
+//
+// Under a live provider outage the backoff below paces failures faster than
+// this count, so the duration gate is what decides. This gate decides when
+// failures arrive more slowly than the backoff -- a queue the scanner is only
+// trickling into -- where two failures eleven seconds apart must not be read
+// as a systemic one.
 const MAX_CONSECUTIVE_DISPATCH_FAILURES = 20
 
 // ...and the streak has to have lasted this long, so that on the count alone a
-// token refresh that blips for a second cannot tear a run down. Files failed
-// during the window surface as plain error results, indistinguishable from a
-// genuinely bad file, so the retry delay below is what bounds the loss.
+// token refresh that blips for a second cannot tear a run down.
 const MIN_DISPATCH_FAILURE_STREAK_MS = 10_000
 
-// How long to wait after a failed dispatch while a streak is live. A failed
-// dispatch returns its worker to the pool immediately, so without this the
-// loop burns the whole queue before the streak is old enough to report. At
-// this delay both gates above are reached together, which bounds the damage
-// at roughly MAX_CONSECUTIVE_DISPATCH_FAILURES files per streak.
-const DISPATCH_FAILURE_RETRY_DELAY_MS = 500
+// Backoff between dispatch attempts while a streak is live, doubling from the
+// SECOND consecutive failure: an isolated bad file waits not at all, which is
+// what keeps MAX_CONSECUTIVE_DISPATCH_FAILURES worth of scattered failures
+// cheap. Failed files surface as plain error results, indistinguishable from a
+// genuinely bad file, so this backoff is the only thing bounding the loss --
+// it has to reach MIN_DISPATCH_FAILURE_STREAK_MS in roughly
+// MAX_CONSECUTIVE_DISPATCH_FAILURES files. At 50ms doubling to a 500ms ceiling
+// the twentieth failure lands at ~8.3s, so a streak reports at ~25 files.
+const DISPATCH_BACKOFF_BASE_MS = 50
+const DISPATCH_BACKOFF_MAX_MS = 500
 let consecutiveDispatchFailures = 0
 let dispatchFailureStreakStart = 0
 let dispatchFailureReported = false
+
+// When the next dispatch attempt may proceed, and whether a loop is already
+// making it. Both are checked at the top of the dispatch loop rather than
+// after a failure, because a failed dispatch returns its worker to the pool
+// immediately: a loop sleeping after the release holds nothing, so every other
+// dispatchMappingJobs() call -- one per scan-worker message -- would pop that
+// worker and fail another file at full speed. Deferring every caller bounds a
+// streak by time; admitting only one of them keeps that bound at ~25 files
+// rather than ~25 per worker.
+let dispatchBackoffUntil = 0
+let dispatchProbeActive = false
 
 // Number of replacement workers currently being created asynchronously.
 // The termination condition in dispatchMappingJobs() waits for this to reach 0
@@ -247,7 +267,7 @@ export function terminateAllWorkers(): void {
   filesToProcess.length = 0
   workersActive = 0
   pendingReplacements = 0
-  consecutiveDispatchFailures = 0
+  resetDispatchFailureState()
   doneEmitted = false
   directoryScanFinished = false
   scanPaused = false
@@ -277,9 +297,7 @@ export async function initializeMappingWorkers(
   poolInitialized = false
   initFailedWorkers.clear()
   lastInitErrorMessage = ''
-  consecutiveDispatchFailures = 0
-  dispatchFailureStreakStart = 0
-  dispatchFailureReported = false
+  resetDispatchFailureState()
   rejectRunCallback = rejectCb
   mapResultsList = skipCollectingMappings ? undefined : []
   filesMapped = 0
@@ -342,6 +360,29 @@ export async function dispatchMappingJobs(): Promise<void> {
   if (aborted) return
 
   while (filesToProcess.length > 0 && availableMappingWorkers.length > 0) {
+    // A streak is live, so pace the retries -- and let only one loop do the
+    // pacing. Both checks sit above the pops, so a caller that defers leaves
+    // the queue and the pool exactly as it found them.
+    //
+    // Tracked per iteration rather than globally: a loop already past this gate
+    // when the streak began holds nothing, and must not release the probe some
+    // other loop is holding.
+    let holdsDispatchProbe = false
+    if (consecutiveDispatchFailures > 0) {
+      // break rather than return: the backpressure resume and the termination
+      // check below still belong to this pass.
+      if (dispatchProbeActive) break
+      dispatchProbeActive = true
+      holdsDispatchProbe = true
+      const waitMs = dispatchBackoffUntil - Date.now()
+      if (waitMs > 0) await delay(waitMs)
+      // The run can be torn down during that wait.
+      if (aborted) {
+        dispatchProbeActive = false
+        return
+      }
+    }
+
     const { fileInfo, previousFileInfo } = filesToProcess.pop()!
     const mappingWorker = availableMappingWorkers.pop()!
 
@@ -384,8 +425,7 @@ export async function dispatchMappingJobs(): Promise<void> {
         hashPartSize,
         serializedMappingOptions: serializeMappingOptions(mappingOptions),
       } satisfies MappingRequest)
-      consecutiveDispatchFailures = 0
-      dispatchFailureReported = false
+      resetDispatchFailureState()
     } catch (error) {
       // Same double-recovery guard as recoverCrashedWorker, and for the same
       // reason: this await can outlive its file. The stall watchdog may have
@@ -407,11 +447,15 @@ export async function dispatchMappingJobs(): Promise<void> {
       // Reported once per streak (a success resets it). The run owner decides
       // what to do: its rejection tears the pool down, which empties the queue
       // and ends this loop. With no callback wired the run drains into error
-      // results as before.
+      // results as before -- which is why the backoff below is not conditional
+      // on having reported: nothing guarantees a report stops anything.
       if (consecutiveDispatchFailures === 0) {
         dispatchFailureStreakStart = Date.now()
       }
       consecutiveDispatchFailures += 1
+      dispatchBackoffUntil =
+        Date.now() + dispatchBackoffMs(consecutiveDispatchFailures)
+
       const streakDuration = Date.now() - dispatchFailureStreakStart
       if (
         !dispatchFailureReported &&
@@ -425,16 +469,12 @@ export async function dispatchMappingJobs(): Promise<void> {
           ),
         )
       }
-
-      // Reporting tears the pool down, which clears the queue and ends this
-      // loop, so only an unreported streak is worth slowing down.
-      if (!dispatchFailureReported) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, DISPATCH_FAILURE_RETRY_DELAY_MS),
-        )
-        // The run can be torn down during that wait.
-        if (aborted) return
-      }
+    } finally {
+      // Whether the attempt succeeded, failed, or bailed out on a worker
+      // something else had already recovered, the next retry is somebody's to
+      // make. Held across the attempt itself, not just the wait, so a pool of
+      // N workers cannot pile N failures into one backoff window.
+      if (holdsDispatchProbe) dispatchProbeActive = false
     }
   }
 
@@ -548,6 +588,36 @@ function safeProgress(message: TProgressMessage): void {
   } catch (error) {
     console.error('Progress callback threw; continuing:', error)
   }
+}
+
+/**
+ * How long to wait before the next dispatch attempt, given the streak so far.
+ *
+ * Zero for the first failure: a run with scattered bad files must not pay for
+ * the streak machinery, which is the whole reason
+ * MAX_CONSECUTIVE_DISPATCH_FAILURES is set as high as it is.
+ */
+function dispatchBackoffMs(consecutiveFailures: number): number {
+  if (consecutiveFailures < 2) return 0
+  return Math.min(
+    DISPATCH_BACKOFF_BASE_MS * 2 ** (consecutiveFailures - 2),
+    DISPATCH_BACKOFF_MAX_MS,
+  )
+}
+
+/**
+ * Clear every piece of dispatch-failure state together.
+ *
+ * Split out because the two callers had drifted: leaving `dispatchFailureReported`
+ * set behind a zeroed count means 'never back off again, and start the next
+ * streak from a stale streak start'.
+ */
+function resetDispatchFailureState(): void {
+  consecutiveDispatchFailures = 0
+  dispatchFailureStreakStart = 0
+  dispatchFailureReported = false
+  dispatchBackoffUntil = 0
+  dispatchProbeActive = false
 }
 
 /**
