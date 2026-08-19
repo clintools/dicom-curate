@@ -362,10 +362,23 @@ export async function dispatchMappingJobs(): Promise<void> {
     // would otherwise leave this file popped and this worker slot consumed for
     // the rest of the run, so the termination condition could never be met.
     try {
+      // Independent providers, and both are per-file round trips on the
+      // dispatch hot path, so they are resolved together rather than in turn.
+      const [inputFileInfo, resolvedOutputTarget] = await Promise.all([
+        getHttpInputHeaders(fileInfo),
+        getHttpOutputHeaders(outputTarget),
+      ])
+
+      // Same double-recovery guard as the failure branch below, and for the
+      // same reason: those awaits can outlive their file. If the stall watchdog
+      // or an abort has already recovered this worker, posting to it now leaves
+      // workersActive incremented for a reply that can never arrive.
+      if (!workerCurrentFile.has(mappingWorker)) continue
+
       mappingWorker.postMessage({
         request: 'apply',
-        fileInfo: await getHttpInputHeaders(fileInfo),
-        outputTarget: await getHttpOutputHeaders(outputTarget),
+        fileInfo: inputFileInfo,
+        outputTarget: resolvedOutputTarget,
         previousFileInfo,
         hashMethod,
         hashPartSize,
