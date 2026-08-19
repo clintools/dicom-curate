@@ -79,16 +79,23 @@ function queueFile(name: string) {
   return { fileInfo: makeFileInfo(name), scanAnomalies: [] }
 }
 
+/**
+ * The header and worker mocks are driven by file-scoped flags, so every
+ * describe block has to clear them: whatever the previous test set otherwise
+ * leaks into the next one, in a different block or not.
+ */
+function resetMockState(): void {
+  pauseHeaders = false
+  resumeHeaders = null
+  failPausedHeaders = null
+  rejectNextHeaders = false
+  rejectAllHeaders = false
+  failWorkerCreation = false
+  resetMockWorkers()
+}
+
 describe('dispatchMappingJobs', () => {
-  beforeEach(() => {
-    pauseHeaders = false
-    resumeHeaders = null
-    failPausedHeaders = null
-    rejectNextHeaders = false
-    rejectAllHeaders = false
-    failWorkerCreation = false
-    resetMockWorkers()
-  })
+  beforeEach(resetMockState)
 
   afterEach(() => {
     // Unblock any pending header awaits so the event loop is clean.
@@ -554,9 +561,7 @@ describe('dispatchMappingJobs', () => {
 })
 
 describe('initializeMappingWorkers', () => {
-  beforeEach(() => {
-    resetMockWorkers()
-  })
+  beforeEach(resetMockState)
 
   afterEach(() => {
     pool.terminateAllWorkers()
@@ -569,7 +574,22 @@ describe('initializeMappingWorkers', () => {
 
     await expect(
       pool.initializeMappingWorkers(false, undefined, () => {}, 0),
-    ).rejects.toThrow('workerCount must be a positive integer, received 0')
+    ).rejects.toThrow(
+      'workerCount must be an integer between 1 and 64, received 0',
+    )
+    expect(getMockWorkersCreated()).toHaveLength(0)
+  })
+
+  // The default path caps itself at 8; only an explicit count can ask for a
+  // number of threads that exhausts the process before any work is done.
+  it('rejects a workerCount above the ceiling', async () => {
+    configureMockMappingWorkers(['normal'])
+
+    await expect(
+      pool.initializeMappingWorkers(false, undefined, () => {}, 100_000),
+    ).rejects.toThrow(
+      'workerCount must be an integer between 1 and 64, received 100000',
+    )
     expect(getMockWorkersCreated()).toHaveLength(0)
   })
 })
