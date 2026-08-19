@@ -221,6 +221,42 @@ describe('dispatchMappingJobs', () => {
     expect(pool.getWorkersActive()).toBe(0)
   })
 
+  // A run with a scattered handful of unreadable files must not pay for the
+  // streak machinery: at a 5% failure rate a flat per-failure delay costs a
+  // 100k-file run the best part of an hour in pure waiting.
+  it('does not delay dispatch after an isolated failure', async () => {
+    configureMockMappingWorkers(['normal'])
+
+    const progressMessages: any[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => progressMessages.push(msg),
+      1,
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+    // LIFO dispatch: the last file pushed is the one whose headers reject, so
+    // the good file behind it is dispatched from a live streak of one.
+    pool.filesToProcess.push(queueFile('mapped.dcm'), queueFile('rejected.dcm'))
+    rejectNextHeaders = true
+
+    vi.useFakeTimers()
+    try {
+      // Not one tick of the clock: had the failure booked a backoff, the
+      // second file could not be dispatched and this would never settle.
+      await pool.dispatchMappingJobs()
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(pool.filesToProcess).toHaveLength(0)
+    expect(progressMessages).toHaveLength(1)
+    expect(progressMessages[0].mapResults.errors).toEqual([
+      'Header provider unavailable',
+    ])
+  })
+
   // The stall watchdog's only evidence that the mapping pump is alive. A pool
   // erroring files through the dispatch-failure path reaches none of the
   // handlers that refresh it, so without this it reads as dead and the watchdog
@@ -258,6 +294,9 @@ describe('dispatchMappingJobs', () => {
 
     const rejections: Error[] = []
     const progressMessages: any[] = []
+    // Captured before the teardown below empties it, so this measures the pool
+    // and not the test's own reject callback.
+    let queuedAtReport = -1
     await pool.initializeMappingWorkers(
       false,
       undefined,
@@ -267,6 +306,7 @@ describe('dispatchMappingJobs', () => {
       // the loop, so the file count below is the damage a streak really does.
       (reason: Error) => {
         rejections.push(reason)
+        queuedAtReport = pool.filesToProcess.length
         pool.terminateAllWorkers()
       },
     )
@@ -290,20 +330,161 @@ describe('dispatchMappingJobs', () => {
     // Once per streak, not once per failed file: the run owner tears the pool
     // down on the first report, and a success would reset the count.
     expect(rejections).toHaveLength(1)
-    expect(rejections[0].message).toMatch(
-      /Dispatch failed for 2\d+ consecutive/,
+    expect(rejections[0].message).toMatch(/Dispatch failed for 2\d consecutive/)
+    // The point of the backoff: a 200-file queue loses about twenty-five files,
+    // not all of them, before the run is failed. Most of the queue is still
+    // there when the report fires -- that is what makes the report worth acting
+    // on rather than a postmortem.
+    expect(progressMessages.length).toBeLessThanOrEqual(30)
+    expect(queuedAtReport).toBeGreaterThan(150)
+  })
+
+  // dispatchMappingJobs() runs once per scan-worker message, twice for 'file',
+  // so a streak during a live scan is re-entered continuously. Every entrant
+  // has to defer, and only one of them may retry: a backoff that only slowed
+  // the loop already sleeping lost 1051 files here instead of ~25, because each
+  // new entrant found the failed worker already back in the pool.
+  // Both counts, because the bound has to come from the streak and not from the
+  // pool: letting every idle worker retry in lockstep would multiply the loss
+  // by the pool size.
+  it.each([
+    1, 8,
+  ])('bounds the loss when dispatch is re-entered throughout the streak (%i workers)', async (workerCount) => {
+    rejectAllHeaders = true
+    configureMockMappingWorkers(['normal'])
+
+    const rejections: Error[] = []
+    const progressMessages: any[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => progressMessages.push(msg),
+      workerCount,
+      (reason: Error) => {
+        rejections.push(reason)
+        pool.terminateAllWorkers()
+      },
     )
-    // The point of the retry delay: a 200-file queue loses about twenty files,
-    // not all of them, before the run is failed.
-    expect(progressMessages.length).toBeLessThanOrEqual(25)
-    expect(pool.filesToProcess).toHaveLength(0)
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(true)
+    for (let i = 0; i < 5000; i++) {
+      pool.filesToProcess.push(queueFile(`f${i}.dcm`))
+    }
+
+    vi.useFakeTimers()
+    try {
+      void pool.dispatchMappingJobs()
+      // A scanner feeding steadily: ten re-entries per 100ms for the whole
+      // streak.
+      for (let tick = 0; tick < 150; tick++) {
+        for (let call = 0; call < 10; call++) void pool.dispatchMappingJobs()
+        await vi.advanceTimersByTimeAsync(100)
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(rejections).toHaveLength(1)
+    // 25 files at one worker, 29 at eight: the pool size adds a small
+    // constant, because up to N attempts are already in flight before the
+    // first failure registers, but it is not a multiplier. Unbounded, this
+    // queue loses over a thousand.
+    expect(progressMessages.length).toBeLessThanOrEqual(40)
+    // The queue is never empty during the streak, so nothing may report the
+    // run finished while the pool sits in a backoff with no worker active.
+    expect(
+      progressMessages.filter((m: any) => m.response === 'done'),
+    ).toHaveLength(0)
+  })
+
+  // Reporting is advice, not teardown: rejectCb is optional, and the paths that
+  // do wire it do not all terminate the pool. A backoff that switched itself
+  // off once reported let the rest of the queue burn at full speed.
+  it('keeps backing off after reporting when nothing tears the pool down', async () => {
+    rejectAllHeaders = true
+    configureMockMappingWorkers(['normal'])
+
+    const progressMessages: any[] = []
+    // No rejectCb: the pool has nothing to report to and nothing tears it down.
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => progressMessages.push(msg),
+      1,
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(true)
+    for (let i = 0; i < 500; i++) {
+      pool.filesToProcess.push(queueFile(`f${i}.dcm`))
+    }
+
+    vi.useFakeTimers()
+    try {
+      void pool.dispatchMappingJobs()
+      // Well past the report, which lands around 10s.
+      await vi.advanceTimersByTimeAsync(20_000)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    // Capped by the backoff throughout, not just up to the report: 20s of
+    // 500ms ceiling is ~45 files, nowhere near the whole queue.
+    expect(progressMessages.length).toBeLessThanOrEqual(60)
+    expect(pool.filesToProcess.length).toBeGreaterThan(400)
   })
 
   // A token refresh that blips for a few seconds fails a burst of files. The
   // provider comes back before the streak is old enough to count, and tearing
   // the whole run down over it would cost hours of completed work.
+  //
+  // The burst deliberately runs past MAX_CONSECUTIVE_DISPATCH_FAILURES: with
+  // the count gate already satisfied, only the duration gate is left to stop
+  // the report, which is the one this test exists to hold.
   it('does not fail the run when a failure burst is over quickly', async () => {
     rejectAllHeaders = true
+    configureMockMappingWorkers(['normal'])
+
+    const rejections: Error[] = []
+    const progressMessages: any[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => progressMessages.push(msg),
+      1,
+      (reason: Error) => rejections.push(reason),
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(true)
+    for (let i = 0; i < 60; i++) {
+      pool.filesToProcess.push(queueFile(`f${i}.dcm`))
+    }
+
+    vi.useFakeTimers()
+    try {
+      const dispatchPromise = pool.dispatchMappingJobs()
+      // Just under MIN_DISPATCH_FAILURE_STREAK_MS.
+      await vi.advanceTimersByTimeAsync(9_000)
+      rejectAllHeaders = false
+      await vi.advanceTimersByTimeAsync(9_000)
+      await dispatchPromise
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(rejections).toEqual([])
+    // Without this the burst could be short enough for the count gate to be
+    // what held, and the duration gate would be free to disappear.
+    const errored = progressMessages.filter(
+      (m: any) => m.mapResults?.errors?.length,
+    )
+    expect(errored.length).toBeGreaterThan(20)
+  })
+
+  // Failures arriving more slowly than the backoff -- a queue the scanner is
+  // only trickling into -- age past MIN_DISPATCH_FAILURE_STREAK_MS on their
+  // own. Nothing but the count gate stands between two unlucky files eleven
+  // seconds apart and a torn-down run.
+  it('does not fail the run on a couple of failures spread over a long window', async () => {
     configureMockMappingWorkers(['normal'])
 
     const rejections: Error[] = []
@@ -315,18 +496,23 @@ describe('dispatchMappingJobs', () => {
       (reason: Error) => rejections.push(reason),
     )
     pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
-    pool.setDirectoryScanFinished(true)
-    for (let i = 0; i < 40; i++) {
-      pool.filesToProcess.push(queueFile(`f${i}.dcm`))
-    }
+    // Left unfinished so an empty queue does not emit 'done' and drain the pool
+    // between the two failures.
+    pool.setDirectoryScanFinished(false)
 
     vi.useFakeTimers()
     try {
-      const dispatchPromise = pool.dispatchMappingJobs()
-      await vi.advanceTimersByTimeAsync(4_000)
-      rejectAllHeaders = false
-      await vi.advanceTimersByTimeAsync(4_000)
-      await dispatchPromise
+      for (let i = 0; i < 2; i++) {
+        rejectAllHeaders = true
+        pool.filesToProcess.push(queueFile(`bad${i}.dcm`))
+        await pool.dispatchMappingJobs()
+        rejectAllHeaders = false
+        // No successful dispatch in between, so the streak is never reset --
+        // the second failure lands on a streak already older than
+        // MIN_DISPATCH_FAILURE_STREAK_MS, leaving the count gate alone to
+        // decide.
+        await vi.advanceTimersByTimeAsync(11_000)
+      }
     } finally {
       vi.useRealTimers()
     }
