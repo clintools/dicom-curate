@@ -5,6 +5,7 @@ import {
   LazyFileBlob,
   readableStreamToAsyncIterable,
 } from './blobUtil'
+import { extractDataset } from './collectDataset'
 import { composeSpecs } from './composeSpecs'
 import createNestedDirectories from './createNestedDirectories'
 import curateDict from './curateDict'
@@ -13,6 +14,7 @@ import { hash, hashStream, phiSafeToken } from './hash'
 import { loadLibStorage } from './libStorage'
 import { loadS3Client } from './s3Client'
 import type {
+  TCollectedDataset,
   TFileInfo,
   THashMethod,
   TMappingOptions,
@@ -274,6 +276,65 @@ export async function curateOne({
     write: (...args: any[]) => ArrayBuffer | Blob | Promise<ArrayBuffer | Blob>
   }
   let clonedMapResults: TMapResults
+  // Populated when mappingOptions.collectDataset is set (see TMapResults.dataset).
+  let collectedDataset: TCollectedDataset | undefined
+
+  // Header-only streaming parse (stops at PixelData), shared by the curation path and
+  // by collectDataset in passthrough ('none') mode. Returns the populated reader and
+  // the byte offset of the PixelData tag within `file` (-1 when absent/unknown).
+  const parseHeader = async () => {
+    const reader = new dcmjs.async.AsyncDicomReader()
+    const parseFeed = cancellableReadableStreamIterable(file.stream())
+    const feedDone = reader.stream.fromAsyncStream(parseFeed.iterable)
+    // Build a "never resolves, only rejects" sentinel from feedDone so we can
+    // race it against readFile() without letting a normal feedDone resolution
+    // exit the race too early (fromAsyncStream resolves after setComplete() but
+    // before readFile() finishes parsing the buffered data).
+    //
+    // Attaching .catch() here also prevents "Uncaught (in promise)" in the
+    // failure case: if the underlying ReadableStream fails (e.g. a mode-0000
+    // file that Chrome reads via its network service and reports as
+    // "TypeError: network error"), feedDone rejects while readFile() is still
+    // blocked inside ensureAvailable() — which has no timeout and can only be
+    // woken by addBuffer/setComplete, calls that never come when fromAsyncStream
+    // threw. Without this early .catch() the browser fires "Uncaught (in
+    // promise)" before the finally block ever runs.
+    const feedErrorSignal = new Promise<never>((_, reject) => {
+      feedDone.catch(reject)
+    })
+    // Stop reading at the PixelData tag.  The fixed dcmjs read() loop breaks
+    // out of the scan when readTagHeader() returns {untilTag: true}, leaving
+    // stream.offset pointing at the byte immediately after the 4-byte tag
+    // (i.e. the VR field for explicit-LE).  Subtracting 4 gives the start of
+    // the PixelData tag, which is exactly the offset we need for the slice.
+    try {
+      // Race readFile against feedErrorSignal: on a normal run feedErrorSignal
+      // stays pending forever so readFile wins; on stream failure feedErrorSignal
+      // rejects immediately, breaking the deadlock where readFile() would hang
+      // waiting for data that will never arrive.
+      await Promise.race([
+        reader.readFile({
+          ignoreErrors: true,
+          noCopy: true,
+          untilTag: '7FE00010',
+        }),
+        feedErrorSignal,
+      ])
+    } finally {
+      // Do not await feedDone without cancelling first: dcmjs fromAsyncStream
+      // appends every chunk to an internal buffer until the source ends.
+      await parseFeed.cancel()
+      await feedDone.catch(() => {})
+      if (typeof reader.stream.consume === 'function') {
+        reader.stream.consume()
+      }
+    }
+
+    const rawOffset = reader.stream.offset - 4
+    const pixelDataOffset =
+      rawOffset > 0 && rawOffset < file.size ? rawOffset : -1
+    return { reader, pixelDataOffset }
+  }
 
   if (mappingOptions.curationSpec !== 'none') {
     dcmjs.log.setLevel(dcmjs.log.levels.ERROR)
@@ -284,60 +345,15 @@ export async function curateOne({
     // zero-copy Blob slice rather than being loaded into memory.
     let pixelDataOffset = -1
     try {
-      const reader = new dcmjs.async.AsyncDicomReader()
-      const parseFeed = cancellableReadableStreamIterable(file.stream())
-      const feedDone = reader.stream.fromAsyncStream(parseFeed.iterable)
-      // Build a "never resolves, only rejects" sentinel from feedDone so we can
-      // race it against readFile() without letting a normal feedDone resolution
-      // exit the race too early (fromAsyncStream resolves after setComplete() but
-      // before readFile() finishes parsing the buffered data).
-      //
-      // Attaching .catch() here also prevents "Uncaught (in promise)" in the
-      // failure case: if the underlying ReadableStream fails (e.g. a mode-0000
-      // file that Chrome reads via its network service and reports as
-      // "TypeError: network error"), feedDone rejects while readFile() is still
-      // blocked inside ensureAvailable() — which has no timeout and can only be
-      // woken by addBuffer/setComplete, calls that never come when fromAsyncStream
-      // threw. Without this early .catch() the browser fires "Uncaught (in
-      // promise)" before the finally block ever runs.
-      const feedErrorSignal = new Promise<never>((_, reject) => {
-        feedDone.catch(reject)
-      })
-      // Stop reading at the PixelData tag.  The fixed dcmjs read() loop breaks
-      // out of the scan when readTagHeader() returns {untilTag: true}, leaving
-      // stream.offset pointing at the byte immediately after the 4-byte tag
-      // (i.e. the VR field for explicit-LE).  Subtracting 4 gives the start of
-      // the PixelData tag, which is exactly the offset we need for the slice.
-      try {
-        // Race readFile against feedErrorSignal: on a normal run feedErrorSignal
-        // stays pending forever so readFile wins; on stream failure feedErrorSignal
-        // rejects immediately, breaking the deadlock where readFile() would hang
-        // waiting for data that will never arrive.
-        await Promise.race([
-          reader.readFile({
-            ignoreErrors: true,
-            noCopy: true,
-            untilTag: '7FE00010',
-          }),
-          feedErrorSignal,
-        ])
-      } finally {
-        // Do not await feedDone without cancelling first: dcmjs fromAsyncStream
-        // appends every chunk to an internal buffer until the source ends.
-        await parseFeed.cancel()
-        await feedDone.catch(() => {})
-        if (typeof reader.stream.consume === 'function') {
-          reader.stream.consume()
-        }
-      }
+      const parsed = await parseHeader()
+      pixelDataOffset = parsed.pixelDataOffset
 
-      const rawOffset = reader.stream.offset - 4
-      if (rawOffset > 0 && rawOffset < file.size) {
-        pixelDataOffset = rawOffset
+      dicomData = new dcmjs.data.DicomDict(parsed.reader.meta)
+      dicomData.dict = parsed.reader.dict
+      if (mappingOptions.collectDataset) {
+        // Capture the SOURCE header before curateDict mutates anything.
+        collectedDataset = extractDataset(dicomData.dict)
       }
-
-      dicomData = new dcmjs.data.DicomDict(reader.meta)
-      dicomData.dict = reader.dict
     } catch (error) {
       console.warn(
         `[dicom-curate] Could not parse ${fileInfo.name} as DICOM data:`,
@@ -430,6 +446,26 @@ export async function curateOne({
       outputFilePath: `${fileInfo.path}/${fileInfo.name}`,
       mappingRequired: false,
     }
+    if (mappingOptions.collectDataset) {
+      // collectDataset forces the header-only parse that passthrough mode otherwise
+      // skips. Passthrough semantics are preserved on parse failure: the file still
+      // passes through, with the failure recorded as an anomaly and no dataset.
+      dcmjs.log.setLevel(dcmjs.log.levels.ERROR)
+      dcmjs.log.getLogger('validation.dcmjs').setLevel(dcmjs.log.levels.SILENT)
+      try {
+        const parsed = await parseHeader()
+        collectedDataset = extractDataset(parsed.reader.dict)
+      } catch {
+        // PHI-safe string: raw name/path stays in fileInfo only (see #283).
+        clonedMapResults.anomalies.push(
+          `Could not parse file as DICOM data for collectDataset`,
+        )
+      }
+    }
+  }
+
+  if (collectedDataset) {
+    clonedMapResults.dataset = collectedDataset
   }
 
   // If we didn't compute preMappedHash yet, do it now

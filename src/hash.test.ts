@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { hash } from './hash'
+import { hash, hashStream } from './hash'
 
 function textBuffer(text: string): ArrayBuffer {
   return new TextEncoder().encode(text).buffer
@@ -83,5 +83,23 @@ describe('hash', () => {
     const copy = new Uint8Array(bytes).buffer
 
     expect(await hash(bytes.buffer, 'crc32')).toBe(await hash(copy, 'crc32'))
+  })
+})
+
+
+describe('sha256 stream fast path', () => {
+  async function* chunksOf(data: Uint8Array, size: number) {
+    for (let i = 0; i < data.length; i += size) {
+      yield data.slice(i, i + size)
+    }
+  }
+
+  it('native fast path and noble streaming agree (and match hash())', async () => {
+    const data = new Uint8Array(3 * 1024 * 1024)
+    for (let i = 0; i < data.length; i++) data[i] = (i * 31) & 0xff
+    const streamed = await hashStream(chunksOf(data, 64 * 1024), 'sha256')
+    const buffered = await hash(data.buffer, 'sha256')
+    expect(streamed).toBe(buffered)
+    expect(streamed).toMatch(/^[0-9a-f]{64}$/)
   })
 })

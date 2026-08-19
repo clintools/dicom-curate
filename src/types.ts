@@ -36,6 +36,9 @@ export type OrganizeOptions = {
   skipModifications?: boolean
   skipValidation?: boolean
   dateOffset?: Iso8601Duration
+  // If true, each TMapResults carries the parsed SOURCE header as plain JSON
+  // (binary VRs excluded) in `dataset` — see TMappingOptions.collectDataset.
+  collectDataset?: boolean
   // If true, the TMapResults values will not be accumulated and
   // will be only returned one by one in progress messages.
   // Only anomalies results will be returned by curateMany() and the final
@@ -187,6 +190,20 @@ export type TMappingOptions = {
   skipModifications?: boolean
   skipValidation?: boolean
   dateOffset?: Iso8601Duration
+  /** Include the parsed SOURCE header in TMapResults.dataset (binary VRs excluded,
+   *  plain JSON — structured-clone-safe across the worker boundary). Lets callers
+   *  index/catalog DICOM metadata in the same pass as hashing/curation instead of
+   *  parsing every file twice. With curationSpec 'none' this forces the (header-only)
+   *  parse that passthrough mode otherwise skips. NOTE: the dataset naturally contains
+   *  PHI from the source header — it is only carried in mapResults for the caller and
+   *  is never written to outputs or logs. */
+  collectDataset?: boolean
+}
+
+/** A collected DICOM header: hex-tag keyed elements, binary VRs excluded, values
+ *  reduced to plain JSON (safe for postMessage/structured clone and JSON storage). */
+export type TCollectedDataset = {
+  [tag: string]: { vr: string; Value?: unknown }
 }
 
 export type TSerializedMappingOptions = Omit<
@@ -250,6 +267,9 @@ export type TMapResults = {
   /** Upload/write failures only (retryable). Separate from `errors` which
    *  contains DICOM validation issues that cannot be resolved by retrying. */
   uploadErrors?: string[]
+  /** The parsed SOURCE header (pre-mapping), present when
+   *  TMappingOptions.collectDataset is set — see TCollectedDataset. */
+  dataset?: TCollectedDataset
   quarantine: { [objectPath: string]: string }
   listing?: {
     info: TMappingTwoPassInfo[]
