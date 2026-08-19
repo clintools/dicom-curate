@@ -10,6 +10,8 @@
  * backpressure — workers block during backoff, reducing concurrent uploads.
  */
 
+import { delay } from './delay'
+
 const MAX_ATTEMPTS = 5
 const BASE_DELAY_MS = 1000
 const BACKOFF_MULTIPLIER = 3
@@ -32,7 +34,7 @@ export async function fetchWithRetry(
       console.warn(
         `fetch attempt ${attempt}/${MAX_ATTEMPTS} failed: ${(error as TypeError).message}. Retrying in ${delayMs}ms...`,
       )
-      await new Promise((resolve) => setTimeout(resolve, delayMs))
+      await delay(delayMs)
     }
   }
 
