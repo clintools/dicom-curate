@@ -69,9 +69,10 @@ const workerCurrentFile = new Map<Worker, TFileInfo>()
 let lastMappingProgressTime = 0
 let lastScanProgressTime = 0
 
-// Workers that reported 'initError'. Tracked because the failure can land
-// while initializeMappingWorkers is still assembling the pool, and those
-// workers must not be pushed as dispatchable afterwards.
+// Workers that reported 'initError' before joining the pool. The failure can
+// beat either push -- initializeMappingWorkers' or spawnReplacementWorker's --
+// and neither may make a terminated worker dispatchable. Each entry is deleted
+// by the push that reads it, so no dead Worker handle is retained.
 const initFailedWorkers = new Set<Worker>()
 let lastInitErrorMessage = ''
 
@@ -147,6 +148,13 @@ let doneEmitted = false
 // crash recovery, and worker message handlers against acting on stale state
 // after teardown.
 let aborted = false
+
+// Identifies the run the pool currently belongs to. Bumped by every teardown
+// and every fresh initialization, and captured by spawnReplacementWorker so its
+// continuations can tell whether their run is still current. Pool state is
+// module-global: without this, a replacement resolving after its run ended
+// decrements the next run's pendingReplacements, which then never reaches zero.
+let currentRunId = 0
 
 // Stored fileInfoIndex from initializeMappingWorkers, used for lookup
 // responses when workers query for previousMappedFileInfo.
@@ -247,6 +255,7 @@ export function markScanPaused(): void {
  */
 export function terminateAllWorkers(): void {
   aborted = true
+  currentRunId += 1
 
   // Terminate idle workers
   while (availableMappingWorkers.length) {
@@ -268,6 +277,7 @@ export function terminateAllWorkers(): void {
   workersActive = 0
   pendingReplacements = 0
   resetDispatchFailureState()
+  dispatchProbeActive = false
   doneEmitted = false
   directoryScanFinished = false
   scanPaused = false
@@ -298,6 +308,8 @@ export async function initializeMappingWorkers(
   initFailedWorkers.clear()
   lastInitErrorMessage = ''
   resetDispatchFailureState()
+  dispatchProbeActive = false
+  currentRunId += 1
   rejectRunCallback = rejectCb
   mapResultsList = skipCollectingMappings ? undefined : []
   filesMapped = 0
@@ -336,15 +348,38 @@ export async function initializeMappingWorkers(
   }
 
   const effectiveWorkerCount =
-    workerCount ?? Math.min(await getHardwareConcurrency(), 8)
-  const workers = await Promise.all(
+    workerCount ?? Math.max(1, Math.min(await getHardwareConcurrency(), 8))
+
+  const results = await Promise.allSettled(
     Array.from({ length: effectiveWorkerCount }, () => createMappingWorker()),
   )
+  const workers: Worker[] = []
+  let creationFailure: { reason: unknown } | undefined
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      workers.push(result.value)
+    } else if (!creationFailure) {
+      creationFailure = { reason: result.reason }
+    }
+  }
+  if (creationFailure) {
+    for (const worker of workers) {
+      try {
+        worker.terminate()
+      } catch {
+        // Worker may already be terminated
+      }
+    }
+    throw creationFailure.reason
+  }
+
   // A worker whose 'initError' already arrived was terminated by
   // handleWorkerInitFailure before this push and must not become dispatchable.
-  availableMappingWorkers.push(
-    ...workers.filter((worker) => !initFailedWorkers.has(worker)),
-  )
+  // The entry is deleted as it is read: this push is its only consumer.
+  for (const worker of workers) {
+    if (initFailedWorkers.delete(worker)) continue
+    availableMappingWorkers.push(worker)
+  }
   poolInitialized = true
   rejectIfNoWorkersLeft(
     `All mapping workers failed to initialize: ${lastInitErrorMessage}`,
@@ -359,6 +394,8 @@ export async function initializeMappingWorkers(
 export async function dispatchMappingJobs(): Promise<void> {
   if (aborted) return
 
+  const runId = currentRunId
+
   while (filesToProcess.length > 0 && availableMappingWorkers.length > 0) {
     // A streak is live, so pace the retries -- and let only one loop do the
     // pacing. Both checks sit above the pops, so a caller that defers leaves
@@ -368,113 +405,132 @@ export async function dispatchMappingJobs(): Promise<void> {
     // when the streak began holds nothing, and must not release the probe some
     // other loop is holding.
     let holdsDispatchProbe = false
-    if (consecutiveDispatchFailures > 0) {
-      // break rather than return: the backpressure resume and the termination
-      // check below still belong to this pass.
-      if (dispatchProbeActive) break
-      dispatchProbeActive = true
-      holdsDispatchProbe = true
-      const waitMs = dispatchBackoffUntil - Date.now()
-      if (waitMs > 0) await delay(waitMs)
-      // The run can be torn down during that wait.
-      if (aborted) {
-        dispatchProbeActive = false
-        return
-      }
-    }
-
-    const { fileInfo, previousFileInfo } = filesToProcess.pop()!
-    const mappingWorker = availableMappingWorkers.pop()!
-
-    // Track which file this worker is processing so we can identify it
-    // if the worker crashes.
-    workerCurrentFile.set(mappingWorker, fileInfo)
-
-    // Increment before the awaits below: a concurrent dispatchMappingJobs() call
-    // triggered by a finishing worker must see a non-zero count or it will emit
-    // 'done' prematurely while headers are still being resolved.
-    workersActive += 1
-
-    const { outputTarget, hashMethod, hashPartSize, ...mappingOptions } =
-      // Not partial anymore.
-      mappingWorkerOptions as TMappingWorkerOptions
-
-    // A header provider that rejects (expired credentials, a network failure)
-    // would otherwise leave this file popped and this worker slot consumed for
-    // the rest of the run, so the termination condition could never be met.
     try {
-      // Independent providers, and both are per-file round trips on the
-      // dispatch hot path, so they are resolved together rather than in turn.
-      const [inputFileInfo, resolvedOutputTarget] = await Promise.all([
-        getHttpInputHeaders(fileInfo),
-        getHttpOutputHeaders(outputTarget),
-      ])
-
-      // Same double-recovery guard as the failure branch below, and for the
-      // same reason: those awaits can outlive their file. If the stall watchdog
-      // or an abort has already recovered this worker, posting to it now leaves
-      // workersActive incremented for a reply that can never arrive.
-      if (!workerCurrentFile.has(mappingWorker)) continue
-
-      mappingWorker.postMessage({
-        request: 'apply',
-        fileInfo: inputFileInfo,
-        outputTarget: resolvedOutputTarget,
-        previousFileInfo,
-        hashMethod,
-        hashPartSize,
-        serializedMappingOptions: serializeMappingOptions(mappingOptions),
-      } satisfies MappingRequest)
-      resetDispatchFailureState()
-    } catch (error) {
-      // Same double-recovery guard as recoverCrashedWorker, and for the same
-      // reason: this await can outlive its file. The stall watchdog may have
-      // already recovered the worker, or an abort may have cleared the map --
-      // accounting again would double-count the file, return a terminated
-      // worker to the pool, and drive workersActive to -1. Continue rather
-      // than return: the queue drain, the backpressure resume and the
-      // termination check below still belong to this pass.
-      if (!workerCurrentFile.has(mappingWorker)) continue
-
-      console.error(
-        'Failed to dispatch file to mapping worker:',
-        error,
-        `File: ${fileInfo.path}/${fileInfo.name}`,
-      )
-      const message = error instanceof Error ? error.message : String(error)
-      failFileAndReturnWorker(mappingWorker, fileInfo, message)
-
-      // Reported once per streak (a success resets it). The run owner decides
-      // what to do: its rejection tears the pool down, which empties the queue
-      // and ends this loop. With no callback wired the run drains into error
-      // results as before -- which is why the backoff below is not conditional
-      // on having reported: nothing guarantees a report stops anything.
-      if (consecutiveDispatchFailures === 0) {
-        dispatchFailureStreakStart = Date.now()
+      if (consecutiveDispatchFailures > 0) {
+        // break rather than return: the backpressure resume and the termination
+        // check below still belong to this pass.
+        if (dispatchProbeActive) break
+        dispatchProbeActive = true
+        holdsDispatchProbe = true
+        const waitMs = dispatchBackoffUntil - Date.now()
+        if (waitMs > 0) await delay(waitMs)
+        // The run can be torn down during the wait and another started in its
+        // place, which resets `aborted` to false. The run check is what catches
+        // that.
+        if (aborted || runId !== currentRunId) return
+        // Both loop invariants can go stale across the wait: another loop past
+        // this gate can drain the queue, and an idle 'initError' removes a
+        // worker without spawning a replacement. The while condition last held
+        // before the sleep, so the pops below must be re-earned.
+        if (
+          filesToProcess.length === 0 ||
+          availableMappingWorkers.length === 0
+        ) {
+          break
+        }
       }
-      consecutiveDispatchFailures += 1
-      dispatchBackoffUntil =
-        Date.now() + dispatchBackoffMs(consecutiveDispatchFailures)
 
-      const streakDuration = Date.now() - dispatchFailureStreakStart
-      if (
-        !dispatchFailureReported &&
-        consecutiveDispatchFailures >= MAX_CONSECUTIVE_DISPATCH_FAILURES &&
-        streakDuration >= MIN_DISPATCH_FAILURE_STREAK_MS
-      ) {
-        dispatchFailureReported = true
-        rejectRunCallback?.(
-          new Error(
-            `Dispatch failed for ${consecutiveDispatchFailures} consecutive files over ${Math.round(streakDuration / 1000)}s, last: ${message}`,
-          ),
+      const { fileInfo, previousFileInfo } = filesToProcess.pop()!
+      const mappingWorker = availableMappingWorkers.pop()!
+
+      // Track which file this worker is processing so we can identify it
+      // if the worker crashes.
+      workerCurrentFile.set(mappingWorker, fileInfo)
+
+      // Increment before the awaits below: a concurrent dispatchMappingJobs()
+      // call triggered by a finishing worker must see a non-zero count or it
+      // will emit 'done' prematurely while headers are still being resolved.
+      workersActive += 1
+
+      const { outputTarget, hashMethod, hashPartSize, ...mappingOptions } =
+        // Not partial anymore.
+        mappingWorkerOptions as TMappingWorkerOptions
+
+      // A header provider that rejects (expired credentials, a network failure)
+      // would otherwise leave this file popped and this worker slot consumed
+      // for the rest of the run, so the termination condition could never be
+      // met.
+      try {
+        // Independent providers, and both are per-file round trips on the
+        // dispatch hot path, so they are resolved together rather than in turn.
+        const [inputFileInfo, resolvedOutputTarget] = await Promise.all([
+          getHttpInputHeaders(fileInfo),
+          getHttpOutputHeaders(outputTarget),
+        ])
+
+        // Same double-recovery guard as the failure branch below, and for the
+        // same reason: those awaits can outlive their file. If the stall
+        // watchdog or an abort has already recovered this worker, posting to it
+        // now leaves workersActive incremented for a reply that can never
+        // arrive.
+        if (!workerCurrentFile.has(mappingWorker)) continue
+
+        mappingWorker.postMessage({
+          request: 'apply',
+          fileInfo: inputFileInfo,
+          outputTarget: resolvedOutputTarget,
+          previousFileInfo,
+          hashMethod,
+          hashPartSize,
+          serializedMappingOptions: serializeMappingOptions(mappingOptions),
+        } satisfies MappingRequest)
+        resetDispatchFailureState()
+      } catch (error) {
+        // Same double-recovery guard as recoverCrashedWorker, and for the same
+        // reason: this await can outlive its file. The stall watchdog may have
+        // already recovered the worker, or an abort may have cleared the map --
+        // accounting again would double-count the file, return a terminated
+        // worker to the pool, and drive workersActive to -1. Continue rather
+        // than return: the queue drain, the backpressure resume and the
+        // termination check below still belong to this pass.
+        if (!workerCurrentFile.has(mappingWorker)) continue
+
+        console.error(
+          'Failed to dispatch file to mapping worker:',
+          error,
+          `File: ${fileInfo.path}/${fileInfo.name}`,
         )
+        const message = error instanceof Error ? error.message : String(error)
+        failFileAndReturnWorker(mappingWorker, fileInfo, message)
+
+        // Reported once per streak (a success resets it). The run owner decides
+        // what to do: its rejection tears the pool down, which empties the
+        // queue and ends this loop. With no callback wired the run drains into
+        // error results as before -- which is why the backoff below is not
+        // conditional on having reported: nothing guarantees a report stops
+        // anything.
+        if (consecutiveDispatchFailures === 0) {
+          dispatchFailureStreakStart = Date.now()
+        }
+        consecutiveDispatchFailures += 1
+        dispatchBackoffUntil =
+          Date.now() + dispatchBackoffMs(consecutiveDispatchFailures)
+
+        const streakDuration = Date.now() - dispatchFailureStreakStart
+        if (
+          !dispatchFailureReported &&
+          consecutiveDispatchFailures >= MAX_CONSECUTIVE_DISPATCH_FAILURES &&
+          streakDuration >= MIN_DISPATCH_FAILURE_STREAK_MS
+        ) {
+          dispatchFailureReported = true
+          rejectRunCallback?.(
+            new Error(
+              `Dispatch failed for ${consecutiveDispatchFailures} consecutive files over ${Math.round(streakDuration / 1000)}s, last: ${message}`,
+            ),
+          )
+        }
       }
     } finally {
-      // Whether the attempt succeeded, failed, or bailed out on a worker
-      // something else had already recovered, the next retry is somebody's to
-      // make. Held across the attempt itself, not just the wait, so a pool of
-      // N workers cannot pile N failures into one backoff window.
-      if (holdsDispatchProbe) dispatchProbeActive = false
+      // Released on every exit from an iteration that acquired it: success,
+      // failure, a worker something else recovered, or a bail-out before the
+      // pops. Held across the whole attempt rather than just the wait, so a pool
+      // of N workers cannot pile N failures into one backoff window.
+      //
+      // Ownership is checked, not assumed: a loop that slept through a teardown
+      // would otherwise release a probe the next run's loop has since acquired.
+      if (holdsDispatchProbe && runId === currentRunId) {
+        dispatchProbeActive = false
+      }
     }
   }
 
@@ -611,13 +667,16 @@ function dispatchBackoffMs(consecutiveFailures: number): number {
  * Split out because the two callers had drifted: leaving `dispatchFailureReported`
  * set behind a zeroed count means 'never back off again, and start the next
  * streak from a stale streak start'.
+ *
+ * Leaves `dispatchProbeActive` alone: this also runs from the dispatch success
+ * path, which may be a loop that never acquired the probe. Ownership stays with
+ * the acquiring iteration; the two teardown callers clear it themselves.
  */
 function resetDispatchFailureState(): void {
   consecutiveDispatchFailures = 0
   dispatchFailureStreakStart = 0
   dispatchFailureReported = false
   dispatchBackoffUntil = 0
-  dispatchProbeActive = false
 }
 
 /**
@@ -746,9 +805,9 @@ function recoverCrashedWorker(
 }
 
 /**
- * Drop an idle worker that broke the message protocol and replace it. It holds
- * no file, so there is nothing to account -- but leaving it in the pool means
- * handing it the next one.
+ * Drop an idle worker that can no longer serve a file -- it broke the message
+ * protocol, or it died holding nothing -- and replace it. There is no in-flight
+ * file to account, but leaving it in the pool means handing it the next one.
  */
 function retireIdleWorker(mappingWorker: Worker): void {
   if (aborted) return
@@ -777,14 +836,26 @@ function retireIdleWorker(mappingWorker: Worker): void {
  */
 function spawnReplacementWorker(): void {
   pendingReplacements += 1
+  const runId = currentRunId
 
   void createMappingWorker()
     .then((worker) => {
-      pendingReplacements -= 1
-      // If processing was aborted while the replacement was being created,
-      // terminate it immediately instead of adding it to the pool.
-      if (aborted) {
+      // If the run that asked for this replacement is over, the continuation
+      // must touch no shared state.
+      if (runId !== currentRunId || aborted) {
         worker.terminate()
+        return
+      }
+      pendingReplacements -= 1
+      // The replacement's own 'initError' can land before this continuation
+      // runs, when handleWorkerInitFailure has no pool entry to remove.
+      if (initFailedWorkers.delete(worker)) {
+        dispatchMappingJobs()
+        // Nothing else will report it: handleWorkerInitFailure ran while this
+        // replacement was still counted as pending, so it saw a non-empty pool.
+        rejectIfNoWorkersLeft(
+          `All mapping workers failed to initialize: ${lastInitErrorMessage}`,
+        )
         return
       }
       availableMappingWorkers.push(worker)
@@ -792,6 +863,8 @@ function spawnReplacementWorker(): void {
     })
     .catch((error: unknown) => {
       console.error('Failed to create replacement worker:', error)
+      // A failure from run 1 must not tear down a healthy run 2.
+      if (runId !== currentRunId || aborted) return
       pendingReplacements -= 1
       dispatchMappingJobs()
       // Whatever killed the worker can equally stop a new one being built (an
@@ -838,7 +911,6 @@ function handleWorkerInitFailure(mappingWorker: Worker, error: string): void {
 
   console.error('Mapping worker failed to initialize:', error)
   lastInitErrorMessage = error
-  initFailedWorkers.add(mappingWorker)
 
   // A file was dispatched before the failure surfaced: recover it like any
   // crash. A pool-wide breakage makes the replacement fail the same way, but
@@ -855,7 +927,14 @@ function handleWorkerInitFailure(mappingWorker: Worker, error: string): void {
   // replacement -- an environment that cannot initialize a worker will not
   // do better on retry.
   const index = availableMappingWorkers.indexOf(mappingWorker)
-  if (index !== -1) availableMappingWorkers.splice(index, 1)
+  if (index !== -1) {
+    availableMappingWorkers.splice(index, 1)
+  } else {
+    // Not in the pool: the failure beat one of the two pushes, neither of which
+    // is reachable from here. Recorded so that push drops it instead. Only this
+    // branch records, so every entry has a consumer.
+    initFailedWorkers.add(mappingWorker)
+  }
   try {
     mappingWorker.terminate()
   } catch {
@@ -886,7 +965,19 @@ async function createMappingWorker(): Promise<Worker> {
       'message' in event
         ? (event as { message: string }).message
         : `Worker error: ${String(event)}`
-    recoverCrashedWorker(mappingWorker, errorMessage)
+    if (workerCurrentFile.has(mappingWorker)) {
+      recoverCrashedWorker(mappingWorker, errorMessage)
+      return
+    }
+    // A worker that died while idle holds no file, so recoverCrashedWorker would
+    // return having done nothing and leave a dead thread pooled for the next
+    // dispatch. Pool membership also distinguishes this from the second event of
+    // one crash: onerror and 'exit' can both fire, and only the first finds the
+    // worker still dispatchable.
+    if (availableMappingWorkers.includes(mappingWorker)) {
+      console.error(`Mapping worker died while idle: ${errorMessage}`)
+      retireIdleWorker(mappingWorker)
+    }
   }
 
   // Handle unexpected worker exit (OOM, segfault, unhandled rejection that
@@ -895,11 +986,21 @@ async function createMappingWorker(): Promise<Worker> {
     ;(mappingWorker as unknown as NodeWorkerLike).on('exit', (code: number) => {
       // Normal exit (code 0) after terminate() is expected -- ignore it.
       // Non-zero exit means the worker crashed.
-      if (code !== 0 && workerCurrentFile.has(mappingWorker)) {
+      if (code === 0) return
+      if (workerCurrentFile.has(mappingWorker)) {
         recoverCrashedWorker(
           mappingWorker,
           `Worker exited unexpectedly with code ${code}`,
         )
+        return
+      }
+      // Idle death, as in onerror above. The pool membership check is what
+      // stops this firing a second time for a crash onerror already recovered:
+      // every intentional terminate() removes the worker from the pool first, so
+      // the non-zero exit it produces is correctly ignored here.
+      if (availableMappingWorkers.includes(mappingWorker)) {
+        console.error(`Mapping worker exited while idle with code ${code}`)
+        retireIdleWorker(mappingWorker)
       }
     })
   }

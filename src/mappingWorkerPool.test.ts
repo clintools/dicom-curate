@@ -13,6 +13,11 @@ let failPausedHeaders: (() => void) | null = null
 let rejectNextHeaders = false
 let rejectAllHeaders = false
 let failWorkerCreation = false
+// Number of workers that may still be built before creation starts failing.
+// null disables it; failWorkerCreation above is the all-or-nothing form.
+let workerCreationsBeforeFailure: number | null = null
+let pauseWorkerCreation = false
+let resumeWorkerCreation: (() => void) | null = null
 
 vi.doMock('./httpHeaders', () => ({
   getHttpInputHeaders: vi.fn(async (fileInfo: any) => {
@@ -39,6 +44,17 @@ vi.doMock('./worker', () => ({
   createWorker: vi.fn(async () => {
     if (failWorkerCreation) {
       throw new Error('Worker construction failed')
+    }
+    if (workerCreationsBeforeFailure !== null) {
+      if (workerCreationsBeforeFailure <= 0) {
+        throw new Error('Worker construction failed')
+      }
+      workerCreationsBeforeFailure -= 1
+    }
+    if (pauseWorkerCreation) {
+      await new Promise<void>((resolve) => {
+        resumeWorkerCreation = resolve
+      })
     }
     const mock = new MockWorker(getNextMockBehavior())
     registerMockWorker(mock)
@@ -91,6 +107,9 @@ function resetMockState(): void {
   rejectNextHeaders = false
   rejectAllHeaders = false
   failWorkerCreation = false
+  workerCreationsBeforeFailure = null
+  pauseWorkerCreation = false
+  resumeWorkerCreation = null
   resetMockWorkers()
 }
 
@@ -101,6 +120,9 @@ describe('dispatchMappingJobs', () => {
     // Unblock any pending header awaits so the event loop is clean.
     resumeHeaders?.()
     resumeHeaders = null
+    // Same for a worker creation a test left parked.
+    resumeWorkerCreation?.()
+    resumeWorkerCreation = null
     // availableMappingWorkers is module-global and initializeMappingWorkers
     // only pushes to it, so a worker one test leaves behind is dispatchable in
     // the next.
@@ -771,6 +793,354 @@ describe('dispatchMappingJobs', () => {
     // termination block would corrupt results it has already been given.
     expect(doneMessages[0].mapResultsList).toHaveLength(1)
   })
+
+  // The backoff gate sits between the while condition and the two pops, so
+  // both loop invariants can go stale across its sleep. No abort is needed for
+  // this one: a loop that entered before the streak began is not gated at all,
+  // and can drain the queue while this one waits.
+  it('recovers when the queue drains while dispatch sleeps in the backoff', async () => {
+    rejectAllHeaders = true
+    configureMockMappingWorkers(['normal'])
+
+    const progressMessages: any[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => progressMessages.push(msg),
+      1,
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+    pool.filesToProcess.push(
+      queueFile('a.dcm'),
+      queueFile('b.dcm'),
+      queueFile('c.dcm'),
+    )
+
+    vi.useFakeTimers()
+    try {
+      let dispatchError: unknown
+      const parked = pool.dispatchMappingJobs().catch((error: unknown) => {
+        dispatchError = error
+      })
+
+      // Two failures land: the first books no delay at all, and the second
+      // parks the loop in a 50ms backoff with a file still queued.
+      for (let tick = 0; tick < 5; tick++) {
+        await vi.advanceTimersByTimeAsync(1)
+      }
+      expect(progressMessages).toHaveLength(2)
+      expect(pool.filesToProcess).toHaveLength(1)
+
+      pool.filesToProcess.length = 0
+      await vi.advanceTimersByTimeAsync(100)
+      await parked
+
+      // Popping an empty queue throws, and every caller of dispatchMappingJobs
+      // invokes it unawaited -- on Node's default that is a process exit.
+      expect(dispatchError).toBeUndefined()
+
+      // A throw ahead of the try that releases the probe leaves it held by
+      // nobody, and every later call then breaks at the gate -- including the
+      // stall watchdog's recovery.
+      rejectAllHeaders = false
+      pool.filesToProcess.push(queueFile('d.dcm'))
+      await pool.dispatchMappingJobs()
+      await vi.advanceTimersByTimeAsync(100)
+
+      expect(pool.filesToProcess).toHaveLength(0)
+      expect(progressMessages).toHaveLength(3)
+      expect(progressMessages[2].mapResults.errors).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // The same stale-invariant window, on the pool side: an idle worker can leave
+  // the pool during the sleep with nothing put back in its place, which is
+  // exactly what an idle 'initError' does by design.
+  it('never pools an undefined worker when the pool empties during the backoff', async () => {
+    rejectAllHeaders = true
+    configureMockMappingWorkers(['normal'])
+
+    const progressMessages: any[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => progressMessages.push(msg),
+      1,
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+    pool.filesToProcess.push(
+      queueFile('a.dcm'),
+      queueFile('b.dcm'),
+      queueFile('c.dcm'),
+    )
+
+    vi.useFakeTimers()
+    try {
+      let dispatchError: unknown
+      const parked = pool.dispatchMappingJobs().catch((error: unknown) => {
+        dispatchError = error
+      })
+      for (let tick = 0; tick < 5; tick++) {
+        await vi.advanceTimersByTimeAsync(1)
+      }
+      expect(pool.availableMappingWorkers).toHaveLength(1)
+
+      // The pooled worker reports that its environment never came up. That path
+      // removes it and deliberately spawns no replacement, so the pool is empty
+      // by the time the sleeping loop wakes.
+      const [worker] = getMockWorkersCreated()
+      ;(worker as any).emitMessage({
+        response: 'initError',
+        error: 'Simulated worker init failure',
+      })
+      expect(pool.availableMappingWorkers).toHaveLength(0)
+
+      await vi.advanceTimersByTimeAsync(100)
+      await parked
+
+      expect(dispatchError).toBeUndefined()
+      // `undefined` popped from an empty pool is dispatchable, and
+      // failFileAndReturnWorker puts it straight back after every failure.
+      expect(pool.availableMappingWorkers).not.toContain(undefined)
+      expect([...pool.getWorkerCurrentFile().keys()]).not.toContain(undefined)
+
+      // Worse than a run full of error results: the termination block latches
+      // doneEmitted before terminating the pool, so one throw on an `undefined`
+      // entry puts 'done' permanently out of reach.
+      pool.filesToProcess.length = 0
+      pool.setDirectoryScanFinished(true)
+      await pool.dispatchMappingJobs()
+      expect(
+        progressMessages.filter((m: any) => m.response === 'done'),
+      ).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // A teardown sets the abort flag and the next run clears it again. A loop
+  // still sleeping in the backoff from the previous run wakes into that, with
+  // every array it is about to touch now owned by a different run.
+  it('does not let a dispatch loop that slept through a teardown serve the next run', async () => {
+    rejectAllHeaders = true
+    configureMockMappingWorkers(['normal'])
+
+    await pool.initializeMappingWorkers(false, undefined, () => {}, 1)
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+    pool.filesToProcess.push(
+      queueFile('a.dcm'),
+      queueFile('b.dcm'),
+      queueFile('c.dcm'),
+    )
+
+    vi.useFakeTimers()
+    try {
+      let dispatchError: unknown
+      const parked = pool.dispatchMappingJobs().catch((error: unknown) => {
+        dispatchError = error
+      })
+      for (let tick = 0; tick < 5; tick++) {
+        await vi.advanceTimersByTimeAsync(1)
+      }
+
+      pool.terminateAllWorkers()
+
+      rejectAllHeaders = false
+      const secondRunMessages: any[] = []
+      await pool.initializeMappingWorkers(
+        false,
+        undefined,
+        (msg: any) => secondRunMessages.push(msg),
+        1,
+      )
+      pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+      pool.setDirectoryScanFinished(false)
+      pool.filesToProcess.push(queueFile('second-run.dcm'))
+
+      await vi.advanceTimersByTimeAsync(200)
+      await parked
+
+      expect(dispatchError).toBeUndefined()
+      // The second run has dispatched nothing itself, so anything consumed here
+      // was consumed by a loop that belongs to a run which is over.
+      expect(pool.filesToProcess).toHaveLength(1)
+      expect(secondRunMessages).toHaveLength(0)
+      expect(pool.getWorkersActive()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // The replacement's own 'initError' can beat its continuation home, and
+  // handleWorkerInitFailure cannot remove it from a pool it has not joined yet.
+  it('keeps a replacement that already failed to initialize out of the pool', async () => {
+    configureMockMappingWorkers(['crash-onerror', 'init-error-immediate'])
+
+    const rejections: Error[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      () => {},
+      1,
+      (reason: Error) => rejections.push(reason),
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+    pool.filesToProcess.push(queueFile('a.dcm'))
+
+    await pool.dispatchMappingJobs()
+    await waitFor(() => getMockWorkersCreated().length > 1)
+    await settle()
+
+    const replacement = getMockWorkersCreated()[1]
+    expect(replacement.terminated).toBe(true)
+    // postMessage to a terminated worker is a silent no-op, so a file handed to
+    // this one sits unanswered until the ten-minute stall watchdog.
+    expect(pool.availableMappingWorkers).not.toContain(
+      replacement as unknown as Worker,
+    )
+    expect(pool.availableMappingWorkers).toHaveLength(0)
+    expect(pool.getPendingReplacements()).toBe(0)
+    // Nothing else can report it: handleWorkerInitFailure ran while this
+    // replacement was still counted as pending, so it found the pool not empty.
+    expect(rejections).toHaveLength(1)
+    expect(rejections[0].message).toMatch(
+      /All mapping workers failed to initialize/,
+    )
+  })
+
+  // Both continuations of spawnReplacementWorker mutate module-global pool
+  // state, and the module outlives the run. A replacement resolving after its
+  // own run was torn down must leave the next run's counter alone: one stray
+  // decrement puts its termination condition permanently out of reach.
+  it('abandons a replacement whose run ended before it was created', async () => {
+    configureMockMappingWorkers(['crash-onerror'])
+
+    await pool.initializeMappingWorkers(false, undefined, () => {}, 1)
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+    pool.filesToProcess.push(queueFile('a.dcm'))
+
+    pauseWorkerCreation = true
+    await pool.dispatchMappingJobs()
+    await waitFor(() => resumeWorkerCreation !== null)
+    expect(pool.getPendingReplacements()).toBe(1)
+
+    // Run one ends with that replacement still being built.
+    pool.terminateAllWorkers()
+
+    pauseWorkerCreation = false
+    const secondRunMessages: any[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => secondRunMessages.push(msg),
+      1,
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    const secondRunWorker = pool.availableMappingWorkers[0]
+
+    // Only now does run one's replacement finish being created.
+    resumeWorkerCreation!()
+    resumeWorkerCreation = null
+    await settle()
+
+    expect(pool.getPendingReplacements()).toBe(0)
+    expect(pool.availableMappingWorkers).toEqual([secondRunWorker])
+    // Abandoned, not leaked: nothing else holds a reference to that thread.
+    expect(getMockWorkersCreated().at(-1)!.terminated).toBe(true)
+
+    // The counter is what proves it: at -1 the termination condition can never
+    // hold and this run could never emit 'done'.
+    pool.setDirectoryScanFinished(true)
+    await pool.dispatchMappingJobs()
+    expect(
+      secondRunMessages.filter((m: any) => m.response === 'done'),
+    ).toHaveLength(1)
+  })
+
+  /**
+   * recoverCrashedWorker returns early for a worker holding no file, so neither
+   * death signal does anything by itself for one that died idle. Without a path
+   * of its own it stays in the pool, is handed the next file, and that file is
+   * stuck until the ten-minute stall watchdog.
+   */
+  async function expectIdleDeathIsReplaced(
+    kill: (worker: MockWorker) => void,
+  ): Promise<void> {
+    configureMockMappingWorkers(['normal'])
+
+    await pool.initializeMappingWorkers(false, undefined, () => {}, 1)
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    // Left unfinished so the termination block cannot drain the pool instead.
+    pool.setDirectoryScanFinished(false)
+
+    const dead = getMockWorkersCreated()[0]
+    expect(pool.availableMappingWorkers).toEqual([dead as unknown as Worker])
+
+    kill(dead)
+    await waitFor(
+      () =>
+        pool.availableMappingWorkers.length === 1 &&
+        pool.availableMappingWorkers[0] !== (dead as unknown as Worker),
+    )
+    await settle()
+
+    expect(dead.terminated).toBe(true)
+    expect(pool.getPendingReplacements()).toBe(0)
+
+    // The replacement must also be able to take work.
+    pool.filesToProcess.push(queueFile('a.dcm'))
+    await pool.dispatchMappingJobs()
+    await waitFor(() => pool.getWorkersActive() === 0)
+    expect(pool.filesToProcess).toHaveLength(0)
+  }
+
+  it('replaces a pooled worker that dies while idle (onerror)', async () => {
+    await expectIdleDeathIsReplaced((worker) => {
+      worker.onerror!({ message: 'Simulated idle worker death' })
+    })
+  })
+
+  it('replaces a pooled worker that dies while idle (non-zero exit)', async () => {
+    await expectIdleDeathIsReplaced((worker) => {
+      for (const listener of (worker as any).exitListeners) {
+        listener(1)
+      }
+    })
+  })
+
+  // onerror and 'exit' can both fire for a single crash. The idle path above
+  // must not turn the second of them into a second replacement, nor into a
+  // second accounting of the file the first one already errored.
+  it('spawns one replacement when a busy worker reports its crash twice', async () => {
+    configureMockMappingWorkers(['crash-onerror-and-exit'])
+
+    const progressMessages: any[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => progressMessages.push(msg),
+      1,
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+    pool.filesToProcess.push(queueFile('a.dcm'))
+
+    await pool.dispatchMappingJobs()
+    await waitFor(() => progressMessages.length > 0)
+    await settle()
+
+    expect(getMockWorkersCreated()).toHaveLength(2)
+    expect(pool.availableMappingWorkers).toHaveLength(1)
+    expect(pool.getWorkersActive()).toBe(0)
+    expect(progressMessages).toHaveLength(1)
+  })
 })
 
 describe('initializeMappingWorkers', () => {
@@ -804,5 +1174,50 @@ describe('initializeMappingWorkers', () => {
       'workerCount must be an integer between 1 and 64, received 100000',
     )
     expect(getMockWorkersCreated()).toHaveLength(0)
+  })
+
+  // Promise.all rejects on the first failure and drops every worker it had
+  // already built. Nothing else references them, so they can be neither used
+  // nor terminated and hold the Node event loop open.
+  it('terminates the workers it had already built when one cannot be created', async () => {
+    configureMockMappingWorkers(['normal'])
+    workerCreationsBeforeFailure = 4
+
+    await expect(
+      pool.initializeMappingWorkers(false, undefined, () => {}, 8),
+    ).rejects.toThrow('Worker construction failed')
+
+    const created = getMockWorkersCreated()
+    expect(created).toHaveLength(4)
+    expect(created.every((worker) => worker.terminated)).toBe(true)
+    expect(pool.availableMappingWorkers).toHaveLength(0)
+  })
+
+  // getHardwareConcurrency falls back to os.cpus().length, which Node documents
+  // as possibly empty. An unfloored default then builds an empty pool, which can
+  // neither dispatch nor reach the termination condition.
+  it('floors the default worker count when the host reports no CPUs', async () => {
+    configureMockMappingWorkers(['normal'])
+    // hardwareConcurrency is preferred when present, so the os fallback is only
+    // reachable with no navigator at all.
+    vi.stubGlobal('navigator', undefined)
+    vi.doMock('node:os', () => ({ cpus: () => [] }))
+
+    try {
+      const rejections: Error[] = []
+      await pool.initializeMappingWorkers(
+        false,
+        undefined,
+        () => {},
+        undefined,
+        (reason: Error) => rejections.push(reason),
+      )
+
+      expect(pool.availableMappingWorkers).toHaveLength(1)
+      expect(rejections).toHaveLength(0)
+    } finally {
+      vi.doUnmock('node:os')
+      vi.unstubAllGlobals()
+    }
   })
 })
