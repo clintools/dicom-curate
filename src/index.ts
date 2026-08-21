@@ -3,7 +3,6 @@ import { composeSpecs } from './composeSpecs'
 import { extractColumnMappings, type TColumnMappings } from './csvMapping'
 import { curateOne } from './curateOne'
 import {
-  availableMappingWorkers,
   dispatchMappingJobs,
   filesToProcess,
   getLastMappingProgressTime,
@@ -79,7 +78,9 @@ function requiresDateOffset(
  */
 // TODO: implement a buffering stream to request fileHandles in batches
 async function initializeFileListWorker(
-  rejectCallback: (reason: Error) => void,
+  // Must be failRun, not rejectCallback: every failure path below ends a run
+  // that still owns a mapping worker pool, and only failRun tears it down.
+  failRun: (reason: Error) => void,
   isRunOver: () => boolean,
 ) {
   const fileListWorker = await createWorker(
@@ -89,11 +90,7 @@ async function initializeFileListWorker(
 
   fileListWorker.onerror = (error) => {
     console.error('Scan worker crashed:', error)
-    // Terminate all mapping workers (both idle and active)
-    while (availableMappingWorkers.length) {
-      availableMappingWorkers.pop()!.terminate()
-    }
-    rejectCallback(
+    failRun(
       new Error(
         `Scan worker crashed: ${'message' in error ? (error as { message: string }).message : String(error)}`,
       ),
@@ -117,9 +114,7 @@ async function initializeFileListWorker(
       // would make a dead run's exit look live again.
       if (code === 0 || isDirectoryScanFinished() || isRunOver()) return
       console.error(`Scan worker exited unexpectedly with code ${code}`)
-      rejectCallback(
-        new Error(`Scan worker exited unexpectedly with code ${code}`),
-      )
+      failRun(new Error(`Scan worker exited unexpectedly with code ${code}`))
     })
   }
 
@@ -173,11 +168,7 @@ async function initializeFileListWorker(
         case 'error': {
           console.error('Scan worker error:', event.data.error)
           fileListWorker.terminate()
-          // Terminate all mapping workers (both idle and active)
-          while (availableMappingWorkers.length) {
-            availableMappingWorkers.pop()!.terminate()
-          }
-          rejectCallback(new Error(event.data.error))
+          failRun(new Error(event.data.error))
           break
         }
         default: {
@@ -350,6 +341,12 @@ async function curateMany(
     // Prevents double-settle when abort races with natural completion.
     let settled = false
 
+    // Whether a scan was ever requested for this run. The watchdog's
+    // no-mapping-work branch also holds before the scan request is posted, and
+    // permanently for an inputType that starts no scanner, so it must not
+    // report either as a scanner going quiet.
+    let scanRequested = false
+
     const signal = organizeOptions.signal
 
     // Stall watchdog: if there's outstanding work and no progress relevant to
@@ -399,7 +396,11 @@ async function curateMany(
         // minutes of silence in that state means it is never coming back, and
         // waiting forever is the failure this watchdog exists to end.
         failRun(
-          new Error('Scan worker stopped reporting progress for 10 minutes'),
+          new Error(
+            scanRequested
+              ? 'Scan worker stopped reporting progress for 10 minutes'
+              : 'No mapping work and no directory scan in progress for 10 minutes',
+          ),
         )
         return
       }
@@ -540,14 +541,23 @@ async function curateMany(
           organizeOptions.inputType === 'path' ||
           organizeOptions.inputType === 's3'
         ) {
-          // Checked again: an initError landing during the awaits above
-          // rejects the run, and a scan worker started for it would run the
-          // whole tree with nothing left able to terminate it.
+          // Checked again after the await:
+          // until the assignment completes, failRun and onAbort see
+          // fileListWorker as undefined and their terminate() is a no-op, so a
+          // run that settles during creation can only be cleaned up here.
           if (settled) return
           fileListWorker = await initializeFileListWorker(
             failRun,
             () => settled,
           )
+          if (settled) {
+            try {
+              fileListWorker.terminate()
+            } catch {
+              // already terminated
+            }
+            return
+          }
 
           // Wire up backpressure resume: when the dispatch loop drains the
           // queue below the low-water mark, it calls this to resume scanning.
@@ -604,6 +614,7 @@ async function curateMany(
               noDefaultExclusions,
             } satisfies FileScanRequest)
           }
+          scanRequested = true
         } else if (organizeOptions.inputType === 'files') {
           queueFilesForMapping(organizeOptions)
         } else if (organizeOptions.inputType === 'http') {
@@ -614,7 +625,10 @@ async function curateMany(
 
         dispatchMappingJobs()
       } catch (error) {
-        rejectCallback(error as Error)
+        // failRun, not rejectCallback: collectMappingOptions and the spec
+        // composition can both throw after the pool is built. Rejecting alone
+        // leaves those workers running, holding the Node event loop open.
+        failRun(error as Error)
       }
     })()
   })

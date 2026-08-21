@@ -5,10 +5,37 @@ async function flushAsyncSetup() {
   await Promise.resolve()
   await Promise.resolve()
 }
+
+/** Longer form, for setups that await a worker creation part way through. */
+async function flushTicks(rounds = 30) {
+  for (let tick = 0; tick < rounds; tick++) {
+    await Promise.resolve()
+  }
+}
+
+/**
+ * Scan worker stand-in: only the surface initializeFileListWorker touches.
+ * Deliberately has no `on`, so the Node-only 'exit' wiring is skipped.
+ */
+function makeMockScanWorker() {
+  const messageListeners: ((event: { data: unknown }) => void)[] = []
+  return {
+    onerror: null as ((event: unknown) => void) | null,
+    terminate: vi.fn(),
+    postMessage: vi.fn(),
+    addEventListener: vi.fn((event: string, listener: any) => {
+      if (event === 'message') messageListeners.push(listener)
+    }),
+    emitMessage(data: unknown) {
+      for (const listener of messageListeners) listener({ data })
+    },
+  }
+}
 describe('curateMany', () => {
   let curateMany: typeof import('./index').curateMany
   let mappingWorkerPool: typeof import('./mappingWorkerPool')
   let composeSpecsModule: typeof import('./composeSpecs')
+  let workerModule: typeof import('./worker')
 
   let capturedProgressCallback: ((msg: any) => void) | undefined
 
@@ -76,6 +103,7 @@ describe('curateMany', () => {
 
     mappingWorkerPool = await import('./mappingWorkerPool')
     composeSpecsModule = await import('./composeSpecs')
+    workerModule = await import('./worker')
     ;({ curateMany } = await import('./index'))
   })
 
@@ -473,5 +501,177 @@ describe('curateMany', () => {
       ([msg]) => msg.response === 'done',
     )
     expect(doneCalls).toHaveLength(1)
+  })
+
+  it('terminates the mapping pool when setup throws after the pool is built', async () => {
+    ;(
+      composeSpecsModule.composeSpecs as MockedFunction<
+        typeof composeSpecsModule.composeSpecs
+      >
+    ).mockReturnValueOnce({
+      dicomPS315EOptions: {
+        retainLongitudinalTemporalInformationOptions: 'Offset',
+      },
+    } as any)
+
+    await expect(
+      curateMany({
+        inputType: 'http',
+        inputUrls: ['https://example.com/file.dcm'],
+        curationSpec: () => ({}),
+        dateOffset: 'not-an-iso8601-offset',
+      } as any),
+    ).rejects.toThrow(
+      'When using "Offset" for retainLongitudinalTemporalInformationOptions',
+    )
+
+    expect(mappingWorkerPool.terminateAllWorkers).toHaveBeenCalledTimes(1)
+  })
+
+  // Both teardown paths terminate fileListWorker, and both see it as undefined
+  // until the assignment completes, so a run that settles during creation has
+  // nothing left able to stop the scan worker.
+  it('terminates a scan worker created for a run that settled during its creation', async () => {
+    const scanWorker = makeMockScanWorker()
+    let resolveCreate: ((worker: unknown) => void) | undefined
+    ;(
+      workerModule.createWorker as MockedFunction<
+        typeof workerModule.createWorker
+      >
+    ).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve as (worker: unknown) => void
+        }),
+    )
+
+    const controller = new AbortController()
+    const promise = curateMany({
+      inputType: 'path',
+      inputDirectory: '/tmp/curate-many-test',
+      curationSpec: 'none',
+      signal: controller.signal,
+    } as any)
+
+    await flushTicks()
+    expect(resolveCreate).toBeDefined()
+
+    controller.abort()
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+
+    // The worker only exists now: after the run settled, and after both
+    // teardown paths ran and found nothing to terminate.
+    resolveCreate!(scanWorker)
+    await flushTicks()
+
+    expect(scanWorker.terminate).toHaveBeenCalledTimes(1)
+    // A scan request from here walks the whole input tree for a dead run and
+    // holds the Node event loop open with nothing able to stop it.
+    expect(scanWorker.postMessage).not.toHaveBeenCalled()
+  })
+
+  // A late event from a finished run's scanner reaches whatever is in the
+  // module-global pool by then -- possibly a later run's idle workers.
+  it("leaves the mapping pool alone when a settled run's scanner reports late", async () => {
+    const scanWorker = makeMockScanWorker()
+    ;(
+      workerModule.createWorker as MockedFunction<
+        typeof workerModule.createWorker
+      >
+    ).mockResolvedValueOnce(scanWorker as unknown as Worker)
+
+    const promise = curateMany({
+      inputType: 'path',
+      inputDirectory: '/tmp/curate-many-test',
+      curationSpec: 'none',
+    } as any)
+
+    await flushTicks()
+    emitDone()
+    await expect(promise).resolves.toBeDefined()
+
+    // Stands in for the idle pool of whichever run is current by then.
+    const laterRunWorker = { terminate: vi.fn() }
+    mappingWorkerPool.availableMappingWorkers.push(
+      laterRunWorker as unknown as Worker,
+    )
+
+    scanWorker.onerror!({ message: 'Scan worker crashed' })
+    scanWorker.emitMessage({ response: 'error', error: 'Scan worker error' })
+
+    expect(laterRunWorker.terminate).not.toHaveBeenCalled()
+    // failRun is settled-guarded.
+    expect(mappingWorkerPool.terminateAllWorkers).not.toHaveBeenCalled()
+  })
+
+  // The watchdog's no-mapping-work branch also holds during start-up and
+  // permanently for an inputType that starts no scanner. Settling such a run is
+  // right, but naming a component that never ran misdirects the operator.
+  it('does not blame the scan worker when no scan was ever started', async () => {
+    vi.useFakeTimers()
+    try {
+      const pool = mappingWorkerPool as unknown as Record<
+        string,
+        MockedFunction<() => number | boolean>
+      >
+      pool.getLastMappingProgressTime.mockReturnValue(0)
+      pool.getLastScanProgressTime.mockReturnValue(0)
+      pool.getWorkersActive.mockReturnValue(0)
+      pool.isDirectoryScanFinished.mockReturnValue(false)
+      pool.getPendingReplacements.mockReturnValue(0)
+
+      const promise = curateMany({
+        inputType: 'not-a-supported-input-type',
+        curationSpec: 'none',
+      } as any)
+
+      await flushTicks()
+      vi.advanceTimersByTime(60_000)
+
+      await expect(promise).rejects.toThrow(
+        'No mapping work and no directory scan in progress for 10 minutes',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still blames the scan worker once a scan has actually been requested', async () => {
+    const scanWorker = makeMockScanWorker()
+    ;(
+      workerModule.createWorker as MockedFunction<
+        typeof workerModule.createWorker
+      >
+    ).mockResolvedValueOnce(scanWorker as unknown as Worker)
+
+    vi.useFakeTimers()
+    try {
+      const pool = mappingWorkerPool as unknown as Record<
+        string,
+        MockedFunction<() => number | boolean>
+      >
+      pool.getLastMappingProgressTime.mockReturnValue(0)
+      pool.getLastScanProgressTime.mockReturnValue(0)
+      pool.getWorkersActive.mockReturnValue(0)
+      pool.isDirectoryScanFinished.mockReturnValue(false)
+      pool.getPendingReplacements.mockReturnValue(0)
+
+      const promise = curateMany({
+        inputType: 'path',
+        inputDirectory: '/tmp/curate-many-test',
+        curationSpec: 'none',
+      } as any)
+
+      await flushTicks()
+      expect(scanWorker.postMessage).toHaveBeenCalled()
+
+      vi.advanceTimersByTime(60_000)
+
+      await expect(promise).rejects.toThrow(
+        'Scan worker stopped reporting progress for 10 minutes',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
