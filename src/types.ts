@@ -60,7 +60,8 @@ export type OrganizeOptions = {
   // Example: ['**/logs/**'] excludes any file under a 'logs' directory.
   // Uses picomatch glob syntax.
   excludedPathGlobs?: string[]
-  // Maximum number of concurrent mapping workers.
+  // Maximum number of concurrent mapping workers. Must be an integer between
+  // 1 and 64; anything else is rejected rather than clamped.
   // Defaults to the platform's hardware concurrency (capped at 8).
   // Reducing this limits peak memory usage at the cost of slower throughput.
   workerCount?: number
@@ -422,6 +423,9 @@ export type TCurationSpecification<THost extends HostProps = HostProps> = {
 type TProgressMessageBase = {
   totalFiles?: number
   processedFiles?: number
+  // Whether the directory scan has finished. Until it has, `totalFiles` is a
+  // lower bound the scanner is still revising, not an exact denominator.
+  scanComplete?: boolean
 }
 
 type TProgressMessageProgress = TProgressMessageBase & {

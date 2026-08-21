@@ -3,15 +3,19 @@ import { composeSpecs } from './composeSpecs'
 import { extractColumnMappings, type TColumnMappings } from './csvMapping'
 import { curateOne } from './curateOne'
 import {
-  availableMappingWorkers,
   dispatchMappingJobs,
   filesToProcess,
-  getLastWorkerProgressTime,
+  getLastMappingProgressTime,
+  getLastScanProgressTime,
+  getPendingReplacements,
   getWorkerCurrentFile,
   getWorkersActive,
   initializeMappingWorkers,
+  isDirectoryScanFinished,
   markScanPaused,
   type ProgressCallback,
+  resetProgressTimestamps,
+  resetScanProgressTime,
   scanAnomalies,
   setAbortSignal,
   setCustomUploader,
@@ -74,7 +78,10 @@ function requiresDateOffset(
  */
 // TODO: implement a buffering stream to request fileHandles in batches
 async function initializeFileListWorker(
-  rejectCallback: (reason: Error) => void,
+  // Must be failRun, not rejectCallback: every failure path below ends a run
+  // that still owns a mapping worker pool, and only failRun tears it down.
+  failRun: (reason: Error) => void,
+  isRunOver: () => boolean,
 ) {
   const fileListWorker = await createWorker(
     new URL('./scanDirectoryWorker.js', import.meta.url),
@@ -83,20 +90,44 @@ async function initializeFileListWorker(
 
   fileListWorker.onerror = (error) => {
     console.error('Scan worker crashed:', error)
-    // Terminate all mapping workers (both idle and active)
-    while (availableMappingWorkers.length) {
-      availableMappingWorkers.pop()!.terminate()
-    }
-    rejectCallback(
+    failRun(
       new Error(
         `Scan worker crashed: ${'message' in error ? (error as { message: string }).message : String(error)}`,
       ),
     )
   }
 
+  // Node worker_threads reports some deaths (OOM kill, unhandled rejection in
+  // the thread) only via 'exit', never onerror. Without this the run waits
+  // forever on a scanner that no longer exists: the watchdog can log the stall
+  // but has nothing to recover and no way to settle.
+  if ('on' in fileListWorker) {
+    ;(
+      fileListWorker as unknown as {
+        on(event: string, cb: (code: number) => void): void
+      }
+    ).on('exit', (code: number) => {
+      // Code 0 is a normal exit; a non-zero code after the scan finished, or
+      // after this run ended (its own abort terminated the worker), is
+      // intentional. `isRunOver` is scoped to the run that owns this worker:
+      // the pool's abort flag is module-global, so a later run resetting it
+      // would make a dead run's exit look live again.
+      if (code === 0 || isDirectoryScanFinished() || isRunOver()) return
+      console.error(`Scan worker exited unexpectedly with code ${code}`)
+      failRun(new Error(`Scan worker exited unexpectedly with code ${code}`))
+    })
+  }
+
   fileListWorker.addEventListener(
     'message',
     (event: MessageEvent<FileScanMsg>) => {
+      // A live scanner is progress too: without this, a long stretch that
+      // yields no mappable files (deep excluded tree, slow remote listing)
+      // reads as a stall. Refreshes only the scan baseline: the file counter
+      // runs even while paused for backpressure, so it must never be able to
+      // mask a wedged mapping pump.
+      resetScanProgressTime()
+
       switch (event.data.response) {
         case 'file': {
           const { fileInfo, previousFileInfo } = event.data
@@ -137,11 +168,7 @@ async function initializeFileListWorker(
         case 'error': {
           console.error('Scan worker error:', event.data.error)
           fileListWorker.terminate()
-          // Terminate all mapping workers (both idle and active)
-          while (availableMappingWorkers.length) {
-            availableMappingWorkers.pop()!.terminate()
-          }
-          rejectCallback(new Error(event.data.error))
+          failRun(new Error(event.data.error))
           break
         }
         default: {
@@ -267,6 +294,10 @@ function queueFilesForMapping(
       scanAnomalies: [],
     })
   })
+  // No scan runs for this input type, so nothing else would ever satisfy the
+  // termination condition and curateMany would never settle. Set before
+  // dispatching so settling never depends on a dispatch call elsewhere.
+  setDirectoryScanFinished(true)
   // Dispatch jobs once after all files are queued to prevent race conditions
   dispatchMappingJobs()
 }
@@ -289,8 +320,10 @@ function queueUrlsForMapping(
     })
   })
 
-  dispatchMappingJobs()
+  // No scan runs for this input type either; set before dispatching for the
+  // same reason as queueFilesForMapping above.
   setDirectoryScanFinished(true)
+  dispatchMappingJobs()
 }
 
 async function curateMany(
@@ -308,48 +341,112 @@ async function curateMany(
     // Prevents double-settle when abort races with natural completion.
     let settled = false
 
+    // Whether a scan was ever requested for this run. The watchdog's
+    // no-mapping-work branch also holds before the scan request is posted, and
+    // permanently for an inputType that starts no scanner, so it must not
+    // report either as a scanner going quiet.
+    let scanRequested = false
+
     const signal = organizeOptions.signal
 
-    // Stall watchdog: if no mapping worker at all has reported back for 10
-    // minutes (i.e., all active workers are stuck), terminate them and count
-    // their in-flight files as mapping errors. This guards against undetectable
-    // worker crashes (e.g., OOM kills that don't trigger onerror or on('exit')).
+    // Stall watchdog: if there's outstanding work and no progress relevant to
+    // it for 10 minutes, recover any stuck workers (counting their in-flight
+    // files as mapping errors) and re-pump the dispatch loop. Guards against
+    // crashes no handler sees (e.g. OOM kills) and against a lost dispatch.
     const STALL_TIMEOUT_MS = 10 * 60 * 1000
     const stallWatchdog = setInterval(() => {
-      if (
-        getWorkersActive() > 0 &&
-        Date.now() - getLastWorkerProgressTime() > STALL_TIMEOUT_MS
-      ) {
-        console.error(
-          `Stall detected: ${getWorkersActive()} mapping worker(s) have not responded for 10 minutes.`,
+      // Gating on active workers alone misses the worst case: a dispatch loop
+      // killed between `workersActive -= 1` and the re-dispatch leaves zero
+      // workers active with the queue still full and the scanner paused, since
+      // backpressure is only released from inside dispatchMappingJobs().
+      // Mirrors the pool's 4-way termination condition exactly, replacements
+      // included: a replacement worker that never finishes being created stalls
+      // a run that otherwise looks complete, and dropping that term here would
+      // silence the one signal that reports it.
+      const workersActive = getWorkersActive()
+      const queueLength = filesToProcess.length
+      const scanFinished = isDirectoryScanFinished()
+      const pendingReplacements = getPendingReplacements()
+      const mappingWorkOutstanding =
+        workersActive > 0 || queueLength > 0 || pendingReplacements > 0
+      if (!mappingWorkOutstanding && scanFinished) {
+        return
+      }
+
+      // With mapping work outstanding, only mapping activity counts: the
+      // scanner's file counter runs even while paused for backpressure, so
+      // scan activity could mask a dead pump for the rest of the scan. Fall
+      // back to the scan timestamp only when the run is purely waiting on
+      // the scanner to surface more files.
+      const relevantProgressTime = mappingWorkOutstanding
+        ? getLastMappingProgressTime()
+        : getLastScanProgressTime()
+      if (Date.now() - relevantProgressTime <= STALL_TIMEOUT_MS) return
+
+      console.error(
+        `Stall detected: no ${mappingWorkOutstanding ? 'mapping' : 'scan'} progress for 10 minutes (${workersActive} worker(s) active, ${queueLength} file(s) queued, ${pendingReplacements} replacement(s) pending, scan ${scanFinished ? 'finished' : 'in progress'}).`,
+      )
+
+      if (!mappingWorkOutstanding) {
+        // Waiting on a scanner that has gone quiet, with nothing dispatched
+        // and nothing queued: there is no worker to recover and no file to
+        // re-dispatch, so the loop below and the re-pump can do nothing. The
+        // scanner is not paused either — backpressure only pauses it while the
+        // queue is full, which would have made mapping work outstanding. Ten
+        // minutes of silence in that state means it is never coming back, and
+        // waiting forever is the failure this watchdog exists to end.
+        failRun(
+          new Error(
+            scanRequested
+              ? 'Scan worker stopped reporting progress for 10 minutes'
+              : 'No mapping work and no directory scan in progress for 10 minutes',
+          ),
         )
-        const workerCurrentFile = getWorkerCurrentFile()
-        // Recover all stuck workers. Iterate over a copy since
-        // recoverCrashedWorker modifies workerCurrentFile.
-        for (const [worker] of [...workerCurrentFile]) {
-          // Import recoverCrashedWorker indirectly via the worker's onerror.
-          // The onerror handler calls recoverCrashedWorker internally.
-          if (worker.onerror) {
-            // Synthetic error event -- avoid ErrorEvent constructor which is
-            // unavailable in Node.js < 23. The onerror handler only reads
-            // event.message via duck-typing so a plain object suffices.
-            worker.onerror({
-              message: 'Worker stalled (no response for 10 minutes)',
-            } as unknown as ErrorEvent)
-          }
+        return
+      }
+
+      const workerCurrentFile = getWorkerCurrentFile()
+      // Recover all stuck workers. Iterate over a copy since
+      // recoverCrashedWorker modifies workerCurrentFile.
+      for (const [worker] of [...workerCurrentFile]) {
+        // Import recoverCrashedWorker indirectly via the worker's onerror.
+        // The onerror handler calls recoverCrashedWorker internally.
+        if (worker.onerror) {
+          // Synthetic error event -- avoid ErrorEvent constructor which is
+          // unavailable in Node.js < 23. The onerror handler only reads
+          // event.message via duck-typing so a plain object suffices.
+          worker.onerror({
+            message: 'Worker stalled (no response for 10 minutes)',
+          } as unknown as ErrorEvent)
         }
       }
+
+      // Unconditional: when the stall is a lost dispatch rather than a stuck
+      // worker there is nothing for the loop above to recover, and this is the
+      // only call that drains the queue and releases scanner backpressure.
+      void dispatchMappingJobs()
+
+      resetProgressTimestamps()
     }, 60_000)
 
     // Progress callback wraps the user's callback and handles lifecycle
     const progressCallback: ProgressCallback = (msg) => {
-      onProgress?.(msg)
-
-      if (msg.response === 'done' && !settled) {
+      if (msg.response === 'done') {
+        // Settle first: a consumer that throws must not be able to stop
+        // curateMany from resolving, and 'done' is forwarded at most once.
+        if (settled) return
         settled = true
         clearInterval(stallWatchdog)
         signal?.removeEventListener('abort', onAbort)
         resolve(msg)
+      }
+
+      // resolve() only queues the awaiter as a microtask, so a synchronous
+      // consumer still observes 'done' before the caller of curateMany resumes.
+      try {
+        onProgress?.(msg)
+      } catch (error) {
+        console.error('Error in curateMany progress callback:', error)
       }
     }
 
@@ -364,6 +461,20 @@ async function curateMany(
     // Reference to the scan worker, hoisted so the abort handler can
     // terminate it. Assigned later when a directory/path/s3 input is used.
     let fileListWorker: Worker | undefined
+
+    // For failures that leave nothing to wait for (scan worker death, every
+    // mapping worker failing to initialize). Guarded on settled so a stale
+    // event from a finished run cannot tear down a newer one's pool state.
+    const failRun = (reason: Error) => {
+      if (settled) return
+      try {
+        fileListWorker?.terminate()
+      } catch {
+        /* already terminated */
+      }
+      terminateAllWorkers()
+      rejectCallback(reason)
+    }
 
     const onAbort = () => {
       // Terminate the scan worker if it exists
@@ -402,7 +513,13 @@ async function curateMany(
           organizeOptions.fileInfoIndex,
           progressCallback,
           organizeOptions.workerCount,
+          failRun,
         )
+
+        // The pool can reject the run from inside that call (every worker
+        // failed to initialize). Both failRun and onAbort are settled-guarded,
+        // so anything created past this point could never be torn down.
+        if (settled) return
 
         // Set global mappingWorkerOptions
         setMappingWorkerOptions(
@@ -424,7 +541,23 @@ async function curateMany(
           organizeOptions.inputType === 'path' ||
           organizeOptions.inputType === 's3'
         ) {
-          fileListWorker = await initializeFileListWorker(rejectCallback)
+          // Checked again after the await:
+          // until the assignment completes, failRun and onAbort see
+          // fileListWorker as undefined and their terminate() is a no-op, so a
+          // run that settles during creation can only be cleaned up here.
+          if (settled) return
+          fileListWorker = await initializeFileListWorker(
+            failRun,
+            () => settled,
+          )
+          if (settled) {
+            try {
+              fileListWorker.terminate()
+            } catch {
+              // already terminated
+            }
+            return
+          }
 
           // Wire up backpressure resume: when the dispatch loop drains the
           // queue below the low-water mark, it calls this to resume scanning.
@@ -481,6 +614,7 @@ async function curateMany(
               noDefaultExclusions,
             } satisfies FileScanRequest)
           }
+          scanRequested = true
         } else if (organizeOptions.inputType === 'files') {
           queueFilesForMapping(organizeOptions)
         } else if (organizeOptions.inputType === 'http') {
@@ -491,7 +625,10 @@ async function curateMany(
 
         dispatchMappingJobs()
       } catch (error) {
-        rejectCallback(error as Error)
+        // failRun, not rejectCallback: collectMappingOptions and the spec
+        // composition can both throw after the pool is built. Rejecting alone
+        // leaves those workers running, holding the Node event loop open.
+        failRun(error as Error)
       }
     })()
   })

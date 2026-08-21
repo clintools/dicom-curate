@@ -12,6 +12,17 @@ export type MockWorkerBehavior =
   | 'crash-exit'
   | 'crash-onerror-and-exit'
   | 'hang'
+  | 'unknown-response'
+  // Emits an unrecognised message while sitting idle in the pool, before it
+  // has been given any file.
+  | 'unknown-response-idle'
+  // Emits 'initError' shortly after creation, while idle in the pool.
+  | 'init-error'
+  // Emits 'initError' as the pool attaches its message listener, i.e. while
+  // initializeMappingWorkers is still assembling the pool.
+  | 'init-error-immediate'
+  // Emits 'initError' in response to the first file it is given.
+  | 'init-error-on-apply'
 
 let mockBehaviors: MockWorkerBehavior[] = []
 let mockWorkerIndex = 0
@@ -46,11 +57,42 @@ export class MockWorker {
 
   constructor(behavior: MockWorkerBehavior) {
     this.behavior = behavior
+
+    if (behavior === 'unknown-response-idle') {
+      // Same setTimeout(0) reason as 'init-error' below: the pool attaches its
+      // message listener synchronously inside createMappingWorker.
+      setTimeout(() => {
+        if (!this.terminated) {
+          this.emitMessage({ response: 'heartbeat' })
+        }
+      }, 0)
+    }
+
+    if (behavior === 'init-error') {
+      // setTimeout(0) so the pool has attached its message listener (that
+      // happens synchronously within createMappingWorker) before this fires.
+      setTimeout(() => {
+        if (!this.terminated) {
+          this.emitMessage({
+            response: 'initError',
+            error: 'Simulated worker init failure',
+          })
+        }
+      }, 0)
+    }
   }
 
   addEventListener(event: string, listener: any): void {
     if (event === 'message') {
       this.messageListeners.push(listener)
+      if (this.behavior === 'init-error-immediate') {
+        listener({
+          data: {
+            response: 'initError',
+            error: 'Simulated worker init failure',
+          },
+        })
+      }
     }
   }
 
@@ -120,6 +162,42 @@ export class MockWorker {
             for (const listener of this.exitListeners) {
               listener(1)
             }
+          }
+        }, 0)
+        break
+      }
+      // Replies with a message the pool has no case for, then finishes the
+      // file normally. Models a worker that is still busy when the unknown
+      // message arrives, so returning it to the pool would double-count.
+      case 'unknown-response': {
+        const mapResults = {
+          sourceInstanceUID: fileInfo?.name || 'unknown',
+          outputFilePath: `output/${fileInfo?.name || 'unknown'}`,
+          mappings: {},
+          anomalies: [],
+          errors: [],
+          quarantine: {},
+          fileInfo,
+        }
+        setTimeout(() => {
+          if (this.terminated) return
+          this.emitMessage({ response: 'heartbeat' })
+          // Emitted even though the pool has terminated this worker by now:
+          // models a reply already queued on the parent's port when terminate
+          // landed, which is what the pool's completion guards exist for.
+          setTimeout(() => {
+            this.emitMessage({ response: 'finished', mapResults })
+          }, 0)
+        }, 0)
+        break
+      }
+      case 'init-error-on-apply': {
+        setTimeout(() => {
+          if (!this.terminated) {
+            this.emitMessage({
+              response: 'initError',
+              error: 'Simulated worker init failure',
+            })
           }
         }, 0)
         break

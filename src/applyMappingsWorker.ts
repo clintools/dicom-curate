@@ -43,7 +43,24 @@ fixupNodeWorkerEnvironment()
     globalThis.addEventListener('message', handleMessage)
   })
   .catch((error) => {
-    // If fixupNodeWorkerEnvironment() fails, the worker can never process
-    // messages. Log the error so it's visible in the console.
-    console.error('Failed to initialize mapping worker environment:', error)
+    // Without an environment the worker can never process messages, so
+    // dispatched files would vanish until the watchdog notices 10 minutes
+    // later. 'initError' tells the pool to drop it and account any file
+    // already in flight; the log carries the reason, visible only here.
+    const message = `Failed to initialize mapping worker environment: ${
+      error instanceof Error ? error.message : String(error)
+    }`
+    console.error(message, error)
+    const msg: MappingResponse = { response: 'initError', error: message }
+    try {
+      emit(msg)
+    } catch {
+      // Under Node the rejection happens before fixupNodeWorkerEnvironment()
+      // installs globalThis.postMessage, so emit() itself throws. Go direct,
+      // matching the { data } wrapping the fixup applies (see worker.ts). If
+      // worker_threads was itself the failure, the log above is the last word.
+      void import('worker_threads')
+        .then(({ parentPort }) => parentPort?.postMessage({ data: msg }))
+        .catch(() => {})
+    }
   })

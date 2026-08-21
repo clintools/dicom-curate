@@ -70,6 +70,14 @@ describe('curateMany orchestration with real workers', () => {
     expect(result.processedFiles).toBe(count)
     expect(listFilesRecursive(outputDir)).toHaveLength(count)
 
+    // Truthful end to end: the scanner is still running when the first files
+    // come back, so totalFiles is provisional at that point and exact at 'done'.
+    expect(progress[0].scanComplete).toBe(false)
+    expect(progress.at(-1)).toMatchObject({
+      response: 'done',
+      scanComplete: true,
+    })
+
     // The count must never overshoot the discovered total, in any message —
     // a pause/resume that lost or replayed a file would break this.
     for (const msg of progress) {
@@ -80,6 +88,28 @@ describe('curateMany orchestration with real workers', () => {
         expect(msg.processedFiles).toBeLessThanOrEqual(msg.totalFiles)
       }
     }
+  })
+
+  it('completes under backpressure when the consumer callback throws on every message', async () => {
+    const { inputDir, outputDir } = workspace()
+    // The full deadlock: a consumer throw lands between `workersActive -= 1`
+    // and the re-dispatch, and dispatch is the only thing that resumes a
+    // scanner paused on backpressure. One throw used to strand the run.
+    const count = 250
+    await writeImages(inputDir, count)
+
+    const { result } = await runCapturingProgress(
+      integrationOptions(inputDir, outputDir, integrationSpec(), {
+        workerCount: 1,
+      }),
+      () => {
+        throw new Error('consumer callback exploded')
+      },
+    )
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(count)
+    expect(listFilesRecursive(outputDir)).toHaveLength(count)
   })
 
   it('aborts a live run and leaves the input reusable by the next run', async () => {

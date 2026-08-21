@@ -29,7 +29,7 @@ import {
   resetMockWorkers,
 } from '../testutils/mockMappingWorker'
 import { MockScanWorker } from '../testutils/mockScanWorker'
-import type { TCurationSpecification } from './types'
+import type { TCurationSpecification, TProgressMessage } from './types'
 
 let scanWorkerInstance: MockScanWorker | undefined
 
@@ -51,6 +51,9 @@ vi.doMock('./worker', () => ({
 }))
 
 const { curateMany } = await import('./index')
+// Imported alongside curateMany so a test can drive the pool into states the
+// public API can no longer produce -- the wedge the watchdog exists to break.
+const pool = await import('./mappingWorkerPool')
 
 const WORKER_COUNT = Math.max(3, Math.min(cpus().length || 1, 8))
 
@@ -63,6 +66,37 @@ function makeBehaviors(
   ).fill('normal')
   // Crash workers go last so they're popped first from the LIFO stack
   return [...normals, ...crashBehaviors]
+}
+
+async function flushMicrotasks(rounds = 1): Promise<void> {
+  for (let i = 0; i < rounds; i++) {
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  }
+}
+
+/** Let any already-scheduled setTimeout(0) work run to completion. */
+async function settle(): Promise<void> {
+  for (let tick = 0; tick < 10; tick++) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+}
+
+/** Drive real timers until `predicate` holds; the mock workers reply on setTimeout(0). */
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let tick = 0; tick < 500; tick++) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error('waitFor: condition was never met')
+}
+
+function queuedFile(name: string) {
+  return {
+    fileInfo: { kind: 'path', path: '/wedged', name, size: 1 } as any,
+    scanAnomalies: [],
+  }
 }
 
 function minimalSpec() {
@@ -265,5 +299,412 @@ describe('worker crash recovery', () => {
       r.errors?.some((e) => e.includes('stalled')),
     )
     expect(stallErrors.length).toBeGreaterThanOrEqual(1)
+  }, 30_000)
+
+  it('stall watchdog re-pumps a stalled dispatch with no active workers', async () => {
+    vi.useFakeTimers()
+
+    configureMockMappingWorkers(['normal'])
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: 1,
+      },
+      () => {},
+    )
+
+    // Let the async setup finish without advancing any timer, so the scan
+    // worker never emits.
+    await flushMicrotasks(20)
+
+    // Reproduce the wedge a killed pump leaves behind: work queued, scan
+    // finished, nothing active and no dispatch pending. Injected rather than
+    // provoked, because the pump can no longer be killed from a callback.
+    scanWorkerInstance!.terminate()
+    pool.filesToProcess.push(
+      queuedFile('wedged-1.dcm'),
+      queuedFile('wedged-2.dcm'),
+    )
+    pool.setDirectoryScanFinished(true)
+
+    // The previous gate (workersActive > 0) could never fire in this state,
+    // so the run hung here indefinitely.
+    for (let i = 0; i < 12; i++) {
+      vi.advanceTimersByTime(60 * 1000)
+      await flushMicrotasks()
+    }
+
+    // Let the re-pumped dispatch and the worker responses drain.
+    for (let i = 0; i < 50; i++) {
+      vi.advanceTimersByTime(1)
+      await flushMicrotasks()
+    }
+
+    const result = await curatePromise
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(2)
+  }, 30_000)
+
+  it('does not let scan activity mask a stalled mapping pump', async () => {
+    vi.useFakeTimers()
+
+    configureMockMappingWorkers(['hang'])
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: 1,
+      },
+      () => {},
+    )
+
+    await flushMicrotasks(20)
+
+    // Let the scan emit its files and the single (hanging) worker swallow the
+    // first one: mapping work is now outstanding and no mapping message will
+    // ever arrive.
+    for (let i = 0; i < 200; i++) {
+      vi.advanceTimersByTime(1)
+      await flushMicrotasks()
+    }
+
+    // The scanner keeps reporting in every minute, as real 'count' messages
+    // through the scan-worker message handler. Its file counter runs even
+    // while paused for backpressure, so it must never stand in for mapping
+    // progress: with work outstanding, only mapping activity counts.
+    for (let i = 0; i < 12; i++) {
+      vi.advanceTimersByTime(60 * 1000)
+      scanWorkerInstance!.emitCount(10)
+      await flushMicrotasks()
+    }
+
+    // Let the recovery, replacement worker, and remaining files drain.
+    for (let i = 0; i < 100; i++) {
+      vi.advanceTimersByTime(1)
+      await flushMicrotasks()
+    }
+
+    const result = await curatePromise
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(10)
+    const stallErrors = result.mapResultsList!.filter((r) =>
+      r.errors?.some((e) => e.includes('stalled')),
+    )
+    expect(stallErrors.length).toBe(1)
+  }, 30_000)
+
+  it('does not false-fire on a healthy scan with nothing dispatched yet', async () => {
+    vi.useFakeTimers()
+    const errorSpy = vi.spyOn(console, 'error')
+
+    configureMockMappingWorkers(['normal'])
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: 1,
+      },
+      () => {},
+    )
+
+    await flushMicrotasks(20)
+
+    // Nothing queued, nothing active, scan not finished -- purely waiting on
+    // the scanner. A deep tree of excluded files or a slow remote listing
+    // looks exactly like this, and must not be reported as a stall as long
+    // as the scanner keeps reporting in.
+    for (let i = 0; i < 12; i++) {
+      vi.advanceTimersByTime(60 * 1000)
+      scanWorkerInstance!.emitCount(0)
+      await flushMicrotasks()
+    }
+
+    expect(
+      errorSpy.mock.calls.some((call) =>
+        String(call[0]).includes('Stall detected'),
+      ),
+    ).toBe(false)
+
+    // Let the scan actually finish so the run can settle.
+    scanWorkerInstance!.terminate()
+    pool.setDirectoryScanFinished(true)
+    for (let i = 0; i < 50; i++) {
+      vi.advanceTimersByTime(1)
+      await flushMicrotasks()
+    }
+
+    const result = await curatePromise
+    expect(result.response).toBe('done')
+
+    errorSpy.mockRestore()
+  }, 30_000)
+
+  // The mirror image of the test above: a scanner that stops reporting has
+  // nothing for the watchdog to recover and nothing to re-dispatch, so
+  // detecting the stall is all it can do -- and detection alone leaves the run
+  // waiting forever.
+  it('rejects the run when the scanner stops reporting', async () => {
+    vi.useFakeTimers()
+
+    configureMockMappingWorkers(['normal'])
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: 1,
+      },
+      () => {},
+    )
+
+    await flushMicrotasks(20)
+
+    // Kill the scanner before it emits anything: no files queued, no worker
+    // active, no 'done' -- the run is left waiting on a scanner that will
+    // never speak again. (A real one wedges rather than dies, which is why the
+    // 'exit' handler cannot cover this.)
+    scanWorkerInstance!.terminate()
+
+    for (let i = 0; i < 11; i++) {
+      vi.advanceTimersByTime(60 * 1000)
+      await flushMicrotasks()
+    }
+
+    await expect(curatePromise).rejects.toThrow(
+      /Scan worker stopped reporting progress/,
+    )
+  }, 30_000)
+
+  it('rejects the run when every mapping worker fails to initialize', async () => {
+    configureMockMappingWorkers(Array(WORKER_COUNT).fill('init-error'))
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    await expect(curatePromise).rejects.toThrow(
+      /All mapping workers failed to initialize/,
+    )
+
+    expect(getMockWorkersCreated().every((w) => w.terminated)).toBe(true)
+    expect(pool.availableMappingWorkers.length).toBe(0)
+
+    // Here the failures land after setup created the scan worker, so failRun
+    // is what tears it down.
+    expect(scanWorkerInstance?.terminated ?? true).toBe(true)
+  })
+
+  it('starts no scan when the pool fails during assembly', async () => {
+    configureMockMappingWorkers(
+      Array(WORKER_COUNT).fill('init-error-immediate'),
+    )
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    await expect(curatePromise).rejects.toThrow(
+      /All mapping workers failed to initialize/,
+    )
+
+    // The rejection lands before setup reaches the scan worker. Since failRun
+    // and the abort handler are both settled-guarded, a worker created past
+    // that point could never be terminated -- it would scan the whole tree
+    // for a dead run and hold the Node event loop open.
+    expect(scanWorkerInstance).toBeUndefined()
+  })
+
+  it('drops an idle worker that fails to initialize and completes with the rest', async () => {
+    configureMockMappingWorkers(makeBehaviors('init-error'))
+
+    const result = await curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(10)
+
+    // The failed worker never received a file, so nothing was errored, and
+    // no replacement was spawned for it (total created == initial pool).
+    const errors = result.mapResultsList!.filter(
+      (r) => r.errors && r.errors.length > 0,
+    )
+    expect(errors).toHaveLength(0)
+    expect(getMockWorkersCreated().length).toBe(WORKER_COUNT)
+  })
+
+  it('recovers a worker whose init failure surfaces after a file was dispatched', async () => {
+    configureMockMappingWorkers(makeBehaviors('init-error-on-apply'))
+
+    const result = await curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(10)
+
+    // The in-flight file was accounted exactly once, as a crash-style error.
+    const initErrors = result.mapResultsList!.filter((r) =>
+      r.errors?.some((e) => e.includes('failed to initialize')),
+    )
+    expect(initErrors).toHaveLength(1)
+
+    // The broken worker was replaced so the pool did not shrink.
+    expect(getMockWorkersCreated().length).toBeGreaterThan(WORKER_COUNT)
+  })
+
+  it('rejects the run when the scan worker exits without an error event', async () => {
+    vi.useFakeTimers()
+
+    configureMockMappingWorkers(Array(WORKER_COUNT).fill('normal'))
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    // Setup finishes without advancing timers, so the scan has emitted
+    // nothing -- then kill the thread as an OOM does: 'exit' and nothing more.
+    await flushMicrotasks(20)
+    scanWorkerInstance!.emitExit(1)
+
+    await expect(curatePromise).rejects.toThrow(
+      /Scan worker exited unexpectedly with code 1/,
+    )
+  })
+
+  it('ignores a normal scan worker exit', async () => {
+    configureMockMappingWorkers(Array(WORKER_COUNT).fill('normal'))
+
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    await waitFor(() => scanWorkerInstance !== undefined)
+    scanWorkerInstance!.emitExit(0)
+
+    const result = await curatePromise
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(10)
+  })
+
+  it('emits done once when the last worker crashes at end of run', async () => {
+    const singleFileDir = createTestDicomDir(1)
+
+    try {
+      configureMockMappingWorkers(['hang'])
+
+      const doneMessages: TProgressMessage[] = []
+      const curatePromise = curateMany(
+        {
+          inputType: 'path',
+          inputDirectory: singleFileDir,
+          curationSpec: minimalSpec,
+          skipWrite: true,
+          workerCount: 1,
+        },
+        (msg) => {
+          if (msg.response === 'done') doneMessages.push(msg)
+        },
+      )
+
+      // Crash only once the sole file is in flight and the scan has finished,
+      // so recovery runs with an empty queue - the end-of-run case where the
+      // termination condition is already satisfied.
+      await waitFor(
+        () => pool.isDirectoryScanFinished() && pool.getWorkersActive() === 1,
+      )
+
+      // A hard scan read-failure is reported from the termination block, so a
+      // second pass through it appends this entry to mapResultsList twice.
+      pool.scanAnomalies.push({
+        fileInfo: {
+          kind: 'path',
+          path: singleFileDir,
+          name: 'unreadable.dcm',
+        } as any,
+        anomalies: [],
+        errors: ['Simulated read failure'],
+      })
+
+      const [crashed] = getMockWorkersCreated()
+      crashed.onerror!({ message: 'Simulated end-of-run crash' })
+
+      const result = await curatePromise
+
+      // Give the replacement worker time to be created and dispatched: doing
+      // that after 'done' rather than before can produce duplicates.
+      await settle()
+      expect(getMockWorkersCreated()).toHaveLength(2)
+
+      expect(result.response).toBe('done')
+      expect(doneMessages).toHaveLength(1)
+      expect(
+        result.mapResultsList!.filter((r) =>
+          r.sourceInstanceUID.startsWith('scan_'),
+        ),
+      ).toHaveLength(1)
+      expect(result.mapResultsList).toHaveLength(2)
+
+      // Torn down with the pool rather than left running past the run.
+      expect(getMockWorkersCreated()[1].terminated).toBe(true)
+    } finally {
+      cleanupTestDicomDir(singleFileDir)
+    }
   }, 30_000)
 })

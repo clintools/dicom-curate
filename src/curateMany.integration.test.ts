@@ -6,6 +6,7 @@
  * reach the caller through the progress stream as work proceeds rather than
  * only in the final result.
  */
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   integrationOptions,
@@ -50,6 +51,48 @@ describe('curateMany driven through real workers', () => {
       .map((m) => m.processedFiles)
       .filter((n): n is number => typeof n === 'number')
     expect(counts).toEqual([...counts].sort((a, b) => a - b))
+  })
+
+  it('completes for in-memory file input, which never runs a scan', async () => {
+    const { inputDir, outputDir } = workspace()
+    const inputPath = join(inputDir, 'study', 'subject', 'only.dcm')
+    await writeSynthFile(inputPath, VALID_CT_IMAGE)
+
+    // No scan worker exists on this path, so nothing but queueFilesForMapping
+    // can mark the scan finished -- and without that the run never settles.
+    const { result } = await runCapturingProgress({
+      ...integrationOptions(inputDir, outputDir, integrationSpec()),
+      inputType: 'files',
+      inputFiles: [
+        new File([Uint8Array.from(await readFile(inputPath))], 'only.dcm'),
+      ],
+    } as never)
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(1)
+  })
+
+  it('settles on an empty queue for both directly-queued input types', async () => {
+    const { inputDir, outputDir } = workspace()
+    const base = integrationOptions(inputDir, outputDir, integrationSpec())
+
+    // Neither input type runs a scan, so an empty list is the shortest path to
+    // the termination condition -- and the one that never reaches a worker.
+    const files = await runCapturingProgress({
+      ...base,
+      inputType: 'files',
+      inputFiles: [],
+    } as never)
+    expect(files.result.response).toBe('done')
+    expect(files.result.processedFiles).toBe(0)
+
+    const urls = await runCapturingProgress({
+      ...base,
+      inputType: 'http',
+      inputUrls: [],
+    } as never)
+    expect(urls.result.response).toBe('done')
+    expect(urls.result.processedFiles).toBe(0)
   })
 
   it('surfaces per-file mapping results through the progress stream', async () => {
