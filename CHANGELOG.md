@@ -1,3 +1,35 @@
+# [0.42.0](https://github.com/clintools/dicom-curate/compare/v0.41.2...v0.42.0) (2026-08-23)
+
+
+### Bug Fixes
+
+* account a mapping worker reply exactly once when recovery has already run ([34bff86](https://github.com/clintools/dicom-curate/commit/34bff866640c8b72ad7b9db8e814b7df2c474d31))
+* bound an explicitly requested mapping worker count ([1f87ac3](https://github.com/clintools/dicom-curate/commit/1f87ac326e322db252f595c8597dcaf7b48442f3))
+* bound the loss from a re-entered dispatch failure streak ([54a71cd](https://github.com/clintools/dicom-curate/commit/54a71cd45febe40cf2a8b2b0d3e38c0d07d3b8ca))
+* count a failed dispatch as mapping progress ([7de5cf8](https://github.com/clintools/dicom-curate/commit/7de5cf85e73b9a21c58531098d6f62532de3359b))
+* deliver mapping worker initialisation failures and drop the failed workers from the pool ([3429f4f](https://github.com/clintools/dicom-curate/commit/3429f4f8ce987152a434bff24b832ab2b587fc82))
+* end a run whose scan worker has stopped reporting ([a869ea5](https://github.com/clintools/dicom-curate/commit/a869ea566e2628b3758678d9f8e508b259782060))
+* fail the run after twenty consecutive dispatch failures ([8ad7d4f](https://github.com/clintools/dicom-curate/commit/8ad7d4f800b3498f999c55188b1734934460b289))
+* guard the dispatch success path against a recovered worker ([5afdead](https://github.com/clintools/dicom-curate/commit/5afdead2fd44045e4e931c6dd9514f7de9d06ae9))
+* harden the mapping worker pool against dispatch and replacement races ([703783c](https://github.com/clintools/dicom-curate/commit/703783c30758eebd3b9cd4421ab68a7ca3e5a93c))
+* keep the mapping pump alive through consumer and dispatch failures ([3dcfda1](https://github.com/clintools/dicom-curate/commit/3dcfda1cedfa9dbf16f980fdf4514efaade84eab))
+* reject a mapping worker count below one ([d0fd5fb](https://github.com/clintools/dicom-curate/commit/d0fd5fb75d74141dde181f5d874942abee53d56f))
+* reject the run when the mapping worker pool empties ([6025ea8](https://github.com/clintools/dicom-curate/commit/6025ea857579b40f1a379d3acfc00e5057ca6516))
+* reject the run when the scan worker exits unexpectedly ([1a61499](https://github.com/clintools/dicom-curate/commit/1a614992956d8ee082b4317852c7b14e31eb0193))
+* report mapping worker initialisation failures to the pool ([8966370](https://github.com/clintools/dicom-curate/commit/8966370b71168cf457854ecc2af7dbc0197cd47d))
+* report scan worker initialisation failures instead of hanging ([6268bad](https://github.com/clintools/dicom-curate/commit/6268bad2571d5123abd0f8f40a0e95d25e0f793a))
+* report scan worker initialisation failures through worker_threads ([8df618a](https://github.com/clintools/dicom-curate/commit/8df618a7f51e0fba18a9ebd47f03ef542800998d))
+* require a dispatch failure streak to last before failing the run ([6618b07](https://github.com/clintools/dicom-curate/commit/6618b07754de7f867e5ba057adcf0a3cf7cee830))
+* require mapping progress in the stall watchdog while mapping work is outstanding ([43aed4d](https://github.com/clintools/dicom-curate/commit/43aed4d885dfb9ec1936e3d6e65e38604a8a0777))
+* set directoryScanFinished before dispatching queued files and urls ([70c41c0](https://github.com/clintools/dicom-curate/commit/70c41c084dd77eb411f3503805f03209248c71e3))
+* tear down a curateMany run that ends before or during scan worker setup ([3f5a9f4](https://github.com/clintools/dicom-curate/commit/3f5a9f455ae3767c808822a87ce35e9cbd58e20d))
+* throttle retries while dispatch failures are streaking ([121aa09](https://github.com/clintools/dicom-curate/commit/121aa0967d75c4fad85b99f111700ef9aa37d132))
+
+
+### Features
+
+* report scan completion on progress messages ([80020c8](https://github.com/clintools/dicom-curate/commit/80020c8d95f09761e5dc8d9d5c684638aebd481c))
+
 ## [0.41.2](https://github.com/clintools/dicom-curate/compare/v0.41.1...v0.41.2) (2026-08-17)
 
 
