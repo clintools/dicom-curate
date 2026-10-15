@@ -42,6 +42,7 @@
   },
   "scripts": {
     "pre-commit:check": "tsc --noEmit && pnpm lint",
+    "hooks:pre-push": "bash scripts/hooks/pre-push.sh",
     "clean": "rm -rf dist",
     "build": "pnpm generate:sampleSpec && pnpm build:esm && pnpm build:types && rollup -c",
     "build:esm": "node esbuild.config.js",

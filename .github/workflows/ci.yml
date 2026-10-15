@@ -90,24 +90,6 @@ jobs:
           echo "embedded version: $(grep -aoE '1\.00\.snapshot\.[0-9]+' "$BIN" | sort -u | tr '\n' ' ')"
           grep -aqF '1.00.snapshot.20260320044638' "$BIN"
 
-      - name: Type Check
-        run: pnpm tsc --noEmit
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Test
-        run: pnpm test
-
-      - name: Build
-        run: pnpm build
-
-      - name: E2E smoke
-        run: pnpm test:e2e
-
-      - name: Integration tests
-        run: pnpm test:integration
-
       - name: Cache public conformance fixtures
         uses: actions/cache@v4
         with:
@@ -116,10 +98,9 @@ jobs:
           restore-keys: |
             dicom-public-fixtures-
 
-      - name: Conformance tests
-        run: pnpm test:conformance
-        env:
-          RUN_PUBLIC_CONFORMANCE: "1"
+      # Shared with the pre-push hook.
+      - name: Checks
+        run: bash scripts/hooks/pre-push.sh
 
       # PR-only: semantic-release returns early on a pull request, but on a push
       # it runs verifyAuth — a push --dry-run needing write, which this job's
