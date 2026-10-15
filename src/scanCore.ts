@@ -162,14 +162,13 @@ export type ScanContext = {
 }
 
 /**
- * Backpressure and abort state for a single scan.
+ * Backpressure state for a single scan.
  *
  * When the main thread signals 'stop', the feeder awaits {@link waitIfPaused}
  * before emitting the next file; 'resume' releases it. The counter is NOT
  * affected by backpressure — it always runs at max speed.
  */
 export class ScanController {
-  keepScanning = true
   private pauseResolve: (() => void) | null = null
   private pausePromise: Promise<void> | null = null
 
@@ -189,12 +188,11 @@ export class ScanController {
     }
   }
 
-  /** If paused, wait until resumed. Returns false if scanning was aborted. */
-  async waitIfPaused(): Promise<boolean> {
+  /** If paused, wait until resumed. */
+  async waitIfPaused(): Promise<void> {
     if (this.pausePromise) {
       await this.pausePromise
     }
-    return this.keepScanning
   }
 }
 
@@ -548,8 +546,6 @@ export async function scanDirectory(
     prefix: string,
   ): Promise<void> {
     for await (const entry of dirHandle.values()) {
-      if (!controller.keepScanning) return
-
       if (entry.kind === 'file') {
         const key = `${prefix}/${entry.name}`
 
@@ -581,8 +577,6 @@ export async function scanDirectory(
     prefix: string,
   ): Promise<void> {
     for await (const entry of dirHandle.values()) {
-      if (!controller.keepScanning) return
-
       if (entry.kind === 'file') {
         const key = `${prefix}/${entry.name}`
         const prev = previousIndex ? previousIndex[key] : undefined
@@ -616,7 +610,7 @@ export async function scanDirectory(
             errors: [safeReadErrorMessage(readError)],
             previousFileInfo: prev,
           } satisfies FileScanMsg)
-          if (!(await controller.waitIfPaused())) return
+          await controller.waitIfPaused()
           continue
         }
 
@@ -660,7 +654,7 @@ export async function scanDirectory(
         }
 
         // Backpressure: may pause the feeder for memory control
-        if (!(await controller.waitIfPaused())) return
+        await controller.waitIfPaused()
       } else if (entry.kind === 'directory') {
         await feeder(
           entry as FileSystemDirectoryHandle,
@@ -720,8 +714,6 @@ export async function scanDirectoryNode(
       entries.sort((a, b) => a.name.localeCompare(b.name))
 
       for (const entry of entries) {
-        if (!controller.keepScanning) return
-
         if (entry.isFile()) {
           const key = `${prefix}/${entry.name}`
 
@@ -751,8 +743,6 @@ export async function scanDirectoryNode(
       entries.sort((a, b) => a.name.localeCompare(b.name))
 
       for (const entry of entries) {
-        if (!controller.keepScanning) return
-
         if (entry.isFile()) {
           const filePath = path.join(currentPath, entry.name)
           const key = `${prefix}/${entry.name}`
@@ -786,7 +776,7 @@ export async function scanDirectoryNode(
               errors: [safeReadErrorMessage(readError)],
               previousFileInfo: prev,
             } satisfies FileScanMsg)
-            if (!(await controller.waitIfPaused())) return
+            await controller.waitIfPaused()
             continue
           }
 
@@ -838,7 +828,7 @@ export async function scanDirectoryNode(
           }
 
           // Backpressure: may pause the feeder for memory control
-          if (!(await controller.waitIfPaused())) return
+          await controller.waitIfPaused()
         } else if (entry.isDirectory()) {
           await feeder(
             path.join(currentPath, entry.name),
