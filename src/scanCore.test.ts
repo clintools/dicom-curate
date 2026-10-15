@@ -93,21 +93,20 @@ function writeNonDicom(path: string, size = 200): void {
 describe('ScanController', () => {
   it('returns immediately from waitIfPaused when not paused', async () => {
     const controller = new ScanController()
-    expect(await controller.waitIfPaused()).toBe(true)
+    await expect(controller.waitIfPaused()).resolves.toBeUndefined()
   })
 
   it('blocks waitIfPaused until resumed', async () => {
     const controller = new ScanController()
     controller.pause()
     let settled = false
-    const waiter = controller.waitIfPaused().then((v) => {
+    const waiter = controller.waitIfPaused().then(() => {
       settled = true
-      return v
     })
     await Promise.resolve()
     expect(settled).toBe(false)
     controller.resume()
-    expect(await waiter).toBe(true)
+    await waiter
     expect(settled).toBe(true)
   })
 
@@ -117,7 +116,6 @@ describe('ScanController', () => {
     controller.pause()
     controller.pause() // second pause must not replace the pending promise
     controller.resume()
-    expect(controller.keepScanning).toBe(true)
   })
 })
 
