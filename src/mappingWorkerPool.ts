@@ -953,6 +953,7 @@ function handleWorkerInitFailure(mappingWorker: Worker, error: string): void {
  * (replacement after crash).
  */
 async function createMappingWorker(): Promise<Worker> {
+  const runId = currentRunId
   const mappingWorker = await createWorker(
     new URL('./applyMappingsWorker.js', import.meta.url),
     { type: 'module' },
@@ -1005,7 +1006,10 @@ async function createMappingWorker(): Promise<Worker> {
 
   mappingWorker.addEventListener('message', (event) => {
     // Ignore messages from workers after abort — the pool is torn down.
-    if (aborted) return
+    // terminate() does not discard replies already queued, and the next run
+    // resets `aborted`, so only the run check stops a previous run's worker
+    // reaching this run's uploader or pool.
+    if (aborted || runId !== currentRunId) return
 
     // Any message from a worker means mapping progress is being made.
     // Recorded before the lookup/upload branches below so a consumer upload

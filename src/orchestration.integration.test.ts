@@ -146,14 +146,8 @@ describe('curateMany orchestration with real workers', () => {
     // Real workers were hard-terminated. A fresh run over the same input must
     // still complete — partial output from the aborted run is re-processed.
     //
-    // KNOWN RACE (#302): mappingWorkerPool holds its state at module level and
-    // the next run resets `aborted` to false. A message still in flight from a
-    // terminated run-1 worker can therefore pass the `if (aborted) return`
-    // guard in the message handler and act on run-2 state — not just the
-    // counters, but pushing the terminated worker back onto
-    // availableMappingWorkers, so run 2 may dispatch to a dead thread and
-    // stall. If this assertion ever flakes, that is the cause — it is a
-    // product bug, not a test bug.
+    // Run-1 replies still queued when run 2 starts must not reach run-2 state;
+    // the pool's run-id check drops them.
     const { result } = await runCapturingProgress(
       integrationOptions(inputDir, outputDir, integrationSpec(), {
         workerCount: 2,

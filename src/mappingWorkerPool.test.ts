@@ -1064,6 +1064,33 @@ describe('dispatchMappingJobs', () => {
     ).toHaveLength(1)
   })
 
+  // terminate() does not discard replies already queued on the parent's port,
+  // and the next run resets the abort flag before they are delivered.
+  it("ignores a previous run's worker messages once the next run has started", async () => {
+    configureMockMappingWorkers(['normal', 'normal'])
+
+    await pool.initializeMappingWorkers(false, undefined, () => {}, 1)
+    const staleWorker = getMockWorkersCreated()[0]
+    pool.terminateAllWorkers()
+
+    await pool.initializeMappingWorkers(false, undefined, () => {}, 1)
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(false)
+    const upload = vi.fn(async () => ({ etag: 'etag' }))
+    pool.setCustomUploader({ upload } as any)
+    const secondRunWorker = pool.availableMappingWorkers[0]
+
+    const emit = (data: any) => (staleWorker as any).emitMessage(data)
+    emit({ response: 'heartbeat' })
+    emit({ response: 'upload', key: 'k', stream: null, size: 0 })
+    await settle()
+
+    expect(upload).not.toHaveBeenCalled()
+    expect(pool.availableMappingWorkers).toEqual([secondRunWorker])
+    expect(getMockWorkersCreated()).toHaveLength(2)
+    expect(pool.getPendingReplacements()).toBe(0)
+  })
+
   /**
    * recoverCrashedWorker returns early for a worker holding no file, so neither
    * death signal does anything by itself for one that died idle. Without a path
