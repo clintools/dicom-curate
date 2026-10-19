@@ -438,6 +438,8 @@ result.excluded // => 'pre' | 'post' | undefined
 
 ## Testing
 
+Development requires Node.js 22.13 or newer (pnpm 11's minimum); CI runs Node 24. The published package supports Node.js 20+.
+
 Vitest is split into four projects in `vitest.config.ts`:
 
 | Command | Project | Location | Purpose |
