@@ -1091,6 +1091,48 @@ describe('dispatchMappingJobs', () => {
     expect(pool.getPendingReplacements()).toBe(0)
   })
 
+  // A worker built for an aborted run drops every message under the run check,
+  // so pooling it leaves any file sent to it unfinished until the stall watchdog.
+  it('discards workers whose run was aborted during pool setup', async () => {
+    configureMockMappingWorkers(['normal', 'normal'])
+
+    pauseWorkerCreation = true
+    const firstRunInit = pool.initializeMappingWorkers(
+      false,
+      undefined,
+      () => {},
+      1,
+    )
+    await waitFor(() => resumeWorkerCreation !== null)
+    pool.terminateAllWorkers()
+    pauseWorkerCreation = false
+    resumeWorkerCreation!()
+    resumeWorkerCreation = null
+    await firstRunInit
+    const staleWorker = getMockWorkersCreated()[0]
+
+    const secondRunMessages: any[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => secondRunMessages.push(msg),
+      1,
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(true)
+    pool.filesToProcess.push(queueFile('a.dcm'), queueFile('b.dcm'))
+
+    expect(staleWorker.terminated).toBe(true)
+    expect(pool.availableMappingWorkers).not.toContain(
+      staleWorker as unknown as Worker,
+    )
+
+    await pool.dispatchMappingJobs()
+    await waitFor(() =>
+      secondRunMessages.some((m: any) => m.response === 'done'),
+    )
+  })
+
   /**
    * recoverCrashedWorker returns early for a worker holding no file, so neither
    * death signal does anything by itself for one that died idle. Without a path
