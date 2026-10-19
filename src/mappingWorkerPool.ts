@@ -310,6 +310,7 @@ export async function initializeMappingWorkers(
   resetDispatchFailureState()
   dispatchProbeActive = false
   currentRunId += 1
+  const runId = currentRunId
   rejectRunCallback = rejectCb
   mapResultsList = skipCollectingMappings ? undefined : []
   filesMapped = 0
@@ -362,7 +363,10 @@ export async function initializeMappingWorkers(
       creationFailure = { reason: result.reason }
     }
   }
-  if (creationFailure) {
+  // These workers carry this run's ID, so once it is superseded they drop every
+  // message and any file dispatched to one waits for the stall watchdog.
+  const superseded = aborted || runId !== currentRunId
+  if (creationFailure || superseded) {
     for (const worker of workers) {
       try {
         worker.terminate()
@@ -370,7 +374,8 @@ export async function initializeMappingWorkers(
         // Worker may already be terminated
       }
     }
-    throw creationFailure.reason
+    if (creationFailure && !superseded) throw creationFailure.reason
+    return
   }
 
   // A worker whose 'initError' already arrived was terminated by
@@ -952,6 +957,8 @@ function handleWorkerInitFailure(mappingWorker: Worker, error: string): void {
  * (replacement after crash).
  */
 async function createMappingWorker(): Promise<Worker> {
+  // Read before the await: a worker that finishes creation after a teardown
+  // must belong to the run that requested it, not the next one.
   const runId = currentRunId
   const mappingWorker = await createWorker(
     new URL('./applyMappingsWorker.js', import.meta.url),
