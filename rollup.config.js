@@ -16,11 +16,14 @@ const basePlugins = [
   nodePolyfills(),
 ]
 
-const umdPlugins = [
+// preserveSource inlines each worker as a function and drops the first and last
+// lines of its source at runtime. Terser joins lines, so a minified build must
+// use base64 instead or it deletes real worker code.
+const umdPlugins = (preserveSource) => [
   webWorkerLoader({
     targetPlatform: 'browser',
     inline: true, // Inline worker code as blob URLs
-    preserveSource: true, // Keep the source code readable
+    preserveSource,
     sourcemap: false,
     extensions: ['.js', '.ts'], // Handle TypeScript files
   }),
@@ -60,7 +63,7 @@ export default [
       '@aws-sdk/client-s3',
       '@aws-sdk/lib-storage',
     ],
-    plugins: umdPlugins,
+    plugins: umdPlugins(true),
   },
 
   // UMD build - minified
@@ -89,6 +92,8 @@ export default [
       '@aws-sdk/lib-storage',
     ],
     treeshake: true,
-    plugins: [...umdPlugins, terser()],
+    // The base64 loader decodes with atob, which yields bytes, not UTF-8
+    // characters, so any non-ASCII in the workers would be silently corrupted.
+    plugins: [...umdPlugins(false), terser({ format: { ascii_only: true } })],
   },
 ]
