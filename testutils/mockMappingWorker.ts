@@ -11,6 +11,9 @@ export type MockWorkerBehavior =
   | 'crash-onerror'
   | 'crash-exit'
   | 'crash-onerror-and-exit'
+  // Fires onerror with a plain Event, as a browser does when the worker
+  // script fails to fetch or parse.
+  | 'load-failure'
   | 'hang'
   | 'unknown-response'
   // Emits an unrecognised message while sitting idle in the pool, before it
@@ -137,6 +140,14 @@ export class MockWorker {
             this.onerror({
               message: 'Simulated worker crash (onerror)',
             } as unknown as Event)
+          }
+        }, 0)
+        break
+      }
+      case 'load-failure': {
+        setTimeout(() => {
+          if (!this.terminated && this.onerror) {
+            this.onerror(new Event('error'))
           }
         }, 0)
         break

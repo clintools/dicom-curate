@@ -13,6 +13,7 @@ import type {
 } from './applyMappingsWorker'
 import { safeSerializeError } from './applyMappingsWorker'
 import { delay } from './delay'
+import { describeWorkerError } from './describeWorkerError'
 import { phiSafeToken } from './hash'
 import { getHttpInputHeaders, getHttpOutputHeaders } from './httpHeaders'
 import { serializeMappingOptions } from './serializeMappingOptions'
@@ -961,10 +962,7 @@ async function createMappingWorker(): Promise<Worker> {
   // The previous `onerror = console.error` only logged and did not recover
   // the worker slot, causing curateMany to hang.
   mappingWorker.onerror = (event) => {
-    const errorMessage =
-      'message' in event
-        ? (event as { message: string }).message
-        : `Worker error: ${String(event)}`
+    const errorMessage = describeWorkerError(event)
     if (workerCurrentFile.has(mappingWorker)) {
       recoverCrashedWorker(mappingWorker, errorMessage)
       return

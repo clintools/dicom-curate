@@ -604,6 +604,28 @@ describe('curateMany', () => {
     expect(mappingWorkerPool.terminateAllWorkers).not.toHaveBeenCalled()
   })
 
+  it('names a scan worker script that failed to load', async () => {
+    const scanWorker = makeMockScanWorker()
+    ;(
+      workerModule.createWorker as MockedFunction<
+        typeof workerModule.createWorker
+      >
+    ).mockResolvedValueOnce(scanWorker as unknown as Worker)
+
+    const promise = curateMany({
+      inputType: 'path',
+      inputDirectory: '/tmp/curate-many-test',
+      curationSpec: 'none',
+    } as any)
+
+    await flushTicks()
+    scanWorker.onerror!(new Event('error'))
+
+    await expect(promise).rejects.toThrow(
+      'Scan worker crashed: Worker script failed to load or parse',
+    )
+  })
+
   // The watchdog's no-mapping-work branch also holds during start-up and
   // permanently for an inputType that starts no scanner. Settling such a run is
   // right, but naming a component that never ran misdirects the operator.

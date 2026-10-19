@@ -2,6 +2,7 @@ import picomatch from 'picomatch'
 import { composeSpecs } from './composeSpecs'
 import { extractColumnMappings, type TColumnMappings } from './csvMapping'
 import { curateOne } from './curateOne'
+import { describeWorkerError } from './describeWorkerError'
 import {
   dispatchMappingJobs,
   filesToProcess,
@@ -90,11 +91,7 @@ async function initializeFileListWorker(
 
   fileListWorker.onerror = (error) => {
     console.error('Scan worker crashed:', error)
-    failRun(
-      new Error(
-        `Scan worker crashed: ${'message' in error ? (error as { message: string }).message : String(error)}`,
-      ),
-    )
+    failRun(new Error(`Scan worker crashed: ${describeWorkerError(error)}`))
   }
 
   // Node worker_threads reports some deaths (OOM kill, unhandled rejection in
