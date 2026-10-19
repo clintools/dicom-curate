@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Pre-push hook — the CI checks. CI runs this script too
-# (.github/workflows/ci.yml), so a push that passes here passes CI.
+# Pre-push hook. CI runs this script too (.github/workflows/ci.yml), but the
+# hook checks the working tree, not the pushed commits.
 
 set -euo pipefail
 
@@ -10,27 +10,41 @@ cd "$REPO_ROOT"
 # shellcheck source=scripts/hooks/lib.sh
 source "$REPO_ROOT/scripts/hooks/lib.sh"
 
-skip_if_merge_or_rebase
+# A stray MERGE_HEAD or rebase dir in CI must not pass the checks unrun.
+[[ -n "${CI:-}" ]] || skip_if_merge_or_rebase
 
-echo "🔹 Running typecheck..."
+# Collapsible per-check log groups in GitHub Actions.
+section() {
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    [[ -n "${in_group:-}" ]] && echo "::endgroup::"
+    echo "::group::$1"
+    in_group=1
+  else
+    echo "🔹 $1..."
+  fi
+}
+
+section "Typecheck"
 pnpm tsc --noEmit
 
-echo "🔹 Running lint..."
+section "Lint"
 pnpm lint
 
-echo "🔹 Running unit tests..."
+section "Unit tests"
 pnpm test
 
-echo "🔹 Running build..."
+section "Build"
 pnpm build
 
-echo "🔹 Running E2E smoke tests..."
+section "E2E smoke tests"
 pnpm test:e2e
 
-echo "🔹 Running integration tests..."
+section "Integration tests"
 pnpm test:integration
 
-echo "🔹 Running conformance tests..."
-RUN_PUBLIC_CONFORMANCE=1 pnpm test:conformance
+# RUN_PUBLIC_CONFORMANCE=0 skips the public suite, which needs network on first run.
+section "Conformance tests"
+RUN_PUBLIC_CONFORMANCE="${RUN_PUBLIC_CONFORMANCE:-1}" pnpm test:conformance
 
+[[ -n "${in_group:-}" ]] && echo "::endgroup::"
 echo "✓ Pre-push validation completed"

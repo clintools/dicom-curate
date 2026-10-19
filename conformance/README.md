@@ -42,7 +42,7 @@ We do **not** require violations to disappear after curate. We only require the 
 | **Fail — introduced** | Curate (or the test setup) added at least one normalised `dciodvfy` line not present before. Printed as `introduced` in the assertion message. |
 | **Fail — baseline drift** | Live `dciodvfy` on the fixture differs from the JSON in `baselines/` (extra or missing lines). Usually means `dicom3tools` was upgraded, or `dicom-synth` output changed. Refresh baselines after confirming the change is expected. |
 | **Skipped** | No `dciodvfy` found via `DCIODVFY_PATH`, `PATH`, or `.cache-dciodvfy/extracted/usr/bin/dciodvfy` — build [dicom3tools](https://www.dclunie.com/dicom3tools.html) (see below) or set `DCIODVFY_PATH`. |
-| **Skipped (public)** | `RUN_PUBLIC_CONFORMANCE` unset (or `0`/`false`) — needs network on first run (fetched files are cached). CI sets it; local runs opt in. |
+| **Skipped (public)** | `RUN_PUBLIC_CONFORMANCE` unset (or `0`/`false`) — needs network on first run (fetched files are cached). The pre-push hook (and so CI) sets it unless already set; `RUN_PUBLIC_CONFORMANCE=0 git push` opts out. |
 | **Skipped (local)** | `CONFORMANCE_LOCAL_PATH` unset — optional private corpus; off in default CI. |
 | **Fail (local config)** | `CONFORMANCE_LOCAL_PATH` set but invalid (missing path, no `.dcm` files, etc.) — one failing test reports the error. |
 
@@ -83,7 +83,7 @@ Normalised violation keys look like `Error::</TagName(gggg,eeee)>::message` (fil
 | `dciodvfy.differential.test.ts` | Per synthetic variant: baseline drift; identity; byte copy; passthrough curate | Yes |
 | `dciodvfy.violations.test.ts` | Same four checks per declared violation class, plus guards that one fixture exists per class, that unviolated control fixtures still match the clean baseline, and that each violation baseline differs from it (declared exemptions assert equality instead, so they fail when no longer true) | Yes |
 | `dciodvfy.normalise.test.ts` | Parser normalisation only (no `dciodvfy` binary) | Yes |
-| `dciodvfy.public.test.ts` | Catalog validation + baseline presence (always); shared four-test differential suite per public case after a `beforeAll` prefetch (`RUN_PUBLIC_CONFORMANCE=1`) | Yes (env set in workflow) |
+| `dciodvfy.public.test.ts` | Catalog validation + baseline presence (always); shared four-test differential suite per public case after a `beforeAll` prefetch (`RUN_PUBLIC_CONFORMANCE=1`) | Yes (env set in `scripts/hooks/pre-push.sh`) |
 | `dciodvfy.local.test.ts` | Optional local file or directory (env) | Local test: no |
 | `localFixtures.test.ts` | Path discovery helpers (no `dciodvfy` binary) | Yes |
 
