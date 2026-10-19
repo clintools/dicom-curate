@@ -110,12 +110,16 @@ describe('ScanController', () => {
     expect(settled).toBe(true)
   })
 
-  it('pause is idempotent and resume is a no-op when not paused', () => {
+  it('pause is idempotent and resume is a no-op when not paused', async () => {
     const controller = new ScanController()
     controller.resume() // no pending pause — should be safe
     controller.pause()
+    const waiter = controller.waitIfPaused()
     controller.pause() // second pause must not replace the pending promise
     controller.resume()
+    // A replaced promise would strand this waiter's resolver and time out.
+    await expect(waiter).resolves.toBeUndefined()
+    await expect(controller.waitIfPaused()).resolves.toBeUndefined()
   })
 })
 
