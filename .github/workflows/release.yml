@@ -72,4 +72,7 @@ jobs:
       - name: Release with semantic-release
         run: npx semantic-release
         env:
+          # `prepare` installs the hooks; without this each release push reruns
+          # the pre-push checks, and a failure can leave a release commit untagged.
+          HUSKY: 0
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
