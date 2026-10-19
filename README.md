@@ -33,6 +33,19 @@ They can be consumed as follows:
 
 > Use the unminified UMD build (/umd) is primarily intended for demos and debugging.
 
+### Bundlers
+
+The ESM build loads its workers with `new URL('./<worker>.js', import.meta.url)`. In dev mode, Vite below 8 pre-bundles `dicom-curate` into `node_modules/.vite/deps/`, where those worker files do not exist, so every worker 404s and `curateMany` reports `Worker script failed to load or parse`. Exclude it from pre-bundling:
+
+```js
+// vite.config.js
+export default {
+  optimizeDeps: { exclude: ['dicom-curate'] },
+}
+```
+
+Production builds and Vite 8 are unaffected.
+
 ### Examples
 
 Converting a nested input folder structure containing DICOM files to a cleaned output folder destination (note: this uses a browser API only supported in Chrome and Edge browsers):

@@ -176,6 +176,27 @@ describe('worker crash recovery', () => {
     expect(getMockWorkersCreated().length).toBeGreaterThan(WORKER_COUNT)
   })
 
+  it('reports a worker script that failed to load as a mapping error', async () => {
+    configureMockMappingWorkers(makeBehaviors('load-failure'))
+
+    const result = await curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      () => {},
+    )
+
+    expect(result.response).toBe('done')
+    const loadErrors = result.mapResultsList!.filter((r) =>
+      r.errors?.some((e) => e.includes('Worker script failed to load')),
+    )
+    expect(loadErrors.length).toBeGreaterThanOrEqual(1)
+  })
+
   it('recovers from unexpected exit (non-zero code)', async () => {
     configureMockMappingWorkers(makeBehaviors('crash-exit'))
 
