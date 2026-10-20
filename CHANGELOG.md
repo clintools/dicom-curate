@@ -1,3 +1,11 @@
+## [0.42.2](https://github.com/clintools/dicom-curate/compare/v0.42.1...v0.42.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* discard mapping workers built for a run aborted during pool setup ([b9065ef](https://github.com/clintools/dicom-curate/commit/b9065ef8c240ae7e4dcc0132ab22e853b99a43df))
+* drop mapping worker messages from a previous run ([f3d6521](https://github.com/clintools/dicom-curate/commit/f3d65214c383d58b767f254f27ed3e407875c325))
+
 ## [0.42.1](https://github.com/clintools/dicom-curate/compare/v0.42.0...v0.42.1) (2026-10-20)
 
 
