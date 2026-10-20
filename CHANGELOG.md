@@ -1,3 +1,12 @@
+## [0.42.1](https://github.com/clintools/dicom-curate/compare/v0.42.0...v0.42.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* assign inlined UMD workers to separate globals ([28f21bf](https://github.com/clintools/dicom-curate/commit/28f21bfb4b3d6ecd11fd88c6a927c8c698ddd52c))
+* explain worker script load failures ([006b8c1](https://github.com/clintools/dicom-curate/commit/006b8c117bd6d536bf0ef43bf2178b85e8473c53))
+* inline minified UMD workers as base64 ([19f832a](https://github.com/clintools/dicom-curate/commit/19f832a8ed06bf1f0b6402e91bf5c0523b5696c1))
+
 # [0.42.0](https://github.com/clintools/dicom-curate/compare/v0.41.2...v0.42.0) (2026-08-23)
 
 
