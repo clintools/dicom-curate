@@ -1133,6 +1133,37 @@ describe('dispatchMappingJobs', () => {
     )
   })
 
+  // curateMany rejects on abort at once, so a caller can restart before the
+  // aborted setup settles. The restart clears `aborted`; only the run ID check
+  // keeps the stale worker out of the new pool.
+  it('discards workers whose run was aborted and restarted during pool setup', async () => {
+    configureMockMappingWorkers(['normal', 'normal'])
+
+    pauseWorkerCreation = true
+    const firstRunInit = pool.initializeMappingWorkers(
+      false,
+      undefined,
+      () => {},
+      1,
+    )
+    await waitFor(() => resumeWorkerCreation !== null)
+    pool.terminateAllWorkers()
+    const resumeFirstRun = resumeWorkerCreation!
+    resumeWorkerCreation = null
+    pauseWorkerCreation = false
+
+    await pool.initializeMappingWorkers(false, undefined, () => {}, 1)
+    resumeFirstRun()
+    await firstRunInit
+    const staleWorker = getMockWorkersCreated()[1]
+
+    expect(staleWorker.terminated).toBe(true)
+    expect(pool.availableMappingWorkers).not.toContain(
+      staleWorker as unknown as Worker,
+    )
+    expect(pool.availableMappingWorkers).toHaveLength(1)
+  })
+
   /**
    * recoverCrashedWorker returns early for a worker holding no file, so neither
    * death signal does anything by itself for one that died idle. Without a path
