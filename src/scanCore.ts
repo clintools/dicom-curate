@@ -1,3 +1,5 @@
+import type { Dirent } from 'fs'
+import { delay } from './delay'
 import { loadS3Client } from './s3Client'
 import type { TFileInfo, TFileInfoIndex, TS3BucketOptions } from './types'
 
@@ -50,7 +52,10 @@ export function isS3KeyExcludedByName(
  * server-bound logs. The raw path/name is carried separately in `fileInfo`
  * so it appears only in the private (input) log.
  */
-export function safeReadErrorMessage(error: unknown): string {
+export function safeReadErrorMessage(
+  error: unknown,
+  what: 'file' | 'directory' = 'file',
+): string {
   let detail = 'unknown error'
   if (error && typeof error === 'object') {
     const { code, name } = error as { code?: unknown; name?: unknown }
@@ -60,7 +65,51 @@ export function safeReadErrorMessage(error: unknown): string {
       detail = name
     }
   }
-  return `Unable to read file (filesystem error): ${detail}`
+  const action = what === 'directory' ? 'list directory' : 'read file'
+  return `Unable to ${action} (filesystem error): ${detail}`
+}
+
+/** Waits between attempts to list a directory; its length is the retry count. */
+export const LIST_RETRY_DELAYS_MS = [500, 1000, 2000]
+
+/** A directory still could not be listed after every retry. */
+class DirectoryListingError extends Error {
+  constructor(readonly listError: unknown) {
+    super(listError instanceof Error ? listError.message : String(listError))
+  }
+}
+
+/** Wait out the backoff for a failed listing, or give up once it is spent. */
+async function backOffOrThrow(attempt: number, error: unknown): Promise<void> {
+  if (attempt >= LIST_RETRY_DELAYS_MS.length) {
+    throw new DirectoryListingError(error)
+  }
+  await delay(LIST_RETRY_DELAYS_MS[attempt])
+}
+
+/**
+ * Yield a directory's entries, re-listing from the start after a failure and
+ * skipping names already yielded, so a mid-listing failure loses nothing.
+ */
+async function* listEntriesWithRetry(
+  dir: FileSystemDirectoryHandle,
+): AsyncGenerator<FileSystemHandle> {
+  const yielded = new Set<string>()
+  let attempt = 0
+  for (;;) {
+    try {
+      for await (const entry of dir.values()) {
+        if (yielded.has(entry.name)) continue
+        yielded.add(entry.name)
+        // Progress earns fresh retries: only a stalled listing exhausts them.
+        attempt = 0
+        yield entry
+      }
+      return
+    } catch (error) {
+      await backOffOrThrow(attempt++, error)
+    }
+  }
 }
 
 export type FileScanMsg =
@@ -86,6 +135,8 @@ export type FileScanMsg =
        * `fileInfo` so it stays in the private (input) log.
        */
       errors?: string[]
+      /** Set when `fileInfo` names a directory that could not be listed. */
+      scanTarget?: 'directory'
       previousFileInfo?: {
         size?: number
         mtime?: string
@@ -532,6 +583,17 @@ export async function scanDirectory(
   // single-threaded; the counter increments, the feeder decrements on files
   // that fail the full filter.
   let totalDiscovered = 0
+  // Files the feeder has emitted: the exact total, and the floor for the
+  // reported total once the counter has failed.
+  let filesFed = 0
+  let counterFailed = false
+  const emitCount = () =>
+    emit({
+      response: 'count',
+      totalDiscovered: counterFailed
+        ? Math.max(totalDiscovered, filesFed)
+        : totalDiscovered,
+    } satisfies FileScanMsg)
 
   /**
    * Counter: traverses the directory tree using only readdir + name filter.
@@ -545,7 +607,7 @@ export async function scanDirectory(
     dirHandle: FileSystemDirectoryHandle,
     prefix: string,
   ): Promise<void> {
-    for await (const entry of dirHandle.values()) {
+    for await (const entry of listEntriesWithRetry(dirHandle)) {
       if (entry.kind === 'file') {
         const key = `${prefix}/${entry.name}`
 
@@ -576,7 +638,7 @@ export async function scanDirectory(
     dirHandle: FileSystemDirectoryHandle,
     prefix: string,
   ): Promise<void> {
-    for await (const entry of dirHandle.values()) {
+    for await (const entry of listEntriesWithRetry(dirHandle)) {
       if (entry.kind === 'file') {
         const key = `${prefix}/${entry.name}`
         const prev = previousIndex ? previousIndex[key] : undefined
@@ -592,10 +654,7 @@ export async function scanDirectory(
           // which keeps it in the private (input) log.
           if (cheapFilterNameOnly(entry.name, key, filters)) {
             totalDiscovered--
-            emit({
-              response: 'count',
-              totalDiscovered,
-            } satisfies FileScanMsg)
+            emitCount()
           }
           emit({
             response: 'scanAnomalies',
@@ -616,6 +675,7 @@ export async function scanDirectory(
 
         const fileAnomalies: string[] = []
         if (await shouldProcessFile(file, fileAnomalies, key, filters)) {
+          filesFed++
           emit({
             response: 'file',
             fileInfo: {
@@ -627,15 +687,13 @@ export async function scanDirectory(
             },
             previousFileInfo: prev,
           } satisfies FileScanMsg)
+          if (counterFailed) emitCount()
         } else {
           // File failed full filter. If it would have passed the counter's
           // name-only filter, the counter already counted it — correct.
           if (cheapFilterNameOnly(entry.name, key, filters)) {
             totalDiscovered--
-            emit({
-              response: 'count',
-              totalDiscovered,
-            } satisfies FileScanMsg)
+            emitCount()
           }
           if (fileAnomalies.length > 0) {
             emit({
@@ -656,10 +714,29 @@ export async function scanDirectory(
         // Backpressure: may pause the feeder for memory control
         await controller.waitIfPaused()
       } else if (entry.kind === 'directory') {
-        await feeder(
-          entry as FileSystemDirectoryHandle,
-          prefix + '/' + entry.name,
-        )
+        try {
+          await feeder(
+            entry as FileSystemDirectoryHandle,
+            prefix + '/' + entry.name,
+          )
+        } catch (error) {
+          if (!(error instanceof DirectoryListingError)) throw error
+          // A sub-directory that cannot be listed must NOT abort the scan.
+          // Report it and carry on with its siblings.
+          emit({
+            response: 'scanAnomalies',
+            fileInfo: {
+              path: prefix,
+              name: entry.name,
+              size: 0,
+              kind: 'handle',
+              fileHandle: entry as unknown as FileSystemFileHandle,
+            },
+            anomalies: [],
+            errors: [safeReadErrorMessage(error.listError, 'directory')],
+            scanTarget: 'directory',
+          } satisfies FileScanMsg)
+        }
       }
     }
   }
@@ -668,13 +745,21 @@ export async function scanDirectory(
     // Run counter and feeder concurrently. The counter finishes first
     // (~8x faster), giving an accurate total. The feeder runs for the
     // duration of processing, subject to backpressure.
-    await Promise.all([counter(dir, dir.name), feeder(dir, dir.name)])
+    await Promise.all([
+      // The count is only an estimate: its failure must not end a scan whose
+      // feeder is healthy.
+      counter(dir, dir.name).catch(() => {
+        counterFailed = true
+        emitCount()
+      }),
+      feeder(dir, dir.name),
+    ])
 
-    // Final count sync — at this point totalDiscovered is exact
-    // (counter finished + feeder corrections applied).
+    // Final count sync: exact even when the counter failed or the feeder
+    // skipped a directory the counter had counted.
     emit({
       response: 'count',
-      totalDiscovered,
+      totalDiscovered: filesFed,
     } satisfies FileScanMsg)
     emit({ response: 'done' } satisfies FileScanMsg)
   } catch (error) {
@@ -699,10 +784,31 @@ export async function scanDirectoryNode(
   // single-threaded; the counter increments, the feeder decrements on files
   // that fail the full filter.
   let totalDiscovered = 0
+  // Files the feeder has emitted: the exact total, and the floor for the
+  // reported total once the counter has failed.
+  let filesFed = 0
+  let counterFailed = false
+  const emitCount = () =>
+    emit({
+      response: 'count',
+      totalDiscovered: counterFailed
+        ? Math.max(totalDiscovered, filesFed)
+        : totalDiscovered,
+    } satisfies FileScanMsg)
 
   try {
     const fs = await import('fs/promises')
     const path = await import('path')
+
+    async function readdirWithRetry(currentPath: string): Promise<Dirent[]> {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await fs.readdir(currentPath, { withFileTypes: true })
+        } catch (error) {
+          await backOffOrThrow(attempt, error)
+        }
+      }
+    }
 
     /**
      * Counter: traverses using readdir + name filter only.
@@ -710,7 +816,7 @@ export async function scanDirectoryNode(
      * Emits 'count' at max speed.
      */
     async function counter(currentPath: string, prefix: string): Promise<void> {
-      const entries = await fs.readdir(currentPath, { withFileTypes: true })
+      const entries = await readdirWithRetry(currentPath)
       entries.sort((a, b) => a.name.localeCompare(b.name))
 
       for (const entry of entries) {
@@ -739,7 +845,7 @@ export async function scanDirectoryNode(
      * counter's estimate when files fail the full filter.
      */
     async function feeder(currentPath: string, prefix: string): Promise<void> {
-      const entries = await fs.readdir(currentPath, { withFileTypes: true })
+      const entries = await readdirWithRetry(currentPath)
       entries.sort((a, b) => a.name.localeCompare(b.name))
 
       for (const entry of entries) {
@@ -758,10 +864,7 @@ export async function scanDirectoryNode(
             // in fileInfo, keeping it in the private (input) log.
             if (cheapFilterNameOnly(entry.name, key, filters)) {
               totalDiscovered--
-              emit({
-                response: 'count',
-                totalDiscovered,
-              } satisfies FileScanMsg)
+              emitCount()
             }
             emit({
               response: 'scanAnomalies',
@@ -791,6 +894,7 @@ export async function scanDirectoryNode(
               filters,
             )
           ) {
+            filesFed++
             emit({
               response: 'file',
               fileInfo: {
@@ -802,14 +906,12 @@ export async function scanDirectoryNode(
               },
               previousFileInfo: prev,
             } satisfies FileScanMsg)
+            if (counterFailed) emitCount()
           } else {
             // Correct the counter's estimate if needed
             if (cheapFilterNameOnly(entry.name, key, filters)) {
               totalDiscovered--
-              emit({
-                response: 'count',
-                totalDiscovered,
-              } satisfies FileScanMsg)
+              emitCount()
             }
             if (fileAnomalies.length > 0) {
               emit({
@@ -830,10 +932,27 @@ export async function scanDirectoryNode(
           // Backpressure: may pause the feeder for memory control
           await controller.waitIfPaused()
         } else if (entry.isDirectory()) {
-          await feeder(
-            path.join(currentPath, entry.name),
-            prefix + '/' + entry.name,
-          )
+          const dirFullPath = path.join(currentPath, entry.name)
+          try {
+            await feeder(dirFullPath, prefix + '/' + entry.name)
+          } catch (error) {
+            if (!(error instanceof DirectoryListingError)) throw error
+            // A sub-directory that cannot be listed must NOT abort the scan.
+            // Report it and carry on with its siblings.
+            emit({
+              response: 'scanAnomalies',
+              fileInfo: {
+                path: prefix,
+                name: entry.name,
+                size: 0,
+                kind: 'path',
+                fullPath: dirFullPath,
+              },
+              anomalies: [],
+              errors: [safeReadErrorMessage(error.listError, 'directory')],
+              scanTarget: 'directory',
+            } satisfies FileScanMsg)
+          }
         }
       }
     }
@@ -841,12 +960,21 @@ export async function scanDirectoryNode(
     const dirName = path.basename(dirPath)
 
     // Run counter and feeder concurrently
-    await Promise.all([counter(dirPath, dirName), feeder(dirPath, dirName)])
+    await Promise.all([
+      // The count is only an estimate: its failure must not end a scan whose
+      // feeder is healthy.
+      counter(dirPath, dirName).catch(() => {
+        counterFailed = true
+        emitCount()
+      }),
+      feeder(dirPath, dirName),
+    ])
 
-    // Final count sync
+    // Final count sync: exact even when the counter failed or the feeder
+    // skipped a directory the counter had counted.
     emit({
       response: 'count',
-      totalDiscovered,
+      totalDiscovered: filesFed,
     } satisfies FileScanMsg)
     emit({ response: 'done' } satisfies FileScanMsg)
   } catch (error) {
