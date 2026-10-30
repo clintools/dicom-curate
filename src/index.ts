@@ -147,8 +147,18 @@ async function initializeFileListWorker(
         }
         case 'scanAnomalies': {
           // Handle scan anomalies separately - they don't go to processing
-          const { fileInfo: anomalyFileInfo, anomalies, errors } = event.data
-          scanAnomalies.push({ fileInfo: anomalyFileInfo, anomalies, errors })
+          const {
+            fileInfo: anomalyFileInfo,
+            anomalies,
+            errors,
+            scanTarget,
+          } = event.data
+          scanAnomalies.push({
+            fileInfo: anomalyFileInfo,
+            anomalies,
+            errors,
+            scanTarget,
+          })
           break
         }
         case 'count': {
