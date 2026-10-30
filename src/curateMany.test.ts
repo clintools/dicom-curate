@@ -604,6 +604,36 @@ describe('curateMany', () => {
     expect(mappingWorkerPool.terminateAllWorkers).not.toHaveBeenCalled()
   })
 
+  it('keeps the directory marker on a scan error from the scanner', async () => {
+    const scanWorker = makeMockScanWorker()
+    ;(
+      workerModule.createWorker as MockedFunction<
+        typeof workerModule.createWorker
+      >
+    ).mockResolvedValueOnce(scanWorker as unknown as Worker)
+
+    const promise = curateMany({
+      inputType: 'path',
+      inputDirectory: '/tmp/curate-many-test',
+      curationSpec: 'none',
+    } as any)
+
+    await flushTicks()
+    scanWorker.emitMessage({
+      response: 'scanAnomalies',
+      fileInfo: { path: 'root', name: 'bad', size: 0, kind: 'path' },
+      anomalies: [],
+      errors: ['Unable to list directory (filesystem error): EIO'],
+      scanTarget: 'directory',
+    })
+    emitDone()
+    await promise
+
+    expect(mappingWorkerPool.scanAnomalies).toEqual([
+      expect.objectContaining({ scanTarget: 'directory' }),
+    ])
+  })
+
   it('names a scan worker script that failed to load', async () => {
     const scanWorker = makeMockScanWorker()
     ;(
