@@ -248,6 +248,8 @@ export type TMapResults = {
   }
   anomalies: string[]
   errors: string[]
+  /** Set on a scan error whose `fileInfo` names a directory, not a file. */
+  scanTarget?: 'directory'
   /** Upload/write failures only (retryable). Separate from `errors` which
    *  contains DICOM validation issues that cannot be resolved by retrying. */
   uploadErrors?: string[]
