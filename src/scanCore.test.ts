@@ -24,10 +24,27 @@ vi.mock('./s3Client', () => ({
   }),
 }))
 
+// Backoff resolves at once; tests assert the requested waits instead.
+vi.mock('./delay', () => ({ delay: vi.fn(async () => {}) }))
+
+// Passthrough, so a test can fail chosen directory listings.
+vi.mock('fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs/promises')>()
+  return { ...actual, readdir: vi.fn(actual.readdir) }
+})
+
+const { delay } = await import('./delay')
+const fsPromises = await import('fs/promises')
+const realReaddir = (
+  await vi.importActual<typeof import('fs/promises')>('fs/promises')
+).readdir
+const readdirMock = vi.mocked(fsPromises.readdir)
+
 const {
   cheapFilterNameOnly,
   createScanHandler,
   isS3KeyExcludedByName,
+  LIST_RETRY_DELAYS_MS,
   safeReadErrorMessage,
   ScanController,
   scanDirectory,
@@ -68,6 +85,10 @@ function errorMessages(msgs: FileScanMsg[]) {
   return msgs.flatMap((m) =>
     m.response === 'scanAnomalies' && m.errors?.length ? [m] : [],
   )
+}
+
+function requestedDelays(): number[] {
+  return vi.mocked(delay).mock.calls.map(([ms]) => ms)
 }
 
 function countValues(msgs: FileScanMsg[]): number[] {
@@ -154,7 +175,17 @@ describe('scanDirectoryNode', () => {
     for (const t of trees.splice(0)) {
       rmSync(t, { recursive: true, force: true })
     }
+    readdirMock.mockImplementation(realReaddir)
+    vi.mocked(delay).mockClear()
   })
+
+  function failListing(dirPath: string, times: number): void {
+    let left = times
+    readdirMock.mockImplementation(((target: string, options: unknown) =>
+      target === dirPath && left-- > 0
+        ? Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' }))
+        : realReaddir(target, options as never)) as typeof realReaddir)
+  }
 
   function makeTree(): string {
     const root = mkdtempSync(join(tmpdir(), 'scancore-node-'))
@@ -293,6 +324,32 @@ describe('scanDirectoryNode', () => {
     },
   )
 
+  it('retries a sub-directory listing that fails once', async () => {
+    const root = makeTree()
+    failListing(join(root, 'level1'), 1)
+    const msgs = await run(root)
+    expect(errorMessages(msgs)).toHaveLength(0)
+    expect(msgs.some((m) => m.response === 'done')).toBe(true)
+    expect(fileNames(msgs)).toEqual(['nested_valid.dcm', 'root_valid.dcm'])
+    expect(requestedDelays()).toEqual([LIST_RETRY_DELAYS_MS[0]])
+  })
+
+  it('reports a sub-directory that never lists and continues with its siblings', async () => {
+    const root = makeTree()
+    failListing(join(root, 'level1', 'nested'), Infinity)
+    const msgs = await run(root)
+    expect(msgs.some((m) => m.response === 'done')).toBe(true)
+    expect(fileNames(msgs)).toEqual(['root_valid.dcm'])
+    const errorMsgs = errorMessages(msgs)
+    expect(errorMsgs).toHaveLength(1)
+    expect(errorMsgs[0].errors).toEqual([
+      'Unable to list directory (filesystem error): EIO',
+    ])
+    expect(errorMsgs[0].fileInfo.name).toBe('nested')
+    expect(errorMsgs[0].scanTarget).toBe('directory')
+    expect(countValues(msgs).at(-1)).toBe(1)
+  })
+
   it('reports a scan error rather than throwing for a missing directory', async () => {
     const msgs = await run(join(tmpdir(), 'scancore-does-not-exist-xyz'))
     expect(
@@ -301,6 +358,17 @@ describe('scanDirectoryNode', () => {
           m.response === 'error' && m.error.includes('Directory scan failed'),
       ),
     ).toBe(true)
+  })
+
+  it('retries the root listing before failing the scan', async () => {
+    const root = makeTree()
+    failListing(root, Infinity)
+    const msgs = await run(root)
+    expect(msgs.some((m) => m.response === 'error')).toBe(true)
+    // Counter and feeder each list the root.
+    expect(requestedDelays().sort((a, b) => a - b)).toEqual(
+      [...LIST_RETRY_DELAYS_MS, ...LIST_RETRY_DELAYS_MS].sort((a, b) => a - b),
+    )
   })
 })
 
@@ -322,7 +390,7 @@ describe('scanDirectory (browser FileSystem handles)', () => {
     kind = 'directory' as const
     constructor(
       public name: string,
-      private entries: Array<FakeFileHandle | FakeDirHandle>,
+      private entries: Array<FakeFileHandle | FakeDirHandle | FlakyDirHandle>,
     ) {}
     async *values() {
       for (const entry of this.entries) yield entry
@@ -377,6 +445,164 @@ describe('scanDirectory (browser FileSystem handles)', () => {
       'Unable to read file (filesystem error)',
     )
     expect(errorMsgs[0].fileInfo.name).toBe('bad.dcm')
+  })
+
+  // Throws on the values() calls numbered in `failCalls` after yielding
+  // `yieldFirst` entries (or as many as it returns for the call number), like
+  // a dropped network share.
+  class FlakyDirHandle {
+    kind = 'directory' as const
+    private calls = 0
+    constructor(
+      public name: string,
+      private entries: FakeFileHandle[],
+      private failCalls: number[],
+      private yieldFirst: number | ((call: number) => number) = 0,
+    ) {}
+    async *values() {
+      const call = ++this.calls
+      const fail = this.failCalls.includes(call)
+      const first =
+        typeof this.yieldFirst === 'function'
+          ? this.yieldFirst(call)
+          : this.yieldFirst
+      const entries = fail ? this.entries.slice(0, first) : this.entries
+      for (const entry of entries) yield entry
+      if (fail) throw new DOMException('state had changed', 'InvalidStateError')
+    }
+  }
+
+  class GatedFileHandle extends FakeFileHandle {
+    constructor(
+      name: string,
+      file: File,
+      private gate: Promise<void>,
+    ) {
+      super(name, file)
+    }
+    async getFile(): Promise<File> {
+      await this.gate
+      return super.getFile()
+    }
+  }
+
+  // Holds the feeder on the first file until the counter, which awaits only
+  // microtasks here, has walked the tree: the counter makes the first
+  // values() calls on `flaky`, the feeder the rest.
+  async function runCounterFirst(
+    flaky: FlakyDirHandle,
+    before: FakeFileHandle[] = [],
+  ) {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const msgs = run(
+      new FakeDirHandle('root', [
+        new GatedFileHandle('a.dcm', dicomFile('a.dcm'), gate),
+        ...before,
+        flaky,
+        new FakeFileHandle('z.dcm', dicomFile('z.dcm')),
+      ]),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    release()
+    return msgs
+  }
+
+  const ATTEMPTS = LIST_RETRY_DELAYS_MS.length + 1
+  const calls = (from: number, count: number) =>
+    Array.from({ length: count }, (_, i) => from + i)
+
+  afterEach(() => vi.mocked(delay).mockClear())
+
+  it.each([
+    ['the counter', [1]],
+    ['the feeder', [2]],
+  ])('recovers when %s fails to list once', async (_lister, failCalls) => {
+    const b = new FakeFileHandle('b.dcm', dicomFile('b.dcm'))
+    const msgs = await runCounterFirst(
+      new FlakyDirHandle('sub', [b], failCalls),
+    )
+    expect(errorMessages(msgs)).toHaveLength(0)
+    expect(fileNames(msgs)).toEqual(['a.dcm', 'b.dcm', 'z.dcm'])
+    expect(countValues(msgs).at(-1)).toBe(3)
+    expect(requestedDelays()).toEqual([LIST_RETRY_DELAYS_MS[0]])
+  })
+
+  it('emits each entry once when a listing fails part-way and recovers', async () => {
+    const entries = ['b.dcm', 'c.dcm'].map(
+      (name) => new FakeFileHandle(name, dicomFile(name)),
+    )
+    const msgs = await runCounterFirst(
+      new FlakyDirHandle('sub', entries, [2], 1),
+    )
+    expect(errorMessages(msgs)).toHaveLength(0)
+    expect(fileNames(msgs)).toEqual(['a.dcm', 'b.dcm', 'c.dcm', 'z.dcm'])
+  })
+
+  it("falls back to the feeder's tally when the counter never lists", async () => {
+    const b = new FakeFileHandle('b.dcm', dicomFile('b.dcm'))
+    const m = new FakeFileHandle('m.dcm', dicomFile('m.dcm'))
+    const msgs = await runCounterFirst(
+      new FlakyDirHandle('sub', [b], calls(1, ATTEMPTS)),
+      [m],
+    )
+    expect(msgs.some((msg) => msg.response === 'error')).toBe(false)
+    expect(errorMessages(msgs)).toHaveLength(0)
+    expect(fileNames(msgs)).toEqual(['a.dcm', 'b.dcm', 'm.dcm', 'z.dcm'])
+    // Counter's a.dcm and m.dcm, its failure, then one per file fed: the
+    // counter's 2 holds until the feeder passes it. Then the final sync.
+    expect(countValues(msgs)).toEqual([1, 2, 2, 2, 2, 3, 4, 4])
+  })
+
+  it('keeps retrying a listing that makes progress between failures', async () => {
+    const entries = ['b', 'c', 'd', 'e', 'f', 'g'].map(
+      (name) => new FakeFileHandle(`${name}.dcm`, dicomFile(`${name}.dcm`)),
+    )
+    // The counter lists cleanly (call 1). Each feeder call c fails after one
+    // more entry than the last, more often than a stall's retries allow.
+    const failures = ATTEMPTS + 1
+    const msgs = await runCounterFirst(
+      new FlakyDirHandle('sub', entries, calls(2, failures), (c) => c - 1),
+    )
+    expect(errorMessages(msgs)).toHaveLength(0)
+    expect(fileNames(msgs)).toHaveLength(entries.length + 2)
+    expect(requestedDelays()).toEqual(
+      Array(failures).fill(LIST_RETRY_DELAYS_MS[0]),
+    )
+  })
+
+  it('reports a sub-directory the feeder never lists and continues with its siblings', async () => {
+    const b = new FakeFileHandle('b.dcm', dicomFile('b.dcm'))
+    const msgs = await runCounterFirst(
+      new FlakyDirHandle('bad', [b], calls(2, ATTEMPTS)),
+    )
+    expect(msgs.some((m) => m.response === 'done')).toBe(true)
+    expect(fileNames(msgs)).toEqual(['a.dcm', 'z.dcm'])
+    const errorMsgs = errorMessages(msgs)
+    expect(errorMsgs).toHaveLength(1)
+    expect(errorMsgs[0].errors).toEqual([
+      'Unable to list directory (filesystem error): InvalidStateError',
+    ])
+    expect(errorMsgs[0].fileInfo.name).toBe('bad')
+    expect(errorMsgs[0].scanTarget).toBe('directory')
+    // The counter counted b.dcm; the final sync corrects it.
+    expect(countValues(msgs)).toEqual([1, 2, 3, 2])
+    expect(requestedDelays()).toEqual(LIST_RETRY_DELAYS_MS)
+  })
+
+  it('reports a sub-directory that neither lister can list', async () => {
+    const b = new FakeFileHandle('b.dcm', dicomFile('b.dcm'))
+    const msgs = await runCounterFirst(
+      new FlakyDirHandle('bad', [b], calls(1, 2 * ATTEMPTS)),
+    )
+    expect(msgs.some((m) => m.response === 'done')).toBe(true)
+    expect(fileNames(msgs)).toEqual(['a.dcm', 'z.dcm'])
+    expect(errorMessages(msgs)).toHaveLength(1)
+    expect(countValues(msgs).at(-1)).toBe(2)
+    expect(requestedDelays()).toEqual([
+      ...LIST_RETRY_DELAYS_MS,
+      ...LIST_RETRY_DELAYS_MS,
+    ])
   })
 
   it('reports a scan error when traversal throws', async () => {
