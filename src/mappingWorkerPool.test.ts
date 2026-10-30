@@ -766,6 +766,33 @@ describe('dispatchMappingJobs', () => {
     expect(pool.availableMappingWorkers[0]).not.toBe(stuck)
   })
 
+  it('marks a directory scan error in the done results', async () => {
+    configureMockMappingWorkers(['normal'])
+
+    const progressMessages: any[] = []
+    await pool.initializeMappingWorkers(
+      false,
+      undefined,
+      (msg: any) => progressMessages.push(msg),
+      1,
+    )
+    pool.setMappingWorkerOptions({ curationSpec: () => ({}) } as any)
+    pool.setDirectoryScanFinished(true)
+    pool.scanAnomalies.push({
+      fileInfo: makeFileInfo('bad'),
+      anomalies: [],
+      errors: ['Unable to list directory (filesystem error): EIO'],
+      scanTarget: 'directory',
+    })
+
+    await pool.dispatchMappingJobs()
+
+    const done = progressMessages.find((m) => m.response === 'done')
+    expect(done.mapResultsList).toEqual([
+      expect.objectContaining({ scanTarget: 'directory' }),
+    ])
+  })
+
   it('emits done once when dispatch is re-entered in a terminal state', async () => {
     configureMockMappingWorkers(['normal'])
 

@@ -186,6 +186,7 @@ export let scanAnomalies: {
   fileInfo: TFileInfo
   anomalies: string[]
   errors?: string[]
+  scanTarget?: 'directory'
 }[] = []
 
 // Callbacks set by curateMany, stored here for use by the dispatch loop.
@@ -580,12 +581,13 @@ export async function dispatchMappingJobs(): Promise<void> {
     //    write pass (!skipWrite), and they carry the input path in
     //    `outputFilePath` as before.
     //
-    //  - Hard read errors (file could not be read at all): always surfaced,
+    //  - Hard read errors (file could not be read at all, or directory could
+    //    not be listed, marked by `scanTarget`): always surfaced,
     //    in both passes, via `errors`. We deliberately OMIT `outputFilePath`
     //    so the raw input path is not leaked into the server-bound log; the
     //    raw path is retained in `fileInfo` for the private (input) log, and a
     //    path-less trace is rendered in the server-bound log by the consumer.
-    scanAnomalies.forEach(({ fileInfo, anomalies, errors }) => {
+    scanAnomalies.forEach(({ fileInfo, anomalies, errors, scanTarget }) => {
       const hasReadErrors = !!errors && errors.length > 0
 
       if (hasReadErrors) {
@@ -601,6 +603,7 @@ export async function dispatchMappingJobs(): Promise<void> {
           errors,
           quarantine: {},
           fileInfo,
+          scanTarget,
         }
         mapResultsList!.push(scanErrorResult)
         return
