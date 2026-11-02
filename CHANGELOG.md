@@ -1,3 +1,12 @@
+## [0.42.3](https://github.com/clintools/dicom-curate/compare/v0.42.2...v0.42.3) (2026-11-02)
+
+
+### Bug Fixes
+
+* keep counting past a directory the counter cannot list ([74dc9c3](https://github.com/clintools/dicom-curate/commit/74dc9c37231545e6a80dc73afbc05c4bc5ed5036))
+* mark a scan error that names a directory ([bf57db3](https://github.com/clintools/dicom-curate/commit/bf57db326c2904ee0800d2b818a96e76bde2639a))
+* retry a failed directory listing and report it, not fail the scan ([b62a022](https://github.com/clintools/dicom-curate/commit/b62a02294bea8ef7ca6005b127ebf790f2f23f16))
+
 ## [0.42.2](https://github.com/clintools/dicom-curate/compare/v0.42.1...v0.42.2) (2026-10-20)
 
 
