@@ -584,13 +584,13 @@ export async function scanDirectory(
   // that fail the full filter.
   let totalDiscovered = 0
   // Files the feeder has emitted: the exact total, and the floor for the
-  // reported total once the counter has failed.
+  // reported total once the counter has skipped a directory.
   let filesFed = 0
-  let counterFailed = false
+  let countIncomplete = false
   const emitCount = () =>
     emit({
       response: 'count',
-      totalDiscovered: counterFailed
+      totalDiscovered: countIncomplete
         ? Math.max(totalDiscovered, filesFed)
         : totalDiscovered,
     } satisfies FileScanMsg)
@@ -613,16 +613,20 @@ export async function scanDirectory(
 
         if (cheapFilterNameOnly(entry.name, key, filters)) {
           totalDiscovered++
-          emit({
-            response: 'count',
-            totalDiscovered,
-          } satisfies FileScanMsg)
+          emitCount()
         }
       } else if (entry.kind === 'directory') {
-        await counter(
-          entry as FileSystemDirectoryHandle,
-          prefix + '/' + entry.name,
-        )
+        try {
+          await counter(
+            entry as FileSystemDirectoryHandle,
+            prefix + '/' + entry.name,
+          )
+        } catch (error) {
+          if (!(error instanceof DirectoryListingError)) throw error
+          // The feeder reports it. Carry on, so one bad directory does not
+          // leave the rest of the tree uncounted.
+          countIncomplete = true
+        }
       }
     }
   }
@@ -687,7 +691,7 @@ export async function scanDirectory(
             },
             previousFileInfo: prev,
           } satisfies FileScanMsg)
-          if (counterFailed) emitCount()
+          if (countIncomplete) emitCount()
         } else {
           // File failed full filter. If it would have passed the counter's
           // name-only filter, the counter already counted it — correct.
@@ -749,7 +753,7 @@ export async function scanDirectory(
       // The count is only an estimate: its failure must not end a scan whose
       // feeder is healthy.
       counter(dir, dir.name).catch(() => {
-        counterFailed = true
+        countIncomplete = true
         emitCount()
       }),
       feeder(dir, dir.name),
@@ -785,13 +789,13 @@ export async function scanDirectoryNode(
   // that fail the full filter.
   let totalDiscovered = 0
   // Files the feeder has emitted: the exact total, and the floor for the
-  // reported total once the counter has failed.
+  // reported total once the counter has skipped a directory.
   let filesFed = 0
-  let counterFailed = false
+  let countIncomplete = false
   const emitCount = () =>
     emit({
       response: 'count',
-      totalDiscovered: counterFailed
+      totalDiscovered: countIncomplete
         ? Math.max(totalDiscovered, filesFed)
         : totalDiscovered,
     } satisfies FileScanMsg)
@@ -825,16 +829,20 @@ export async function scanDirectoryNode(
 
           if (cheapFilterNameOnly(entry.name, key, filters)) {
             totalDiscovered++
-            emit({
-              response: 'count',
-              totalDiscovered,
-            } satisfies FileScanMsg)
+            emitCount()
           }
         } else if (entry.isDirectory()) {
-          await counter(
-            path.join(currentPath, entry.name),
-            prefix + '/' + entry.name,
-          )
+          try {
+            await counter(
+              path.join(currentPath, entry.name),
+              prefix + '/' + entry.name,
+            )
+          } catch (error) {
+            if (!(error instanceof DirectoryListingError)) throw error
+            // The feeder reports it. Carry on, so one bad directory does not
+            // leave the rest of the tree uncounted.
+            countIncomplete = true
+          }
         }
       }
     }
@@ -906,7 +914,7 @@ export async function scanDirectoryNode(
               },
               previousFileInfo: prev,
             } satisfies FileScanMsg)
-            if (counterFailed) emitCount()
+            if (countIncomplete) emitCount()
           } else {
             // Correct the counter's estimate if needed
             if (cheapFilterNameOnly(entry.name, key, filters)) {
@@ -964,7 +972,7 @@ export async function scanDirectoryNode(
       // The count is only an estimate: its failure must not end a scan whose
       // feeder is healthy.
       counter(dirPath, dirName).catch(() => {
-        counterFailed = true
+        countIncomplete = true
         emitCount()
       }),
       feeder(dirPath, dirName),
