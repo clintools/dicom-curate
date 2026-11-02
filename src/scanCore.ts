@@ -135,7 +135,10 @@ export type FileScanMsg =
        * `fileInfo` so it stays in the private (input) log.
        */
       errors?: string[]
-      /** Set when `fileInfo` names a directory that could not be listed. */
+      /**
+       * Set when `fileInfo` names a directory that could not be listed. A
+       * `handle` fileInfo then holds a `FileSystemDirectoryHandle`.
+       */
       scanTarget?: 'directory'
       previousFileInfo?: {
         size?: number
