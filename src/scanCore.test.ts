@@ -350,6 +350,53 @@ describe('scanDirectoryNode', () => {
     expect(countValues(msgs).at(-1)).toBe(1)
   })
 
+  it('keeps counting past a sub-directory the counter cannot list', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scancore-node-'))
+    trees.push(root)
+    const bad = join(root, 'a_bad')
+    for (const dir of [bad, join(root, 'b'), join(root, 'c')]) mkdirSync(dir)
+    writeDicom(join(bad, 'w.dcm'))
+    writeDicom(join(root, 'b', 'x.dcm'))
+    writeDicom(join(root, 'c', 'y.dcm'))
+    // The counter lists the root first. Hold the feeder's listing until the
+    // counter has counted both siblings, or for a second if it never does.
+    // a_bad fails each of the counter's attempts, then lists for the feeder.
+    let release!: () => void
+    const counted = new Promise<void>((resolve) => (release = resolve))
+    const fallback = setTimeout(() => release(), 1000)
+    let rootListings = 0
+    let badFailures = LIST_RETRY_DELAYS_MS.length + 1
+    readdirMock.mockImplementation(((target: string, options: unknown) => {
+      if (target === bad && badFailures-- > 0) {
+        return Promise.reject(
+          Object.assign(new Error('EACCES'), { code: 'EACCES' }),
+        )
+      }
+      const listing = () => realReaddir(target, options as never)
+      return target === root && ++rootListings === 2
+        ? counted.then(listing)
+        : listing()
+    }) as typeof realReaddir)
+
+    const msgs: FileScanMsg[] = []
+    await scanDirectoryNode(root, {
+      filters: defaultFilters(),
+      controller: new ScanController(),
+      emit: (msg) => {
+        msgs.push(msg)
+        if (msg.response === 'count' && msg.totalDiscovered === 2) release()
+      },
+    })
+    clearTimeout(fallback)
+
+    const firstFile = msgs.findIndex((m) => m.response === 'file')
+    expect(countValues(msgs.slice(0, firstFile))).toEqual([1, 2])
+    expect(fileNames(msgs)).toEqual(['w.dcm', 'x.dcm', 'y.dcm'])
+    expect(errorMessages(msgs)).toHaveLength(0)
+    // Then one per file fed: the counter's 2 holds until the feeder passes it.
+    expect(countValues(msgs)).toEqual([1, 2, 2, 2, 3, 3])
+  })
+
   it('reports a scan error rather than throwing for a missing directory', async () => {
     const msgs = await run(join(tmpdir(), 'scancore-does-not-exist-xyz'))
     expect(
@@ -539,7 +586,7 @@ describe('scanDirectory (browser FileSystem handles)', () => {
     expect(fileNames(msgs)).toEqual(['a.dcm', 'b.dcm', 'c.dcm', 'z.dcm'])
   })
 
-  it("falls back to the feeder's tally when the counter never lists", async () => {
+  it('keeps counting past a sub-directory the counter never lists', async () => {
     const b = new FakeFileHandle('b.dcm', dicomFile('b.dcm'))
     const m = new FakeFileHandle('m.dcm', dicomFile('m.dcm'))
     const msgs = await runCounterFirst(
@@ -549,9 +596,9 @@ describe('scanDirectory (browser FileSystem handles)', () => {
     expect(msgs.some((msg) => msg.response === 'error')).toBe(false)
     expect(errorMessages(msgs)).toHaveLength(0)
     expect(fileNames(msgs)).toEqual(['a.dcm', 'b.dcm', 'm.dcm', 'z.dcm'])
-    // Counter's a.dcm and m.dcm, its failure, then one per file fed: the
-    // counter's 2 holds until the feeder passes it. Then the final sync.
-    expect(countValues(msgs)).toEqual([1, 2, 2, 2, 2, 3, 4, 4])
+    // Counter's a.dcm, m.dcm and, past sub, z.dcm; then one per file fed: the
+    // counter's 3 holds until the feeder passes it. Then the final sync.
+    expect(countValues(msgs)).toEqual([1, 2, 3, 3, 3, 3, 4, 4])
   })
 
   it('keeps retrying a listing that makes progress between failures', async () => {
