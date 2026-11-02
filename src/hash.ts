@@ -98,10 +98,48 @@ async function md5HexStream(
   return bytesToHex(h.digest())
 }
 
-/** True streaming SHA-256 via @noble/hashes — works in Node.js and browsers. */
+// Native WebCrypto SHA-256 is one to two orders of magnitude faster than pure-JS
+// hashing, but it has no streaming API. Buffer payloads up to this limit and do one
+// native digest (the overwhelmingly common DICOM-file case); beyond it — or where
+// crypto.subtle is unavailable — fall back to true streaming via @noble/hashes.
+const SUBTLE_BUFFER_LIMIT = 256 * 1024 * 1024 // 256 MB
+
+/** Streaming SHA-256: native crypto.subtle fast path for bufferable payloads,
+ *  @noble/hashes incremental hashing otherwise. Works in Node.js and browsers. */
 async function sha256HexStream(
   stream: AsyncIterable<Uint8Array>,
 ): Promise<string> {
+  const subtle = globalThis.crypto?.subtle
+  if (subtle) {
+    const chunks: Uint8Array[] = []
+    let total = 0
+    let h: ReturnType<typeof sha256.create> | undefined
+    for await (const chunk of stream) {
+      if (h) {
+        h.update(chunk)
+        continue
+      }
+      chunks.push(chunk)
+      total += chunk.byteLength
+      if (total > SUBTLE_BUFFER_LIMIT) {
+        // Too big to buffer — switch to streaming, replaying what we collected.
+        h = sha256.create()
+        for (const c of chunks) h.update(c)
+        chunks.length = 0
+      }
+    }
+    if (!h) {
+      const buf = new Uint8Array(total)
+      let offset = 0
+      for (const c of chunks) {
+        buf.set(c, offset)
+        offset += c.byteLength
+      }
+      const digest = await subtle.digest('SHA-256', buf)
+      return bytesToHex(new Uint8Array(digest))
+    }
+    return bytesToHex(h.digest())
+  }
   const h = sha256.create()
   for await (const chunk of stream) h.update(chunk)
   return bytesToHex(h.digest())
