@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -54,7 +54,7 @@ export async function runPassthroughCurate(
   dicomPath: string,
   outDir: string,
 ): Promise<string> {
-  const buf = await readFile(dicomPath)
+  const { size } = await stat(dicomPath)
   const name = basename(dicomPath)
   const result = await curateOne({
     fileInfo: {
@@ -62,7 +62,7 @@ export async function runPassthroughCurate(
       fullPath: dicomPath,
       path: 'conformance',
       name,
-      size: buf.length,
+      size,
     },
     outputTarget: { directory: outDir },
     mappingOptions: passthroughMappingOptions(),
