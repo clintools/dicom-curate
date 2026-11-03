@@ -16,6 +16,7 @@
     "vitest.config.ts",
     "vitest-env.d.ts",
     "conformance/**/*",
+    "scale/**/*",
     "scripts/update-conformance-baselines.ts"
   ],
   "exclude": ["node_modules", "dist"]
