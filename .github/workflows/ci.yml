@@ -115,3 +115,46 @@ jobs:
         env:
           # HUSKY: 0 # uncomment this to disable husky in the semantic-release step
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Did this PR change throughput? Base (HEAD^1 of the merge commit, i.e. main)
+  # and head run alternately on the same runner, so runner speed cancels out.
+  # Not a required check: a failure flags the change without blocking merge.
+  throughput:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      # Depth 2 reaches HEAD^1, the base the worktree below builds.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.13.1"
+          package-manager-cache: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      # --ignore-scripts skips `prepare`'s full build; only build:esm is needed.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Base's own lockfile, so a dependency bump is measured, not masked.
+      - name: Build base
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" HEAD^1
+          cd "$RUNNER_TEMP/base"
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm build:esm
+
+      - name: Throughput, head against base
+        run: pnpm test:throughput
+        env:
+          THROUGHPUT_BASE_DIST: ${{ runner.temp }}/base/dist/esm
