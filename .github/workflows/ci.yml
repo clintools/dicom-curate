@@ -102,6 +102,10 @@ jobs:
       - name: Checks
         run: bash scripts/hooks/pre-push.sh
 
+      # CI-only: ~30s is too slow for every local push.
+      - name: Scale tests
+        run: pnpm test:scale
+
       # PR-only: semantic-release returns early on a pull request, but on a push
       # it runs verifyAuth — a push --dry-run needing write, which this job's
       # read-only token is refused (403). The real release runs in release.yml.
