@@ -74,6 +74,14 @@ async function loadCurateMany(dist: string): Promise<CurateMany> {
 const BASE_FIRST = ['base', 'head'] as const
 const HEAD_FIRST = ['head', 'base'] as const
 
+type Verdict = 'slower' | 'faster' | 'no significant change'
+
+function verdict(changePct: number): Verdict {
+  if (changePct > THRESHOLD_PCT) return 'slower'
+  if (changePct < -THRESHOLD_PCT) return 'faster'
+  return 'no significant change'
+}
+
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b)
   const mid = Math.floor(sorted.length / 2)
@@ -92,8 +100,18 @@ describe('curateMany throughput, head against base', () => {
       appendFileSync(
         process.env.GITHUB_STEP_SUMMARY,
         `### Throughput, head vs base (±${THRESHOLD_PCT}% allowed)\n\n` +
-          '| Workload | Base median | Head median | Median pair change | Pair ratios |\n' +
-          '|---|---|---|---|---|\n',
+          '| Workload | Verdict | Head vs base | Base | Head | Head/base per pair |\n' +
+          '|---|---|---|---|---|---|\n',
+      )
+    }
+  })
+
+  afterAll(() => {
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      appendFileSync(
+        process.env.GITHUB_STEP_SUMMARY,
+        '\nPer-pair ratio: head time / base time. Below 1 = head faster. ' +
+          `Verdict uses the median ratio; outside ±${THRESHOLD_PCT}% fails the check.\n`,
       )
     }
   })
@@ -138,18 +156,26 @@ describe('curateMany throughput, head against base', () => {
 
       const ratios = pairs.map((p) => p.head / p.base)
       const changePct = (median(ratios) - 1) * 100
+      const result = verdict(changePct)
       const baseMedian = `${median(pairs.map((p) => p.base)).toFixed(0)} ms`
       const headMedian = `${median(pairs.map((p) => p.head)).toFixed(0)} ms`
       const change = `${changePct >= 0 ? '+' : ''}${changePct.toFixed(1)}%`
-      const row = [
-        workload.name,
-        baseMedian,
-        headMedian,
-        change,
-        ratios.map((r) => r.toFixed(3)).join(', '),
-      ]
-      console.log(`throughput: ${row.join(' | ')}`)
+      const perPair = ratios.map((r) => r.toFixed(3)).join(', ')
+
+      console.log(
+        `${workload.name}: ${result} (head ${change} vs base, threshold ±${THRESHOLD_PCT}%)\n` +
+          `  medians: base ${baseMedian}, head ${headMedian}\n` +
+          `  head/base per pair (<1 faster, >1 slower): ${perPair}`,
+      )
       if (process.env.GITHUB_STEP_SUMMARY) {
+        const row = [
+          workload.name,
+          result[0].toUpperCase() + result.slice(1),
+          change,
+          baseMedian,
+          headMedian,
+          perPair,
+        ]
         appendFileSync(
           process.env.GITHUB_STEP_SUMMARY,
           `| ${row.join(' | ')} |\n`,
@@ -157,9 +183,9 @@ describe('curateMany throughput, head against base', () => {
       }
 
       expect(
-        Math.abs(changePct),
-        `${workload.name} changed ${change} (base ${baseMedian}, head ${headMedian})`,
-      ).toBeLessThanOrEqual(THRESHOLD_PCT)
+        result,
+        `${workload.name}: head is ${Math.abs(changePct).toFixed(1)}% ${result} than base (threshold ±${THRESHOLD_PCT}%)`,
+      ).toBe('no significant change')
     })
   }
 })
