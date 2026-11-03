@@ -8,6 +8,7 @@
  */
 import { join } from 'node:path'
 import { curateMany } from 'dicom-curate'
+import type { ValidImageSpec } from 'dicom-synth'
 import { afterEach } from 'vitest'
 import type {
   OrganizeOptions,
@@ -76,6 +77,7 @@ export type WrittenImage = {
 export async function writeImages(
   inputDir: string,
   count: number,
+  image: ValidImageSpec = VALID_CT_IMAGE,
 ): Promise<WrittenImage[]> {
   const written: WrittenImage[] = []
   for (let i = 0; i < count; i++) {
@@ -84,7 +86,7 @@ export async function writeImages(
     const patientId = `PID-${id}`
     await writeSynthFile(
       join(inputDir, 'study', 'subject', name),
-      { ...VALID_CT_IMAGE, tags: { PatientID: patientId } },
+      { ...image, tags: { ...image.tags, PatientID: patientId } },
       { index: i },
     )
     written.push({ name, patientId })
@@ -206,6 +208,24 @@ export type CapturedRun = {
   result: Awaited<ReturnType<typeof curateMany>>
   /** Every progress message, in order — the intermediate behaviour under test. */
   progress: TProgressMessage[]
+}
+
+/**
+ * `curateMany` keeping only the final message and an error tally;
+ * `runCapturingProgress` would retain a `TMapResults` per file. `run` takes a
+ * `curateMany` from another build.
+ */
+export async function runQuietly(
+  options: OrganizeOptions,
+  run: typeof curateMany = curateMany,
+) {
+  let errorCount = 0
+  const done = await run(options, (msg) => {
+    if (msg.response === 'progress') {
+      errorCount += msg.mapResults?.errors?.length ?? 0
+    }
+  })
+  return { done, errorCount }
 }
 
 /**
