@@ -65,6 +65,57 @@ export type TCurateOneArgs = {
   signal?: AbortSignal
 }
 
+// dcmjs applies untilTag and the top-level NumberOfFrames inside sequence
+// items, so nested Pixel Data (Icon Image Sequence) throws or is mis-sized.
+// Keep both at the top level, matching the sync reader. See #331.
+class TopLevelUntilTagReader extends dcmjs.async.AsyncDicomReader {
+  async readSequence(
+    listener: { information?: { numberOfFrames?: unknown } },
+    sqTagInfo: unknown,
+    options?: dcmjs.data.ReadFileOptions,
+  ) {
+    const { information } = listener
+    const numberOfFrames = information?.numberOfFrames
+    if (information) information.numberOfFrames = undefined
+    try {
+      return await super.readSequence(listener, sqTagInfo, {
+        ...options,
+        untilTag: null,
+      })
+    } finally {
+      if (information) information.numberOfFrames = numberOfFrames
+    }
+  }
+}
+
+// The streaming reader stores each Pixel Data frame as a list of fragments, but
+// DicomDict.write expects one ArrayBuffer per frame and keeps only the first
+// fragment. One fragment per frame is valid for every transfer syntax. See #331.
+function mergePixelDataFragments(dataset: dcmjs.DicomDataset): void {
+  for (const [tag, element] of Object.entries(dataset)) {
+    if (tag === '7FE00010' && element.Value) {
+      element.Value = (element.Value as unknown[]).map((frame) =>
+        Array.isArray(frame) ? concatBuffers(frame) : frame,
+      ) as typeof element.Value
+    } else if (element.vr === 'SQ') {
+      for (const item of element.Value ?? []) {
+        mergePixelDataFragments(item as dcmjs.DicomDataset)
+      }
+    }
+  }
+}
+
+function concatBuffers(buffers: ArrayBuffer[]): ArrayBuffer {
+  if (buffers.length === 1) return buffers[0]
+  const merged = new Uint8Array(buffers.reduce((n, b) => n + b.byteLength, 0))
+  let offset = 0
+  for (const buffer of buffers) {
+    merged.set(new Uint8Array(buffer), offset)
+    offset += buffer.byteLength
+  }
+  return merged.buffer
+}
+
 function specHasFilter(mappingOptions: TMappingOptions): boolean {
   if (mappingOptions.curationSpec === 'none') return false
   const composed = composeSpecs(mappingOptions.curationSpec())
@@ -284,7 +335,7 @@ export async function curateOne({
     // zero-copy Blob slice rather than being loaded into memory.
     let pixelDataOffset = -1
     try {
-      const reader = new dcmjs.async.AsyncDicomReader()
+      const reader = new TopLevelUntilTagReader()
       const parseFeed = cancellableReadableStreamIterable(file.stream())
       const feedDone = reader.stream.fromAsyncStream(parseFeed.iterable)
       // Build a "never resolves, only rejects" sentinel from feedDone so we can
@@ -303,11 +354,12 @@ export async function curateOne({
       const feedErrorSignal = new Promise<never>((_, reject) => {
         feedDone.catch(reject)
       })
-      // Stop reading at the PixelData tag.  The fixed dcmjs read() loop breaks
-      // out of the scan when readTagHeader() returns {untilTag: true}, leaving
-      // stream.offset pointing at the byte immediately after the 4-byte tag
-      // (i.e. the VR field for explicit-LE).  Subtracting 4 gives the start of
-      // the PixelData tag, which is exactly the offset we need for the slice.
+      // Stop reading at the top-level PixelData tag.  The fixed dcmjs read()
+      // loop breaks out of the scan when readTagHeader() returns
+      // {untilTag: true}, leaving stream.offset pointing at the byte
+      // immediately after the 4-byte tag (i.e. the VR field for explicit-LE).
+      // Subtracting 4 gives the start of the PixelData tag, which is exactly
+      // the offset we need for the slice.
       try {
         // Race readFile against feedErrorSignal: on a normal run feedErrorSignal
         // stays pending forever so readFile wins; on stream failure feedErrorSignal
@@ -336,6 +388,7 @@ export async function curateOne({
         pixelDataOffset = rawOffset
       }
 
+      mergePixelDataFragments(reader.dict)
       dicomData = new dcmjs.data.DicomDict(reader.meta)
       dicomData.dict = reader.dict
     } catch (error) {
@@ -357,7 +410,10 @@ export async function curateOne({
           path: fileInfo.path,
           mtime,
           preMappedHash,
-          parseError: error instanceof Error ? error.message : String(error),
+          parseError:
+            (error instanceof Error && (error.message || error.stack)) ||
+            String(error) ||
+            'Unknown parse error',
         },
         curationTime: performance.now() - startTime,
       }
