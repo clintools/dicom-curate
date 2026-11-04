@@ -1,3 +1,11 @@
+## [0.42.4](https://github.com/clintools/dicom-curate/compare/v0.42.3...v0.42.4) (2026-11-04)
+
+
+### Bug Fixes
+
+* do not re-encode a nested encapsulated Pixel Data ([#331](https://github.com/clintools/dicom-curate/issues/331)) ([a226916](https://github.com/clintools/dicom-curate/commit/a22691677ecb65fcd4b407aadd719ecaf7f24aad))
+* parse files whose Icon Image Sequence holds Pixel Data ([feafbfb](https://github.com/clintools/dicom-curate/commit/feafbfb274e6c2a6b82d2923afd63fb5b3a4460f))
+
 ## [0.42.3](https://github.com/clintools/dicom-curate/compare/v0.42.2...v0.42.3) (2026-11-02)
 
 
