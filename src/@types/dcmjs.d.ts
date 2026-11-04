@@ -147,6 +147,11 @@ declare module 'dcmjs' {
       dict: data.DicomDataset
       constructor(options?: { isLittleEndian?: boolean; maxFragmentSize?: number })
       readFile(options?: data.ReadFileOptions): Promise<AsyncDicomReader>
+      readSequence(
+        listener: unknown,
+        sqTagInfo: unknown,
+        options?: data.ReadFileOptions,
+      ): Promise<void>
     }
   }
 
