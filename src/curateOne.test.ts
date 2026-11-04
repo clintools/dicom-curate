@@ -507,6 +507,274 @@ describe('curateOne PixelData preservation', () => {
     expect(outputBytes.length).toBe(dicomBytes.length)
     expect(Array.from(outputBytes)).toEqual(Array.from(dicomBytes))
   })
+
+  // pixelSpec has PS3.15 off, which keeps the Icon Image Sequence.
+  describe('Icon Image Sequence with nested Pixel Data (#331)', () => {
+    const ICON_PIXELS = [0xa1, 0xa2, 0xa3, 0xa4]
+    const TOP_PIXELS = [0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58]
+    const UNDEFINED_LENGTH = 0xffffffff
+    const ascii = new TextEncoder()
+
+    const concat = (...parts: Uint8Array[]) => {
+      const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+      let offset = 0
+      for (const part of parts) {
+        out.set(part, offset)
+        offset += part.length
+      }
+      return out
+    }
+    const uint16 = (n: number) => {
+      const b = new Uint8Array(2)
+      new DataView(b.buffer).setUint16(0, n, true)
+      return b
+    }
+    const uint32 = (n: number) => {
+      const b = new Uint8Array(4)
+      new DataView(b.buffer).setUint32(0, n, true)
+      return b
+    }
+    const tag = (group: number, element: number) =>
+      concat(uint16(group), uint16(element))
+    const evenText = (text: string, pad: number) => {
+      const b = ascii.encode(text)
+      return b.length % 2 ? concat(b, new Uint8Array([pad])) : b
+    }
+    // Explicit-LE element with a 2-byte length (UI, PN, US, UL).
+    const shortElement = (
+      g: number,
+      e: number,
+      vr: string,
+      value: Uint8Array,
+    ) => concat(tag(g, e), ascii.encode(vr), uint16(value.length), value)
+    // Explicit-LE element with reserved bytes and a 4-byte length (OB, OW, SQ).
+    const longElement = (
+      g: number,
+      e: number,
+      vr: string,
+      value: Uint8Array,
+      length = value.length,
+    ) => concat(tag(g, e), ascii.encode(vr), uint16(0), uint32(length), value)
+
+    const EXPLICIT_LE = '1.2.840.10008.1.2.1'
+    const RLE_LOSSLESS = '1.2.840.10008.1.2.5'
+
+    /** Synthetic Part 10 file: preamble, explicit-LE meta group, then `body`. */
+    function part10(
+      body: Uint8Array,
+      transferSyntaxUid = EXPLICIT_LE,
+    ): Uint8Array {
+      const sopClass = evenText('1.2.840.10008.5.1.4.1.1.7', 0)
+      const metaBody = concat(
+        longElement(0x0002, 0x0001, 'OB', new Uint8Array([0x00, 0x01])),
+        shortElement(0x0002, 0x0002, 'UI', sopClass),
+        shortElement(0x0002, 0x0003, 'UI', evenText('1.2.3.4', 0)),
+        shortElement(0x0002, 0x0010, 'UI', evenText(transferSyntaxUid, 0)),
+      )
+      return concat(
+        new Uint8Array(128),
+        ascii.encode('DICM'),
+        shortElement(0x0002, 0x0000, 'UL', uint32(metaBody.length)),
+        metaBody,
+        shortElement(0x0008, 0x0016, 'UI', sopClass),
+        shortElement(0x0008, 0x0018, 'UI', evenText('1.2.3.4', 0)),
+        shortElement(0x0010, 0x0010, 'PN', evenText('Test^Synthetic', 0x20)),
+        body,
+      )
+    }
+
+    // Encapsulated Pixel Data: empty Basic Offset Table, then one item per fragment.
+    const encapsulatedPixelData = (fragments: number[][]) =>
+      longElement(
+        0x7fe0,
+        0x0010,
+        'OB',
+        concat(
+          tag(0xfffe, 0xe000),
+          uint32(0),
+          ...fragments.flatMap((fragment) => [
+            tag(0xfffe, 0xe000),
+            uint32(fragment.length),
+            new Uint8Array(fragment),
+          ]),
+          tag(0xfffe, 0xe0dd),
+          uint32(0),
+        ),
+        UNDEFINED_LENGTH,
+      )
+
+    function buildDicomWithIconImageSequence({
+      vr = 'OB',
+      lengths = 'defined',
+      numberOfFrames,
+      encapsulated = false,
+    }: {
+      vr?: 'OB' | 'OW'
+      lengths?: 'defined' | 'undefined'
+      numberOfFrames?: number
+      // RLE transfer syntax with the icon split across two fragments.
+      encapsulated?: boolean
+    }): Uint8Array {
+      // Top-level attributes dcmjs reads when sizing Pixel Data frames.
+      const imageAttributes = numberOfFrames
+        ? concat(
+            shortElement(0x0028, 0x0002, 'US', uint16(1)),
+            shortElement(
+              0x0028,
+              0x0008,
+              'IS',
+              evenText(`${numberOfFrames}`, 0x20),
+            ),
+            shortElement(0x0028, 0x0010, 'US', uint16(4)),
+            shortElement(0x0028, 0x0011, 'US', uint16(4)),
+            shortElement(0x0028, 0x0100, 'US', uint16(8)),
+          )
+        : new Uint8Array(0)
+      const itemBody = concat(
+        shortElement(0x0028, 0x0010, 'US', uint16(2)),
+        shortElement(0x0028, 0x0011, 'US', uint16(2)),
+        shortElement(0x0028, 0x0100, 'US', uint16(8)),
+        encapsulated
+          ? encapsulatedPixelData([
+              ICON_PIXELS.slice(0, 2),
+              ICON_PIXELS.slice(2),
+            ])
+          : longElement(0x7fe0, 0x0010, vr, new Uint8Array(ICON_PIXELS)),
+      )
+      const undef = lengths === 'undefined'
+      // Item (E00D) or Sequence (E0DD) Delimitation Item, only for undefined lengths.
+      const delimiter = (element: number) =>
+        undef ? concat(tag(0xfffe, element), uint32(0)) : new Uint8Array(0)
+      const item = concat(
+        tag(0xfffe, 0xe000),
+        uint32(undef ? UNDEFINED_LENGTH : itemBody.length),
+        itemBody,
+        delimiter(0xe00d),
+      )
+      const sequence = longElement(
+        0x0088,
+        0x0200,
+        'SQ',
+        concat(item, delimiter(0xe0dd)),
+        undef ? UNDEFINED_LENGTH : undefined,
+      )
+      return part10(
+        concat(
+          imageAttributes,
+          sequence,
+          encapsulated
+            ? encapsulatedPixelData([TOP_PIXELS])
+            : longElement(0x7fe0, 0x0010, 'OW', new Uint8Array(TOP_PIXELS)),
+        ),
+        encapsulated ? RLE_LOSSLESS : EXPLICIT_LE,
+      )
+    }
+
+    const blobFileInfo = (bytes: Uint8Array): TFileInfo => ({
+      kind: 'blob',
+      blob: new Blob([bytes.buffer as ArrayBuffer], {
+        type: 'application/octet-stream',
+      }),
+      path: inputPath,
+      name: 'icon.dcm',
+      size: bytes.length,
+    })
+
+    // DicomMessage.readFile stores OB/OW values as [ArrayBuffer].
+    const pixelBytes = (element: dcmjs.DicomJsonElement) =>
+      Array.from(new Uint8Array(element.Value![0] as unknown as ArrayBuffer))
+
+    const countOccurrences = (haystack: Uint8Array, needle: number[]) => {
+      let count = 0
+      for (let i = 0; i + needle.length <= haystack.length; i++) {
+        if (needle.every((byte, j) => haystack[i + j] === byte)) count++
+      }
+      return count
+    }
+
+    async function expectIconAndPixelDataKept(dicomBytes: Uint8Array) {
+      const result = await curateOne({
+        fileInfo: blobFileInfo(dicomBytes),
+        outputTarget: {},
+        mappingOptions: { curationSpec: pixelSpec, skipWrite: false },
+      })
+
+      expect(result.errors).toEqual([])
+      expect(result.anomalies).not.toContain(
+        'Could not parse file as DICOM data',
+      )
+      expect(result.mappingRequired).toBe(true)
+
+      const output = new Uint8Array(await result.mappedBlob!.arrayBuffer())
+      // A slice taken from the nested Pixel Data tag would repeat the icon bytes
+      // after the re-serialised header.
+      expect(countOccurrences(output, ICON_PIXELS)).toBe(1)
+
+      const reparsed = dcmjs.data.DicomMessage.readFile(
+        output.buffer as ArrayBuffer,
+      )
+      const iconItem = reparsed.dict['00880200'].Value![0] as dcmjs.DicomDataset
+      expect(pixelBytes(iconItem['7FE00010'])).toEqual(ICON_PIXELS)
+      expect(pixelBytes(reparsed.dict['7FE00010'])).toEqual(TOP_PIXELS)
+    }
+
+    it.each([
+      ['OB', 'defined'],
+      ['OB', 'undefined'],
+      ['OW', 'defined'],
+      ['OW', 'undefined'],
+    ] as const)('parses and keeps a %s icon with %s sequence lengths', async (vr, lengths) => {
+      await expectIconAndPixelDataKept(
+        buildDicomWithIconImageSequence({ vr, lengths }),
+      )
+    })
+
+    // dcmjs sizes Pixel Data by the top-level NumberOfFrames: 2 frames split
+    // the icon and break the write, 3 frames fail the parse.
+    it.each([
+      2, 3,
+    ])('keeps the icon intact in a %i-frame image', async (numberOfFrames) => {
+      await expectIconAndPixelDataKept(
+        buildDicomWithIconImageSequence({ numberOfFrames }),
+      )
+    })
+
+    // dcmjs writes only the first fragment of each frame it is given.
+    it('keeps every fragment of an encapsulated icon', async () => {
+      await expectIconAndPixelDataKept(
+        buildDicomWithIconImageSequence({ encapsulated: true }),
+      )
+    })
+
+    it('records a non-empty parseError when dcmjs throws an Error without a message', async () => {
+      // An undefined-length SQ whose first child is not an Item: dcmjs
+      // readSequence throws `new Error()`.
+      const corrupt = part10(
+        concat(
+          longElement(
+            0x0088,
+            0x0200,
+            'SQ',
+            new Uint8Array(0),
+            UNDEFINED_LENGTH,
+          ),
+          shortElement(0x0028, 0x0010, 'US', uint16(2)),
+        ),
+      )
+
+      const result = await curateOne({
+        fileInfo: blobFileInfo(corrupt),
+        outputTarget: {},
+        mappingOptions: { curationSpec: pixelSpec, skipWrite: true },
+      })
+
+      expect(result.anomalies).toEqual(['Could not parse file as DICOM data'])
+      expect(result.errors).toEqual([
+        'File is not a valid DICOM file or is corrupted',
+      ])
+      expect(result.fileInfo?.parseError).toMatch(/./)
+    })
+  })
 })
 
 describe('curateOne preExclude and postExclude', () => {
