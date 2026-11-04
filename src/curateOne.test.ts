@@ -4,7 +4,14 @@ import {
   buildDicomdirDcmjsBuffer,
   DICOMDIR_SOP_CLASS_UID,
 } from '../testutils/dicomdirFixture'
-import { curateOne } from './curateOne'
+import {
+  buildIconImageFile,
+  ICON_PIXEL_BYTE,
+  ICON_PIXEL_LENGTH,
+  TOP_PIXEL_BYTE,
+  TOP_PIXEL_LENGTH,
+} from '../testutils/iconImageFixture'
+import { curateOne, NESTED_ENCAPSULATED_PIXEL_DATA_ERROR } from './curateOne'
 import { hash } from './hash'
 import type {
   TCurationSpecification,
@@ -512,6 +519,17 @@ describe('curateOne PixelData preservation', () => {
   describe('Icon Image Sequence with nested Pixel Data (#331)', () => {
     const ICON_PIXELS = [0xa1, 0xa2, 0xa3, 0xa4]
     const TOP_PIXELS = [0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58]
+    // Removes the Icon Image Sequence (PS3.15 Table E.1-1 action X).
+    const BASIC_PROFILE: TCurationSpecification['dicomPS315EOptions'] = {
+      cleanDescriptorsOption: true,
+      cleanDescriptorsExceptions: [],
+      retainLongitudinalTemporalInformationOptions: 'Off',
+      retainPatientCharacteristicsOption: [],
+      retainDeviceIdentityOption: true,
+      retainUIDsOption: 'Hashed',
+      retainSafePrivateOption: 'Quarantine',
+      retainInstitutionIdentityOption: true,
+    }
     const UNDEFINED_LENGTH = 0xffffffff
     const ascii = new TextEncoder()
 
@@ -739,11 +757,65 @@ describe('curateOne PixelData preservation', () => {
       )
     })
 
-    // dcmjs writes only the first fragment of each frame it is given.
-    it('keeps every fragment of an encapsulated icon', async () => {
-      await expectIconAndPixelDataKept(
-        buildDicomWithIconImageSequence({ encapsulated: true }),
-      )
+    // A nested encapsulated Pixel Data parses, but DicomDict.write would store
+    // it with an explicit length, its compressed bytes then read as native
+    // pixels. curateOne writes such a file only when the header is unchanged or
+    // the sequence is removed.
+    describe('with an encapsulated icon', () => {
+      const encapsulatedIconFile = () =>
+        buildDicomWithIconImageSequence({ encapsulated: true })
+
+      it('does not write a re-encoded header that keeps the icon', async () => {
+        const result = await curateOne({
+          fileInfo: blobFileInfo(encapsulatedIconFile()),
+          outputTarget: {},
+          mappingOptions: { curationSpec: pixelSpec, skipWrite: false },
+        })
+
+        expect(result.errors).toEqual([NESTED_ENCAPSULATED_PIXEL_DATA_ERROR])
+        expect(result.mappedBlob).toBeUndefined()
+        expect(result.outputFilePath).toBeUndefined()
+        expect(result.fileInfo?.parseError).toBeUndefined()
+      })
+
+      it('writes the image when the PS3.15 Basic Profile removes the icon', async () => {
+        const result = await curateOne({
+          fileInfo: blobFileInfo(encapsulatedIconFile()),
+          outputTarget: {},
+          mappingOptions: {
+            curationSpec: () => ({
+              ...pixelSpec(),
+              dicomPS315EOptions: BASIC_PROFILE,
+            }),
+            skipWrite: false,
+          },
+        })
+
+        expect(result.errors).toEqual([])
+        const output = new Uint8Array(await result.mappedBlob!.arrayBuffer())
+        const reparsed = dcmjs.data.DicomMessage.readFile(
+          output.buffer as ArrayBuffer,
+        )
+        expect(reparsed.dict['00880200']).toBeUndefined()
+        expect(pixelBytes(reparsed.dict['7FE00010'])).toEqual(TOP_PIXELS)
+      })
+
+      it('writes the original bytes when skipModifications leaves the header unchanged', async () => {
+        const input = encapsulatedIconFile()
+        const result = await curateOne({
+          fileInfo: blobFileInfo(input),
+          outputTarget: {},
+          mappingOptions: {
+            curationSpec: pixelSpec,
+            skipModifications: true,
+            skipWrite: false,
+          },
+        })
+
+        expect(result.errors).toEqual([])
+        const output = new Uint8Array(await result.mappedBlob!.arrayBuffer())
+        expect(Array.from(output)).toEqual(Array.from(input))
+      })
     })
 
     it('records a non-empty parseError when dcmjs throws an Error without a message', async () => {
@@ -1721,5 +1793,92 @@ describe('curateOne DICOMDIR pre-exclusion', () => {
 
     expect(result.excluded).toBeUndefined()
     expect(result.mappedBlob).toBeDefined()
+  })
+})
+
+describe('curateOne Icon Image Sequence from dicom-synth fixtures (#331)', () => {
+  const iconSpec = (): TCurationSpecification => ({
+    inputPathPattern:
+      'protocolNumber/activityProvider/centerSubjectId/timepoint/scan',
+    version: '3.0',
+    hostProps: {},
+    dicomPS315EOptions: 'Off',
+    // A header change forces the re-serialised header + Pixel Data slice path.
+    modifyDicomHeader: () => ({ PatientName: 'ANON' }),
+    outputFilePathComponents: (parser) => [
+      parser.getFilePathComp('protocolNumber'),
+      parser.getFilePathComp(parser.FILENAME),
+    ],
+    errors: () => [],
+  })
+
+  // Streams the file in small chunks, so element headers and values straddle
+  // chunk boundaries the way they do in large real files.
+  class ChunkedBlob extends Blob {
+    stream(): ReadableStream<Uint8Array<ArrayBuffer>> {
+      let offset = 0
+      return new ReadableStream({
+        pull: async (controller) => {
+          if (offset >= this.size) {
+            controller.close()
+            return
+          }
+          const chunk = this.slice(offset, offset + 7)
+          offset += 7
+          controller.enqueue(new Uint8Array(await chunk.arrayBuffer()))
+        },
+      })
+    }
+  }
+
+  const bytesOf = (value: unknown) =>
+    Array.from(new Uint8Array(value as ArrayBuffer))
+
+  it.each([
+    ['explicit-vr-little-endian', 'OB', undefined],
+    ['explicit-vr-little-endian', 'OW', '1'],
+    ['explicit-vr-little-endian', 'OW', '4'],
+    ['implicit-vr-little-endian', 'OB', '1'],
+    ['implicit-vr-little-endian', 'OW', '4'],
+  ] as const)('keeps a %s %s icon with NumberOfFrames %s, streamed in 7-byte chunks', async (transferSyntax, pixelVr, numberOfFrames) => {
+    const fixture = await buildIconImageFile({
+      pixelVr,
+      transferSyntax,
+      numberOfFrames,
+    })
+
+    const result = await curateOne({
+      fileInfo: {
+        kind: 'blob',
+        blob: new ChunkedBlob([new Uint8Array(fixture.buffer)]),
+        path: 'Sample_Protocol_Number/Sample_CRO/AB12-123/Visit 1/PET-Abdomen',
+        name: 'icon.dcm',
+        size: fixture.buffer.length,
+      },
+      outputTarget: {},
+      mappingOptions: { curationSpec: iconSpec, skipWrite: false },
+    })
+
+    expect(result.errors).toEqual([])
+    const output = new Uint8Array(await result.mappedBlob!.arrayBuffer())
+    // The appended slice starts at the top-level (7FE0,0010): the output ends
+    // with the source's top-level element.
+    const topLevelElement = fixture.buffer.subarray(
+      fixture.topLevelPixelDataOffset,
+    )
+    expect(
+      Array.from(output.subarray(output.length - topLevelElement.length)),
+    ).toEqual(Array.from(topLevelElement))
+
+    const reparsed = dcmjs.data.DicomMessage.readFile(
+      output.buffer as ArrayBuffer,
+    )
+    const iconItem = reparsed.dict['00880200'].Value![0] as dcmjs.DicomDataset
+    expect(bytesOf(iconItem['7FE00010'].Value![0])).toEqual(
+      Array(ICON_PIXEL_LENGTH).fill(ICON_PIXEL_BYTE),
+    )
+    expect(bytesOf(reparsed.dict['7FE00010'].Value![0])).toEqual(
+      Array(TOP_PIXEL_LENGTH).fill(TOP_PIXEL_BYTE),
+    )
   })
 })
