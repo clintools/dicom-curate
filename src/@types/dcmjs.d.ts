@@ -152,6 +152,8 @@ declare module 'dcmjs' {
         sqTagInfo: unknown,
         options?: data.ReadFileOptions,
       ): Promise<void>
+      /** `length` is -1 for an undefined (encapsulated) length. */
+      readPixelData(tagInfo: { length: number }): Promise<void>
     }
   }
 

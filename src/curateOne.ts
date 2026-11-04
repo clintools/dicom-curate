@@ -8,6 +8,7 @@ import {
 import { composeSpecs } from './composeSpecs'
 import createNestedDirectories from './createNestedDirectories'
 import curateDict from './curateDict'
+import { describeParseError } from './describeParseError'
 import { fetchWithRetry } from './fetchWithRetry'
 import { hash, hashStream, phiSafeToken } from './hash'
 import { loadLibStorage } from './libStorage'
@@ -65,10 +66,17 @@ export type TCurateOneArgs = {
   signal?: AbortSignal
 }
 
+// dcmjs reports an undefined value length (0xFFFFFFFF) as -1.
+const UNDEFINED_LENGTH = -1
+
 // dcmjs applies untilTag and the top-level NumberOfFrames inside sequence
 // items, so nested Pixel Data (Icon Image Sequence) throws or is mis-sized.
 // Keep both at the top level, matching the sync reader. See #331.
 class TopLevelUntilTagReader extends dcmjs.async.AsyncDicomReader {
+  private sequenceDepth = 0
+  /** Set when a sequence item holds encapsulated (compressed) Pixel Data. */
+  nestedEncapsulatedPixelData = false
+
   async readSequence(
     listener: { information?: { numberOfFrames?: unknown } },
     sqTagInfo: unknown,
@@ -77,20 +85,51 @@ class TopLevelUntilTagReader extends dcmjs.async.AsyncDicomReader {
     const { information } = listener
     const numberOfFrames = information?.numberOfFrames
     if (information) information.numberOfFrames = undefined
+    this.sequenceDepth++
     try {
       return await super.readSequence(listener, sqTagInfo, {
         ...options,
         untilTag: null,
       })
     } finally {
+      this.sequenceDepth--
       if (information) information.numberOfFrames = numberOfFrames
     }
   }
+
+  readPixelData(tagInfo: { length: number }) {
+    if (this.sequenceDepth > 0 && tagInfo.length === UNDEFINED_LENGTH) {
+      this.nestedEncapsulatedPixelData = true
+    }
+    return super.readPixelData(tagInfo)
+  }
+}
+
+// DicomDict.write encapsulates only the top-level Pixel Data. A nested
+// encapsulated Pixel Data would be written back with an explicit length, its
+// compressed bytes then read as native pixels. See #331.
+export const NESTED_ENCAPSULATED_PIXEL_DATA_ERROR =
+  'Encapsulated Pixel Data inside a sequence (e.g. Icon Image Sequence) cannot be re-encoded: remove the sequence or leave the header unmodified'
+
+function hasNestedPixelData(
+  dataset: dcmjs.DicomDataset,
+  nested = false,
+): boolean {
+  return Object.entries(dataset).some(
+    ([tag, element]) =>
+      (nested && tag === '7FE00010') ||
+      (element.vr === 'SQ' &&
+        (element.Value ?? []).some((item) =>
+          hasNestedPixelData(item as dcmjs.DicomDataset, true),
+        )),
+  )
 }
 
 // The streaming reader stores each Pixel Data frame as a list of fragments, but
 // DicomDict.write expects one ArrayBuffer per frame and keeps only the first
-// fragment. One fragment per frame is valid for every transfer syntax. See #331.
+// fragment. One fragment per frame is valid for the top-level Pixel Data in
+// every transfer syntax; a nested encapsulated one is not re-encoded at all
+// (NESTED_ENCAPSULATED_PIXEL_DATA_ERROR). See #331.
 function mergePixelDataFragments(dataset: dcmjs.DicomDataset): void {
   for (const [tag, element] of Object.entries(dataset)) {
     if (tag === '7FE00010' && element.Value) {
@@ -334,6 +373,8 @@ export async function curateOne({
     // When set, pixel data is appended to the re-serialised header as a
     // zero-copy Blob slice rather than being loaded into memory.
     let pixelDataOffset = -1
+    // A nested encapsulated Pixel Data parses, but cannot be re-encoded.
+    let nestedEncapsulatedPixelData = false
     try {
       const reader = new TopLevelUntilTagReader()
       const parseFeed = cancellableReadableStreamIterable(file.stream())
@@ -389,6 +430,7 @@ export async function curateOne({
       }
 
       mergePixelDataFragments(reader.dict)
+      nestedEncapsulatedPixelData = reader.nestedEncapsulatedPixelData
       dicomData = new dcmjs.data.DicomDict(reader.meta)
       dicomData.dict = reader.dict
     } catch (error) {
@@ -410,10 +452,7 @@ export async function curateOne({
           path: fileInfo.path,
           mtime,
           preMappedHash,
-          parseError:
-            (error instanceof Error && (error.message || error.stack)) ||
-            String(error) ||
-            'Unknown parse error',
+          parseError: describeParseError(error),
         },
         curationTime: performance.now() - startTime,
       }
@@ -428,9 +467,17 @@ export async function curateOne({
       mappingOptions,
     ))
 
+    const headerChanged = Object.keys(clonedMapResults.mappings).length > 0
+    // Only a re-serialised header re-encodes the nested Pixel Data; unchanged
+    // files keep their original bytes, and a removed sequence is not written.
+    const wouldReencodeNestedEncapsulated =
+      nestedEncapsulatedPixelData &&
+      headerChanged &&
+      hasNestedPixelData((mappedDicomData as dcmjs.data.DicomDict).dict)
+
     // If the spec produced no DICOM header changes, short-circuit to
     // preserve the original file bytes (the dcmjs round-trip is not byte-preserving).
-    if (Object.keys(clonedMapResults.mappings).length === 0) {
+    if (!headerChanged) {
       mappedDicomData = {
         write: () => file,
       }
@@ -458,6 +505,24 @@ export async function curateOne({
       }
       clonedMapResults.curationTime = performance.now() - startTime
       return clonedMapResults
+    }
+
+    // Not written: the output would carry the compressed icon as native pixels.
+    if (wouldReencodeNestedEncapsulated) {
+      const { outputFilePath: _notWritten, ...unwritten } = clonedMapResults
+      return {
+        ...unwritten,
+        errors: [...unwritten.errors, NESTED_ENCAPSULATED_PIXEL_DATA_ERROR],
+        mappingRequired: true,
+        fileInfo: {
+          name: fileInfo.name,
+          size: fileInfo.size,
+          path: fileInfo.path,
+          mtime,
+          preMappedHash,
+        },
+        curationTime: performance.now() - startTime,
+      }
     }
 
     // Indicate that mapping was required (we didn't hit the early-skip branch above)
