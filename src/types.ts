@@ -253,6 +253,13 @@ export type TMapResults = {
    * `handle` fileInfo then holds a `FileSystemDirectoryHandle`.
    */
   scanTarget?: 'directory'
+  /**
+   * The file never finished mapping: its worker crashed, exited, failed to
+   * initialise, sent an unrecognised reply, or was recycled by the stall
+   * watchdog. The file may be valid and worth a retry, but it may also be what
+   * killed the worker, in which case it kills a retry's too: bound retries.
+   */
+  workerLost?: true
   /** Upload/write failures only (retryable). Separate from `errors` which
    *  contains DICOM validation issues that cannot be resolved by retrying. */
   uploadErrors?: string[]
@@ -431,6 +438,11 @@ type TProgressMessageBase = {
   // Whether the directory scan has finished. Until it has, `totalFiles` is a
   // lower bound the scanner is still revising, not an exact denominator.
   scanComplete?: boolean
+  // Suspensions (frozen or sleeping tab, sleeping host) the stall watchdog
+  // detected and excluded from stall detection. Absent until the first one.
+  // Only gaps of over 3 min between its 60 s checks count; shorter delays are
+  // also excluded but not reported. `totalMs` sums each reported gap in full.
+  suspensions?: { count: number; totalMs: number }
 }
 
 type TProgressMessageProgress = TProgressMessageBase & {

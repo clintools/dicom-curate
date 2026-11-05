@@ -1,4 +1,5 @@
 import type { MockedFunction } from 'vitest'
+import type { TFileInfo, TProgressMessage } from './types'
 
 async function flushAsyncSetup() {
   await Promise.resolve()
@@ -82,6 +83,7 @@ describe('curateMany', () => {
       resetProgressTimestamps: vi.fn(),
       resetScanProgressTime: vi.fn(),
       scanAnomalies: [],
+      shiftProgressTimestamps: vi.fn(),
       setDirectoryScanFinished: vi.fn(),
       setAbortSignal: vi.fn(),
       setCustomUploader: vi.fn(),
@@ -725,5 +727,209 @@ describe('curateMany', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  describe('page suspension', () => {
+    const SUSPENSION_MS = 15 * 60_000
+
+    /**
+     * Last progress at the moment the run started, shifted like the real pool.
+     * Busy: one worker mapping with the scan finished. Otherwise: nothing
+     * mapping, scan still running.
+     */
+    function stubPool({ busy }: { busy: boolean }) {
+      const pool = vi.mocked(mappingWorkerPool)
+      let lastProgress = Date.now()
+      const worker = { onerror: vi.fn() }
+      pool.getLastMappingProgressTime.mockImplementation(() => lastProgress)
+      pool.getLastScanProgressTime.mockImplementation(() => lastProgress)
+      pool.shiftProgressTimestamps.mockImplementation((ms) => {
+        lastProgress = Math.min(lastProgress + ms, Date.now())
+      })
+      pool.getWorkersActive.mockReturnValue(busy ? 1 : 0)
+      pool.isDirectoryScanFinished.mockReturnValue(busy)
+      pool.getPendingReplacements.mockReturnValue(0)
+      pool.getWorkerCurrentFile.mockReturnValue(
+        new Map(busy ? [[worker as unknown as Worker, {} as TFileInfo]] : []),
+      )
+      return worker
+    }
+
+    function startHttpRun(
+      signal: AbortSignal,
+      onProgress = vi.fn<(msg: TProgressMessage) => void>(),
+    ) {
+      return curateMany(
+        {
+          inputType: 'http',
+          inputUrls: ['https://example.com/file.dcm'],
+          curationSpec: 'none',
+          signal,
+        } as any,
+        onProgress,
+      )
+    }
+
+    function nextForwardedSuspensions(
+      onProgress: MockedFunction<(msg: TProgressMessage) => void>,
+    ) {
+      capturedProgressCallback!({ response: 'progress' })
+      return onProgress.mock.lastCall![0].suspensions
+    }
+
+    it('does not recover busy workers on the first tick after a suspension', async () => {
+      vi.useFakeTimers()
+      try {
+        const worker = stubPool({ busy: true })
+        const controller = new AbortController()
+        const onProgress = vi.fn<(msg: TProgressMessage) => void>()
+        const promise = startHttpRun(controller.signal, onProgress)
+        await flushAsyncSetup()
+        const dispatchesBeforeTick = vi.mocked(
+          mappingWorkerPool.dispatchMappingJobs,
+        ).mock.calls.length
+
+        // Frozen: the clock moves on but no timer fires until the page resumes.
+        vi.setSystemTime(Date.now() + SUSPENSION_MS)
+        vi.advanceTimersByTime(60_000)
+
+        expect(worker.onerror).not.toHaveBeenCalled()
+        expect(mappingWorkerPool.dispatchMappingJobs).toHaveBeenCalledTimes(
+          dispatchesBeforeTick,
+        )
+        expect(mappingWorkerPool.shiftProgressTimestamps).toHaveBeenCalledWith(
+          SUSPENSION_MS,
+        )
+        expect(nextForwardedSuspensions(onProgress)).toEqual({
+          count: 1,
+          totalMs: SUSPENSION_MS + 60_000,
+        })
+
+        controller.abort()
+        await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('does not fail a scanning run on the first tick after a suspension', async () => {
+      const scanWorker = makeMockScanWorker()
+      ;(
+        workerModule.createWorker as MockedFunction<
+          typeof workerModule.createWorker
+        >
+      ).mockResolvedValueOnce(scanWorker as unknown as Worker)
+
+      vi.useFakeTimers()
+      try {
+        stubPool({ busy: false })
+
+        const controller = new AbortController()
+        const onProgress = vi.fn<(msg: TProgressMessage) => void>()
+        const promise = curateMany(
+          {
+            inputType: 'path',
+            inputDirectory: '/tmp/curate-many-test',
+            curationSpec: 'none',
+            signal: controller.signal,
+          } as any,
+          onProgress,
+        )
+        const settledWith = vi.fn()
+        promise.catch(settledWith)
+
+        await flushTicks()
+        expect(scanWorker.postMessage).toHaveBeenCalled()
+
+        vi.setSystemTime(Date.now() + SUSPENSION_MS)
+        vi.advanceTimersByTime(60_000)
+        await flushTicks()
+
+        expect(settledWith).not.toHaveBeenCalled()
+        expect(nextForwardedSuspensions(onProgress)).toMatchObject({
+          count: 1,
+        })
+
+        controller.abort()
+        await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('still recovers busy workers after ten silent minutes of on-time ticks', async () => {
+      vi.useFakeTimers()
+      try {
+        const worker = stubPool({ busy: true })
+        const controller = new AbortController()
+        const onProgress = vi.fn<(msg: TProgressMessage) => void>()
+        const promise = startHttpRun(controller.signal, onProgress)
+        await flushAsyncSetup()
+
+        vi.advanceTimersByTime(11 * 60_000)
+
+        expect(worker.onerror).toHaveBeenCalledWith({
+          message: 'Worker stalled (no response for 10 minutes)',
+        })
+        expect(nextForwardedSuspensions(onProgress)).toBeUndefined()
+
+        controller.abort()
+        await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('does not count a sleep too short to report as silence', async () => {
+      vi.useFakeTimers()
+      try {
+        const worker = stubPool({ busy: true })
+        const controller = new AbortController()
+        const onProgress = vi.fn<(msg: TProgressMessage) => void>()
+        const promise = startHttpRun(controller.signal, onProgress)
+        await flushAsyncSetup()
+
+        // 9 min of running plus a 90 s sleep: over the timeout by wall clock.
+        vi.advanceTimersByTime(8 * 60_000)
+        vi.setSystemTime(Date.now() + 90_000)
+        vi.advanceTimersByTime(60_000)
+
+        expect(worker.onerror).not.toHaveBeenCalled()
+        expect(nextForwardedSuspensions(onProgress)).toBeUndefined()
+
+        controller.abort()
+        await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('still recovers a stuck worker when every tick arrives late', async () => {
+      vi.useFakeTimers()
+      try {
+        const worker = stubPool({ busy: true })
+        const controller = new AbortController()
+        const promise = startHttpRun(controller.signal)
+        await flushAsyncSetup()
+
+        // Each tick: 4 min not running, then 1 min running.
+        const lateTick = () => {
+          vi.setSystemTime(Date.now() + 4 * 60_000)
+          vi.advanceTimersByTime(60_000)
+        }
+        for (let tick = 0; tick < 10; tick++) lateTick()
+        expect(worker.onerror).not.toHaveBeenCalled()
+
+        lateTick()
+        expect(worker.onerror).toHaveBeenCalledWith({
+          message: 'Worker stalled (no response for 10 minutes)',
+        })
+
+        controller.abort()
+        await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 })

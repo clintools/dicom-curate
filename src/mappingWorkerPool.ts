@@ -788,6 +788,7 @@ function recoverCrashedWorker(
     errors: [errorMessage],
     quarantine: {},
     fileInfo,
+    workerLost: true,
   }
 
   mapResultsList?.push(errorMapResults)
@@ -1220,4 +1221,15 @@ export function resetScanProgressTime(): void {
 export function resetProgressTimestamps(): void {
   lastMappingProgressTime = Date.now()
   lastScanProgressTime = Date.now()
+}
+
+/**
+ * Move both stall watchdog baselines forward by time the page was not running,
+ * so it never counts as silence. Capped at now: progress handled on resume
+ * already sits after the suspension, and a future baseline would hide a stall.
+ */
+export function shiftProgressTimestamps(ms: number): void {
+  const now = Date.now()
+  lastMappingProgressTime = Math.min(lastMappingProgressTime + ms, now)
+  lastScanProgressTime = Math.min(lastScanProgressTime + ms, now)
 }

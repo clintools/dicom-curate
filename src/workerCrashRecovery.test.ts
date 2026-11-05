@@ -171,6 +171,11 @@ describe('worker crash recovery', () => {
       r.errors?.some((e) => e.includes('Simulated worker crash')),
     )
     expect(crashErrors.length).toBeGreaterThanOrEqual(1)
+    expect(crashErrors.every((r) => r.workerLost === true)).toBe(true)
+    const mapped = result.mapResultsList!.filter(
+      (r) => !crashErrors.includes(r),
+    )
+    expect(mapped.some((r) => r.workerLost !== undefined)).toBe(false)
 
     // Replacement worker created (total > initial pool size)
     expect(getMockWorkersCreated().length).toBeGreaterThan(WORKER_COUNT)
@@ -320,6 +325,59 @@ describe('worker crash recovery', () => {
       r.errors?.some((e) => e.includes('stalled')),
     )
     expect(stallErrors.length).toBeGreaterThanOrEqual(1)
+  }, 30_000)
+
+  it('waits a full timeout after a page suspension before recovering a stuck worker', async () => {
+    vi.useFakeTimers()
+
+    configureMockMappingWorkers(makeBehaviors('hang'))
+
+    const progressMessages: TProgressMessage[] = []
+    const curatePromise = curateMany(
+      {
+        inputType: 'path',
+        inputDirectory: testDir,
+        curationSpec: minimalSpec,
+        skipWrite: true,
+        workerCount: WORKER_COUNT,
+      },
+      (msg) => progressMessages.push(msg),
+    )
+
+    const advance = async (ms: number, times: number) => {
+      for (let i = 0; i < times; i++) {
+        vi.advanceTimersByTime(ms)
+        await flushMicrotasks()
+      }
+    }
+
+    // 9 files mapped, 1 stuck on the hanging worker.
+    await advance(1, 200)
+
+    // The page freezes for 15 min, then resumes into one watchdog tick.
+    vi.setSystemTime(Date.now() + 15 * 60 * 1000)
+    await advance(60 * 1000, 1)
+    const stalledSoFar = progressMessages.filter(
+      (m) =>
+        m.response === 'progress' &&
+        m.mapResults?.errors.some((e) => e.includes('stalled')),
+    )
+    expect(stalledSoFar).toHaveLength(0)
+
+    // Then a full timeout of on-time ticks recovers the stuck worker.
+    await advance(60 * 1000, 11)
+    await advance(1, 50)
+
+    const result = await curatePromise
+
+    expect(result.response).toBe('done')
+    expect(result.processedFiles).toBe(10)
+    expect(result.suspensions).toEqual({ count: 1, totalMs: 16 * 60 * 1000 })
+    const stalledResults = result.mapResultsList!.filter((r) =>
+      r.errors?.some((e) => e.includes('stalled')),
+    )
+    expect(stalledResults).toHaveLength(1)
+    expect(stalledResults[0].workerLost).toBe(true)
   }, 30_000)
 
   it('stall watchdog re-pumps a stalled dispatch with no active workers', async () => {
