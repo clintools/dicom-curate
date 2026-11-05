@@ -42,6 +42,10 @@ const RETAINED_BYTES_PER_FILE_CEILING = 64
 /** The collecting run must exceed the ceiling by this much, or the ceiling passes vacuously. */
 const DISCRIMINATION_FACTOR = 4
 
+/** One line per run from the mapping pool; at this volume it buries the measurements. */
+const PROGRESS_CHATTER =
+  /^(Finished mapping \d+ files|job is finished|directoryScanFinished)$/
+
 /**
  * `curateMany` keeping only the final message and an error tally. The harness's
  * `runCapturingProgress` keeps every progress message, each with a `TMapResults`,
@@ -60,8 +64,15 @@ async function runQuietly(options: OrganizeOptions) {
 describe(`curateMany at ${FILE_COUNT.toLocaleString()} files`, () => {
   let workspace: Workspace
   let flushWorkspace: Workspace
+  const originalConsoleLog = console.log
 
   beforeAll(async () => {
+    console.log = (...args) => {
+      if (args.length === 1 && PROGRESS_CHATTER.test(String(args[0]))) {
+        return
+      }
+      originalConsoleLog.apply(console, args)
+    }
     workspace = createIntegrationWorkspace()
     await writeImages(workspace.inputDir, FILE_COUNT)
     flushWorkspace = createIntegrationWorkspace()
@@ -69,6 +80,7 @@ describe(`curateMany at ${FILE_COUNT.toLocaleString()} files`, () => {
   })
 
   afterAll(() => {
+    console.log = originalConsoleLog
     workspace?.cleanup()
     flushWorkspace?.cleanup()
   })

@@ -11,9 +11,6 @@ const inlineDeps = (...extra: string[]) => ({
   deps: { inline: ['@noble/hashes', ...extra] },
 })
 
-const PROGRESS_CHATTER =
-  /^(Finished mapping \d+ files|job is finished|directoryScanFinished)$/
-
 /** Suites that build and drive the real dist/esm workers need longer limits. */
 const REAL_WORKER_TIMEOUTS = {
   testTimeout: 120_000,
@@ -31,14 +28,6 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-    // Mapping-pool progress chatter would bury the scale suite's measurements.
-    // Drop a chunk only if every line is chatter: vitest batches writes.
-    // Root-level: vitest does not accept `onConsoleLog` per project.
-    onConsoleLog: (log) =>
-      !log
-        .trim()
-        .split('\n')
-        .every((line) => PROGRESS_CHATTER.test(line.trim())),
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'html'],
