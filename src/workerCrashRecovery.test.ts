@@ -171,6 +171,11 @@ describe('worker crash recovery', () => {
       r.errors?.some((e) => e.includes('Simulated worker crash')),
     )
     expect(crashErrors.length).toBeGreaterThanOrEqual(1)
+    expect(crashErrors.every((r) => r.workerLost === true)).toBe(true)
+    const mapped = result.mapResultsList!.filter(
+      (r) => !crashErrors.includes(r),
+    )
+    expect(mapped.some((r) => r.workerLost !== undefined)).toBe(false)
 
     // Replacement worker created (total > initial pool size)
     expect(getMockWorkersCreated().length).toBeGreaterThan(WORKER_COUNT)

@@ -233,6 +233,8 @@ describe('dispatchMappingJobs', () => {
       (r: any) => r.fileInfo?.name === 'rejected.dcm',
     )
     expect(failed.errors).toEqual(['Header provider unavailable'])
+    // The worker survived, so this is not a worker-lost file.
+    expect(failed.workerLost).toBeUndefined()
 
     // The second file could only be dispatched because the worker went back
     // to the pool, so this is the assertion that the slot was not leaked.
