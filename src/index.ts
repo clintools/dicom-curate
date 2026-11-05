@@ -24,6 +24,7 @@ import {
   setMappingWorkerOptions,
   setScanResumeCallback,
   setTotalDiscoveredFiles,
+  shiftProgressTimestamps,
   type TMappingWorkerOptions,
   terminateAllWorkers,
 } from './mappingWorkerPool'
@@ -361,7 +362,29 @@ async function curateMany(
     // files as mapping errors) and re-pump the dispatch loop. Guards against
     // crashes no handler sees (e.g. OOM kills) and against a lost dispatch.
     const STALL_TIMEOUT_MS = 10 * 60 * 1000
+    const STALL_CHECK_INTERVAL_MS = 60_000
+    const SUSPENSION_GAP_MS = 3 * STALL_CHECK_INTERVAL_MS
+    let lastTickTime = Date.now()
+    let suspensionCount = 0
+    let suspendedMs = 0
     const stallWatchdog = setInterval(() => {
+      // Only on-time running counts towards the timeout: a late tick's lateness
+      // is assumed suspended (frozen tab, sleep). Throttled timers look the
+      // same, so a stall under throttling is detected late, never missed.
+      const now = Date.now()
+      const gap = now - lastTickTime
+      lastTickTime = now
+      if (gap > STALL_CHECK_INTERVAL_MS) {
+        shiftProgressTimestamps(gap - STALL_CHECK_INTERVAL_MS)
+      }
+      if (gap > SUSPENSION_GAP_MS) {
+        console.warn(
+          `Stall watchdog tick ${Math.round(gap / 1000)} s after the previous one; treating the gap as a page suspension, not a stall.`,
+        )
+        suspensionCount += 1
+        suspendedMs += gap
+      }
+
       // Gating on active workers alone misses the worst case: a dispatch loop
       // killed between `workersActive -= 1` and the re-dispatch leaves zero
       // workers active with the queue still full and the scanner paused, since
@@ -388,7 +411,7 @@ async function curateMany(
       const relevantProgressTime = mappingWorkOutstanding
         ? getLastMappingProgressTime()
         : getLastScanProgressTime()
-      if (Date.now() - relevantProgressTime <= STALL_TIMEOUT_MS) return
+      if (now - relevantProgressTime <= STALL_TIMEOUT_MS) return
 
       console.error(
         `Stall detected: no ${mappingWorkOutstanding ? 'mapping' : 'scan'} progress for 10 minutes (${workersActive} worker(s) active, ${queueLength} file(s) queued, ${pendingReplacements} replacement(s) pending, scan ${scanFinished ? 'finished' : 'in progress'}).`,
@@ -434,10 +457,19 @@ async function curateMany(
       void dispatchMappingJobs()
 
       resetProgressTimestamps()
-    }, 60_000)
+    }, STALL_CHECK_INTERVAL_MS)
 
     // Progress callback wraps the user's callback and handles lifecycle
-    const progressCallback: ProgressCallback = (msg) => {
+    const progressCallback: ProgressCallback = (poolMsg) => {
+      // Built per message: a shared object would carry one consumer's mutation
+      // into later messages.
+      const msg =
+        suspensionCount > 0
+          ? {
+              ...poolMsg,
+              suspensions: { count: suspensionCount, totalMs: suspendedMs },
+            }
+          : poolMsg
       if (msg.response === 'done') {
         // Settle first: a consumer that throws must not be able to stop
         // curateMany from resolving, and 'done' is forwarded at most once.
