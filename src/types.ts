@@ -256,7 +256,8 @@ export type TMapResults = {
   /**
    * The file never finished mapping: its worker crashed, exited, failed to
    * initialise, sent an unrecognised reply, or was recycled by the stall
-   * watchdog. The file itself may be valid, so a retry can succeed.
+   * watchdog. The file may be valid and worth a retry, but it may also be what
+   * killed the worker, in which case it kills a retry's too: bound retries.
    */
   workerLost?: true
   /** Upload/write failures only (retryable). Separate from `errors` which
@@ -437,9 +438,10 @@ type TProgressMessageBase = {
   // Whether the directory scan has finished. Until it has, `totalFiles` is a
   // lower bound the scanner is still revising, not an exact denominator.
   scanComplete?: boolean
-  // Page suspensions (frozen or sleeping tab) the stall watchdog detected and
-  // excluded from stall detection. Absent until the first one. `totalMs` is an
-  // upper bound: each suspension may include up to one 60 s check interval.
+  // Suspensions (frozen or sleeping tab, sleeping host) the stall watchdog
+  // detected and excluded from stall detection. Absent until the first one.
+  // Only gaps of over 3 min between its 60 s checks count; shorter delays are
+  // also excluded but not reported. `totalMs` sums each reported gap in full.
   suspensions?: { count: number; totalMs: number }
 }
 

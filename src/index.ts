@@ -379,7 +379,7 @@ async function curateMany(
       }
       if (gap > SUSPENSION_GAP_MS) {
         console.warn(
-          `Stall watchdog tick ${Math.round(gap / 1000)} s after the previous one; treating the gap as a page suspension, not a stall.`,
+          `Stall watchdog tick ${Math.round(gap / 1000)} s after the previous one; treating the gap as a suspension, not a stall.`,
         )
         suspensionCount += 1
         suspendedMs += gap
