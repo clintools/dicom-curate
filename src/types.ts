@@ -437,6 +437,10 @@ type TProgressMessageBase = {
   // Whether the directory scan has finished. Until it has, `totalFiles` is a
   // lower bound the scanner is still revising, not an exact denominator.
   scanComplete?: boolean
+  // Page suspensions (frozen or sleeping tab) the stall watchdog detected and
+  // excluded from stall detection. Absent until the first one. `totalMs` is an
+  // upper bound: each suspension may include up to one 60 s check interval.
+  suspensions?: { count: number; totalMs: number }
 }
 
 type TProgressMessageProgress = TProgressMessageBase & {
