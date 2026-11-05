@@ -453,7 +453,7 @@ result.excluded // => 'pre' | 'post' | undefined
 
 Development requires Node.js 22.13 or newer (pnpm 11's minimum); CI runs Node 24. The published package supports Node.js 20+.
 
-Vitest is split into five projects in `vitest.config.ts`:
+Vitest is split into six projects in `vitest.config.ts`:
 
 | Command | Project | Location | Purpose |
 |---------|---------|----------|---------|
@@ -462,6 +462,7 @@ Vitest is split into five projects in `vitest.config.ts`:
 | `pnpm test:e2e` | `e2e` | `e2e/` | Pipeline smoke tests (runs `build:esm` first; uses `dist/`) |
 | `pnpm test:conformance` | `conformance` | `conformance/` | `dciodvfy` regression (synthetic; optional public/local via env) |
 | `pnpm test:scale` | `scale` | `scale/` | Memory and accounting at volume: 20,000 files, and a 256 MiB file (runs `build:esm` first; CI only, not the pre-push hook; tune with `SCALE_FILE_COUNT` (min 5,000) / `SCALE_LARGE_FILE_MIB` (min 129)) |
+| `pnpm test:throughput` | `throughput` | `scale/` | Times `curateMany` from two builds, alternating; reports slower / faster / no significant change per workload and fails past ±15% (`THROUGHPUT_THRESHOLD_PCT`). Base is `THROUGHPUT_BASE_DIST`, defaulting to `dist/esm` (A/A). In CI its own job compares a PR against `main`; not a required check |
 
 `integration` and `e2e` both drive the real workers from `dist/esm`, since
 `curateMany` builds them from `new URL(...)` and has no injection seam. They

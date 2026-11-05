@@ -92,11 +92,25 @@ export default defineConfig({
         test: {
           // Separate from `integration` so its ~30s runs on its own.
           name: 'scale',
-          include: ['scale/**/*.test.ts'],
+          include: ['scale/**/*.scale.test.ts'],
           exclude: COMMON_EXCLUDE,
           testTimeout: 600_000,
           // The 20,000-file corpus is written in beforeAll.
           hookTimeout: 300_000,
+          server: inlineDeps('dcmjs', 'dicom-synth'),
+        },
+      },
+      {
+        extends: true,
+        test: {
+          // Needs a second build (THROUGHPUT_BASE_DIST) to mean anything, so
+          // it runs in its own CI job.
+          name: 'throughput',
+          include: ['scale/**/*.throughput.test.ts'],
+          exclude: COMMON_EXCLUDE,
+          testTimeout: 600_000,
+          // afterEach deletes ~40,000 files; the 10s default is too tight on CI.
+          hookTimeout: 60_000,
           server: inlineDeps('dcmjs', 'dicom-synth'),
         },
       },

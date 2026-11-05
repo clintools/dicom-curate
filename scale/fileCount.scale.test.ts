@@ -6,13 +6,12 @@
  */
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { curateMany } from 'dicom-curate'
-import type { OrganizeOptions } from '../src/types'
 import {
   createIntegrationWorkspace,
   integrationOptions,
   integrationSpec,
   listFilesRecursive,
+  runQuietly,
   type Workspace,
   writeImages,
 } from '../testutils/integrationHarness'
@@ -45,21 +44,6 @@ const DISCRIMINATION_FACTOR = 4
 /** One line per run from the mapping pool; at this volume it buries the measurements. */
 const PROGRESS_CHATTER =
   /^(Finished mapping \d+ files|job is finished|directoryScanFinished)$/
-
-/**
- * `curateMany` keeping only the final message and an error tally. The harness's
- * `runCapturingProgress` keeps every progress message, each with a `TMapResults`,
- * so it would retain the very structure under measurement.
- */
-async function runQuietly(options: OrganizeOptions) {
-  let errorCount = 0
-  const done = await curateMany(options, (msg) => {
-    if (msg.response === 'progress') {
-      errorCount += msg.mapResults?.errors?.length ?? 0
-    }
-  })
-  return { done, errorCount }
-}
 
 describe(`curateMany at ${FILE_COUNT.toLocaleString()} files`, () => {
   let workspace: Workspace
