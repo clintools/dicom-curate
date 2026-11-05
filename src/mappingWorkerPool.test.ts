@@ -697,6 +697,28 @@ describe('dispatchMappingJobs', () => {
     })
   })
 
+  it('shifts the stall baselines forward but never past now', async () => {
+    configureMockMappingWorkers(['normal'])
+    await pool.initializeMappingWorkers(false, undefined, () => {}, 1)
+    const mappingBaseline = pool.getLastMappingProgressTime()
+    const scanBaseline = pool.getLastScanProgressTime()
+
+    vi.useFakeTimers({ now: mappingBaseline + 10 * 60_000 })
+    try {
+      pool.shiftProgressTimestamps(4 * 60_000)
+      expect(pool.getLastMappingProgressTime()).toBe(
+        mappingBaseline + 4 * 60_000,
+      )
+      expect(pool.getLastScanProgressTime()).toBe(scanBaseline + 4 * 60_000)
+
+      pool.shiftProgressTimestamps(60 * 60_000)
+      expect(pool.getLastMappingProgressTime()).toBe(Date.now())
+      expect(pool.getLastScanProgressTime()).toBe(Date.now())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('leaves the pool clean when the run is aborted during header resolution', async () => {
     pauseHeaders = true
     configureMockMappingWorkers(['normal'])
