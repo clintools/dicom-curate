@@ -788,6 +788,7 @@ function recoverCrashedWorker(
     errors: [errorMessage],
     quarantine: {},
     fileInfo,
+    workerLost: true,
   }
 
   mapResultsList?.push(errorMapResults)

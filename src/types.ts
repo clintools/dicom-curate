@@ -253,6 +253,12 @@ export type TMapResults = {
    * `handle` fileInfo then holds a `FileSystemDirectoryHandle`.
    */
   scanTarget?: 'directory'
+  /**
+   * The file never finished mapping: its worker crashed, exited, failed to
+   * initialise, sent an unrecognised reply, or was recycled by the stall
+   * watchdog. The file itself may be valid, so a retry can succeed.
+   */
+  workerLost?: true
   /** Upload/write failures only (retryable). Separate from `errors` which
    *  contains DICOM validation issues that cannot be resolved by retrying. */
   uploadErrors?: string[]
