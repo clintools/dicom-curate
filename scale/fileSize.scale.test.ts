@@ -13,18 +13,29 @@ import { runPassthroughCurate } from '../conformance/helpers'
 import { MIB, measurePeakRssOverhead, mib } from '../testutils/memory'
 import { createWorkspace, type Workspace } from '../testutils/workspace'
 
-const SMALL_MIB = 4
-
 /**
- * A realistic large instance, far enough from `SMALL_MIB` that sampling noise
- * cannot fake the slope. Override with `SCALE_LARGE_FILE_MIB`.
+ * Curating a large file costs a bounded 15–33 MiB of RSS that later curations
+ * reuse. Warming up at this size pays it unmeasured; a few MiB would leave it
+ * to the large run, inflating the slope to ~0.4.
  */
-const LARGE_MIB = Number(process.env.SCALE_LARGE_FILE_MIB ?? 64)
+const SMALL_MIB = 64
 
 /**
- * Peak memory growth as a fraction of file-size growth. Streaming scores about
- * -0.03, buffering with `readFileSync` 4.8. A slope, not an absolute ceiling,
- * so it does not encode this machine's baseline RSS.
+ * Far enough from `SMALL_MIB` that sampling noise cannot fake the slope.
+ * Override with `SCALE_LARGE_FILE_MIB`.
+ */
+const LARGE_MIB = Number(process.env.SCALE_LARGE_FILE_MIB ?? 256)
+
+if (!Number.isInteger(LARGE_MIB) || LARGE_MIB <= 2 * SMALL_MIB) {
+  throw new Error(
+    `SCALE_LARGE_FILE_MIB must be an integer greater than ${2 * SMALL_MIB}, got '${process.env.SCALE_LARGE_FILE_MIB}'`,
+  )
+}
+
+/**
+ * Peak memory growth as a fraction of file-size growth. Streaming scores
+ * −0.02 to 0.04; holding one whole-file Buffer about 1. A slope, not an absolute
+ * ceiling, so it does not encode this machine's baseline RSS.
  */
 const MAX_MEMORY_SLOPE = 0.5
 
@@ -58,6 +69,9 @@ describe('curateOne memory against file size', () => {
     const smallPath = writeFixture(SMALL_MIB, 1)
     const largePath = writeFixture(LARGE_MIB, 2)
 
+    // The first curation in the process pays module load and JIT. Measured,
+    // that lands on the small run and cancels the large run's growth.
+    await runPassthroughCurate(smallPath, workspace.outputDir)
     const small = await curateMeasuringPeakRss(smallPath, workspace.outputDir)
     const large = await curateMeasuringPeakRss(largePath, workspace.outputDir)
 

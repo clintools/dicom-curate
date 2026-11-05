@@ -461,7 +461,7 @@ Vitest is split into five projects in `vitest.config.ts`:
 | `pnpm test:integration` | `integration` | `src/**/*.integration.test.ts` | Cross-module flows through real workers (runs `build:esm` first; uses `dist/`) |
 | `pnpm test:e2e` | `e2e` | `e2e/` | Pipeline smoke tests (runs `build:esm` first; uses `dist/`) |
 | `pnpm test:conformance` | `conformance` | `conformance/` | `dciodvfy` regression (synthetic; optional public/local via env) |
-| `pnpm test:scale` | `scale` | `scale/` | Memory and accounting at volume: 20,000 files, and one 64 MiB file (runs `build:esm` first; CI only, not the pre-push hook; tune with `SCALE_FILE_COUNT` (min 5,000) / `SCALE_LARGE_FILE_MIB`) |
+| `pnpm test:scale` | `scale` | `scale/` | Memory and accounting at volume: 20,000 files, and a 256 MiB file (runs `build:esm` first; CI only, not the pre-push hook; tune with `SCALE_FILE_COUNT` (min 5,000) / `SCALE_LARGE_FILE_MIB` (min 129)) |
 
 `integration` and `e2e` both drive the real workers from `dist/esm`, since
 `curateMany` builds them from `new URL(...)` and has no injection seam. They
