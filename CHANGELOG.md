@@ -1,3 +1,15 @@
+# [0.43.0](https://github.com/clintools/dicom-curate/compare/v0.42.4...v0.43.0) (2026-11-10)
+
+
+### Bug Fixes
+
+* stop the stall watchdog reading a suspended page as a stall ([3919011](https://github.com/clintools/dicom-curate/commit/3919011dc34a9b01c714a1c4d1b404a376794cd5))
+
+
+### Features
+
+* mark a map result whose mapping worker was lost ([5a72945](https://github.com/clintools/dicom-curate/commit/5a72945f6da0e03101bbecc1616c7eb0ffd085e0))
+
 ## [0.42.4](https://github.com/clintools/dicom-curate/compare/v0.42.3...v0.42.4) (2026-11-04)
 
 
