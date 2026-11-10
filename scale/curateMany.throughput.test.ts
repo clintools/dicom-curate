@@ -11,6 +11,7 @@ import { ps315SmokeSpec } from '../e2e/helpers'
 import type { curateMany } from '../src/index'
 import type { OrganizeOptions } from '../src/types'
 import {
+  filterProgressChatter,
   integrationOptions,
   integrationSpec,
   runQuietly,
@@ -76,10 +77,14 @@ const HEAD_FIRST = ['head', 'base'] as const
 
 type Verdict = 'slower' | 'faster' | 'no significant change'
 
-function verdict(changePct: number): Verdict {
-  if (changePct > THRESHOLD_PCT) return 'slower'
-  if (changePct < -THRESHOLD_PCT) return 'faster'
+function verdict(throughputPct: number): Verdict {
+  if (throughputPct < -THRESHOLD_PCT) return 'slower'
+  if (throughputPct > THRESHOLD_PCT) return 'faster'
   return 'no significant change'
+}
+
+function signedPct(pct: number): string {
+  return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
 }
 
 function median(values: number[]): number {
@@ -92,26 +97,29 @@ describe('curateMany throughput, head against base', () => {
   const workspace = useWorkspaces()
   let base: CurateMany
   let head: CurateMany
+  let restoreConsoleLog: (() => void) | undefined
 
   beforeAll(async () => {
+    restoreConsoleLog = filterProgressChatter()
     base = await loadCurateMany(BASE_DIST)
     head = await loadCurateMany(HEAD_DIST)
     if (process.env.GITHUB_STEP_SUMMARY) {
       appendFileSync(
         process.env.GITHUB_STEP_SUMMARY,
-        `### Throughput, head vs base (±${THRESHOLD_PCT}% allowed)\n\n` +
-          '| Workload | Verdict | Head vs base | Base | Head | Head/base per pair |\n' +
-          '|---|---|---|---|---|---|\n',
+        `### Throughput, head vs base (±${THRESHOLD_PCT}% throughput allowed)\n\n` +
+          '| Workload | Verdict | Throughput | Run time | Base | Head | Head/base time per pair |\n' +
+          '|---|---|---|---|---|---|---|\n',
       )
     }
   })
 
   afterAll(() => {
+    restoreConsoleLog?.()
     if (process.env.GITHUB_STEP_SUMMARY) {
       appendFileSync(
         process.env.GITHUB_STEP_SUMMARY,
         '\nPer-pair ratio: head time / base time. Below 1 = head faster. ' +
-          `Verdict uses the median ratio; outside ±${THRESHOLD_PCT}% fails the check.\n`,
+          `Verdict uses the throughput change from the median ratio; outside ±${THRESHOLD_PCT}% fails the check.\n`,
       )
     }
   })
@@ -126,6 +134,8 @@ describe('curateMany throughput, head against base', () => {
         rmSync(runDir, { recursive: true, force: true })
         mkdirSync(runDir)
         const start = performance.now()
+        // Base runs head's options and spec: the check assumes both builds accept
+        // the same contract, else a change reads as errors or skewed timings.
         const { done, errorCount } = await runQuietly(
           integrationOptions(inputDir, runDir, workload.spec, {
             workerCount: 4,
@@ -142,6 +152,11 @@ describe('curateMany throughput, head against base', () => {
         return ms
       }
 
+      // Discarded: the first run after writeImages pays for cold caches and
+      // pending writes, and would land on whichever build runs first.
+      await timeRun('base')
+      await timeRun('head')
+
       const pairs: { base: number; head: number }[] = []
       for (let pair = 0; pair < PAIRS; pair++) {
         // The second run of a pair inherits the first's page cache and pending
@@ -155,23 +170,27 @@ describe('curateMany throughput, head against base', () => {
       }
 
       const ratios = pairs.map((p) => p.head / p.base)
-      const changePct = (median(ratios) - 1) * 100
-      const result = verdict(changePct)
+      const medianRatio = median(ratios)
+      const throughputPct = (1 / medianRatio - 1) * 100
+      const timePct = (medianRatio - 1) * 100
+      const result = verdict(throughputPct)
       const baseMedian = `${median(pairs.map((p) => p.base)).toFixed(0)} ms`
       const headMedian = `${median(pairs.map((p) => p.head)).toFixed(0)} ms`
-      const change = `${changePct >= 0 ? '+' : ''}${changePct.toFixed(1)}%`
+      const throughput = signedPct(throughputPct)
+      const time = signedPct(timePct)
       const perPair = ratios.map((r) => r.toFixed(3)).join(', ')
 
       console.log(
-        `${workload.name}: ${result} (head ${change} vs base, threshold ±${THRESHOLD_PCT}%)\n` +
+        `${workload.name}: ${result} (head vs base: throughput ${throughput}, run time ${time}; threshold ±${THRESHOLD_PCT}% throughput)\n` +
           `  medians: base ${baseMedian}, head ${headMedian}\n` +
-          `  head/base per pair (<1 faster, >1 slower): ${perPair}`,
+          `  head/base time per pair (<1 faster, >1 slower): ${perPair}`,
       )
       if (process.env.GITHUB_STEP_SUMMARY) {
         const row = [
           workload.name,
           result[0].toUpperCase() + result.slice(1),
-          change,
+          throughput,
+          time,
           baseMedian,
           headMedian,
           perPair,
@@ -184,7 +203,7 @@ describe('curateMany throughput, head against base', () => {
 
       expect(
         result,
-        `${workload.name}: head is ${Math.abs(changePct).toFixed(1)}% ${result} than base (threshold ±${THRESHOLD_PCT}%)`,
+        `${workload.name}: head throughput ${throughput} vs base (threshold ±${THRESHOLD_PCT}%)`,
       ).toBe('no significant change')
     })
   }
