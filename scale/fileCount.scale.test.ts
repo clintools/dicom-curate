@@ -8,6 +8,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   createIntegrationWorkspace,
+  filterProgressChatter,
   integrationOptions,
   integrationSpec,
   listFilesRecursive,
@@ -41,22 +42,13 @@ const RETAINED_BYTES_PER_FILE_CEILING = 64
 /** The collecting run must exceed the ceiling by this much, or the ceiling passes vacuously. */
 const DISCRIMINATION_FACTOR = 4
 
-/** One line per run from the mapping pool; at this volume it buries the measurements. */
-const PROGRESS_CHATTER =
-  /^(Finished mapping \d+ files|job is finished|directoryScanFinished)$/
-
 describe(`curateMany at ${FILE_COUNT.toLocaleString()} files`, () => {
   let workspace: Workspace
   let flushWorkspace: Workspace
-  const originalConsoleLog = console.log
+  let restoreConsoleLog: (() => void) | undefined
 
   beforeAll(async () => {
-    console.log = (...args) => {
-      if (args.length === 1 && PROGRESS_CHATTER.test(String(args[0]))) {
-        return
-      }
-      originalConsoleLog.apply(console, args)
-    }
+    restoreConsoleLog = filterProgressChatter()
     workspace = createIntegrationWorkspace()
     await writeImages(workspace.inputDir, FILE_COUNT)
     flushWorkspace = createIntegrationWorkspace()
@@ -64,7 +56,7 @@ describe(`curateMany at ${FILE_COUNT.toLocaleString()} files`, () => {
   })
 
   afterAll(() => {
-    console.log = originalConsoleLog
+    restoreConsoleLog?.()
     workspace?.cleanup()
     flushWorkspace?.cleanup()
   })
