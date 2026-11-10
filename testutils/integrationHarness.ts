@@ -228,6 +228,24 @@ export async function runQuietly(
   return { done, errorCount }
 }
 
+/** One line per run from the mapping pool; at volume it buries the measurements. */
+const PROGRESS_CHATTER =
+  /^(Finished mapping \d+ files|job is finished|directoryScanFinished)$/
+
+/** Drops mapping-pool progress lines from `console.log`; returns the restore. */
+export function filterProgressChatter(): () => void {
+  const original = console.log
+  console.log = (...args) => {
+    if (args.length === 1 && PROGRESS_CHATTER.test(String(args[0]))) {
+      return
+    }
+    original.apply(console, args)
+  }
+  return () => {
+    console.log = original
+  }
+}
+
 /**
  * Run `curateMany` against real workers, retaining the progress stream.
  * `onMessage` fires for each message, so a test can act once work is genuinely
