@@ -210,25 +210,29 @@ export async function curateOne({
       mtime = new Date(lastModifiedHeader).toISOString()
     }
   } else if (fileInfo.kind === 's3') {
+    const { bucketOptions } = fileInfo
+    if (!bucketOptions) {
+      throw new Error(`No bucketOptions for S3 object ${fileInfo.objectKey}`)
+    }
     // Dynamically import AWS SDK S3 client
     const s3 = await loadS3Client()
 
     const client = new s3.S3Client({
-      region: fileInfo.bucketOptions.region,
-      credentials: fileInfo.bucketOptions.credentials,
-      endpoint: fileInfo.bucketOptions.endpoint,
-      forcePathStyle: fileInfo.bucketOptions.forcePathStyle,
+      region: bucketOptions.region,
+      credentials: bucketOptions.credentials,
+      endpoint: bucketOptions.endpoint,
+      forcePathStyle: bucketOptions.forcePathStyle,
     })
     const fetchResponse = await client.send(
       new s3.GetObjectCommand({
-        Bucket: fileInfo.bucketOptions.bucketName,
+        Bucket: bucketOptions.bucketName,
         Key: fileInfo.objectKey,
       }),
     )
 
     if (!fetchResponse.Body) {
       throw new Error(
-        `Failed to fetch s3://${fileInfo.bucketOptions.bucketName}/${fileInfo.objectKey}: No data returned`,
+        `Failed to fetch s3://${bucketOptions.bucketName}/${fileInfo.objectKey}: No data returned`,
       )
     }
 

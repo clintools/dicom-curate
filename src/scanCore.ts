@@ -1,7 +1,12 @@
 import type { Dirent } from 'fs'
 import { delay } from './delay'
 import { loadS3Client } from './s3Client'
-import type { TFileInfo, TFileInfoIndex, TS3BucketOptions } from './types'
+import type {
+  TFileInfo,
+  TFileInfoIndex,
+  TS3BucketOptions,
+  TS3Credentials,
+} from './types'
 
 /**
  * Thread-agnostic scanning logic. Kept out of scanDirectoryWorker.ts so it can
@@ -157,6 +162,10 @@ export type FileScanMsg =
   | {
       response: 'done'
     }
+  | {
+      // Answered by an 's3Credentials' request.
+      response: 's3CredentialsRequest'
+    }
 
 type CommonFileScanRequestFields = {
   excludedFiletypes?: string[]
@@ -178,13 +187,19 @@ export type FileScanRequest =
     } & CommonFileScanRequestFields)
   | ({
       request: 'scan'
-      bucketOptions: TS3BucketOptions
+      // Credentials stay on the main thread: a provider cannot be cloned.
+      bucketOptions: Omit<TS3BucketOptions, 'credentials'>
     } & CommonFileScanRequestFields)
   | {
       request: 'stop'
     }
   | {
       request: 'resume'
+    }
+  | {
+      request: 's3Credentials'
+      credentials?: TS3Credentials
+      error?: string
     }
 
 /** Callback used by the traversals to emit results to the main thread. */
@@ -477,32 +492,44 @@ export function cheapFilterNameOnly(
 // --------------------------------------------------------------------------
 
 export async function scanS3Bucket(
-  bucketOptions: TS3BucketOptions,
+  bucketOptions: Omit<TS3BucketOptions, 'credentials'>,
   ctx: ScanContext,
+  // Resolves to undefined when the run has no credentials: the SDK default
+  // chain applies.
+  requestCredentials: () => Promise<TS3Credentials | undefined>,
 ): Promise<void> {
-  const { filters, previousIndex, emit } = ctx
+  const { filters, controller, previousIndex, emit } = ctx
   let totalDiscovered = 0
   try {
     const s3 = await loadS3Client()
 
-    const client = new s3.S3Client({
+    const clientConfig = {
       region: bucketOptions.region,
-      credentials: bucketOptions.credentials,
       endpoint: bucketOptions.endpoint,
       forcePathStyle: bucketOptions.forcePathStyle,
-    })
+    }
 
     // Page through the S3 bucket listing using ContinuationToken
     let continuationToken: string | undefined
 
     do {
+      // A client per page, with credentials fetched for it: the SDK keeps
+      // credentials that carry no expiration for the client's whole life.
+      const client = new s3.S3Client({
+        ...clientConfig,
+        credentials: await requestCredentials(),
+      })
+
       const listCommand = new s3.ListObjectsV2Command({
         Bucket: bucketOptions.bucketName,
         Prefix: bucketOptions.prefix,
         ContinuationToken: continuationToken,
       })
 
-      const data = await client.send(listCommand)
+      // Destroyed per page, or each page's keep-alive sockets outlive it.
+      const data = await client
+        .send(listCommand)
+        .finally(() => client.destroy())
 
       if (data.Contents) {
         for (const item of data.Contents) {
@@ -516,6 +543,9 @@ export async function scanS3Bucket(
             totalDiscovered++
             const prev = previousIndex ? previousIndex[item.Key] : undefined
 
+            // Without a counter pass the reported total trails the listing
+            // while paused; the bounded queue is worth that.
+            await controller.waitIfPaused()
             emit({
               response: 'file',
               fileInfo: {
@@ -523,7 +553,6 @@ export async function scanS3Bucket(
                 name: item.Key,
                 path: item.Key,
                 objectKey: item.Key,
-                bucketOptions,
                 kind: 's3',
               },
               previousFileInfo: prev,
@@ -537,7 +566,6 @@ export async function scanS3Bucket(
                 name: item.Key!,
                 path: item.Key!,
                 objectKey: item.Key!,
-                bucketOptions,
                 kind: 's3',
               },
               anomalies: fileAnomalies,
@@ -1014,6 +1042,21 @@ export function createScanHandler({ emit, close }: ScanHandlerBindings) {
   // cleared on settle rather than ever being replaced by a second scan.
   let currentController: ScanController | null = null
 
+  // Listing is sequential, so at most one credentials request is outstanding.
+  let pendingCredentials:
+    | {
+        resolve: (credentials: TS3Credentials | undefined) => void
+        reject: (error: Error) => void
+      }
+    | undefined
+
+  function requestS3Credentials(): Promise<TS3Credentials | undefined> {
+    return new Promise((resolve, reject) => {
+      pendingCredentials = { resolve, reject }
+      emit({ response: 's3CredentialsRequest' })
+    })
+  }
+
   function handleMessage(event: MessageEvent<FileScanRequest>): void {
     switch (event.data.request) {
       case 'scan': {
@@ -1043,7 +1086,11 @@ export function createScanHandler({ emit, close }: ScanHandlerBindings) {
         } else if ('directoryHandle' in eventData) {
           scan = scanDirectory(eventData.directoryHandle, ctx)
         } else if ('bucketOptions' in eventData) {
-          scan = scanS3Bucket(eventData.bucketOptions, ctx)
+          scan = scanS3Bucket(
+            eventData.bucketOptions,
+            ctx,
+            requestS3Credentials,
+          )
         } else {
           console.error('No valid directory information provided for scanning.')
           break
@@ -1069,6 +1116,16 @@ export function createScanHandler({ emit, close }: ScanHandlerBindings) {
       case 'resume': {
         // Resume the feeder
         currentController?.resume()
+        break
+      }
+      case 's3Credentials': {
+        const pending = pendingCredentials
+        pendingCredentials = undefined
+        if (event.data.error !== undefined) {
+          pending?.reject(new Error(event.data.error))
+        } else {
+          pending?.resolve(event.data.credentials)
+        }
         break
       }
       default:

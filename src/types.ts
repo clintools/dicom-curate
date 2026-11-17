@@ -116,6 +116,21 @@ export type THTTPOptions = {
   headers?: Record<string, string> | THTTPHeaderProvider
 }
 
+export type TS3Credentials = {
+  accessKeyId: string
+  secretAccessKey: string
+  sessionToken?: string
+  // Lets the engine reuse provider credentials until 5 minutes before this.
+  expiration?: Date
+}
+
+// Called on the main thread whenever credentials are needed. Without an
+// `expiration` on what it returns, it is called for every file, so it should
+// cache.
+export type TS3CredentialProvider = () =>
+  | Promise<TS3Credentials>
+  | TS3Credentials
+
 export type TS3BucketOptions = {
   bucketName: string
   region?: string
@@ -123,11 +138,9 @@ export type TS3BucketOptions = {
   prefix?: string
   // Optional additional metadata to include with each uploaded object
   metadata?: Record<string, string>
-  // Optional AWS credentials - if not provided, will use default SDK credentials resolution
-  credentials?: {
-    accessKeyId: string
-    secretAccessKey: string
-  }
+  // Optional AWS credentials - if not provided, will use default SDK credentials resolution.
+  // Read at every request, so changing a static object in place also takes effect.
+  credentials?: TS3Credentials | TS3CredentialProvider
   // Optional S3 endpoint, commonly used for S3-compatible storage services
   endpoint?: string
   // If true, will use path-style addressing for S3 objects
@@ -213,7 +226,12 @@ export type TFileInfo = {
       url: string
       headers?: Record<string, string> | THTTPHeaderProvider
     }
-  | { kind: 's3'; bucketOptions: TS3BucketOptions; objectKey: string }
+  | {
+      kind: 's3'
+      // Absent on files queued by the scan; curateMany sets it at dispatch.
+      bucketOptions?: TS3BucketOptions
+      objectKey: string
+    }
 )
 
 // Includes deep sequences
