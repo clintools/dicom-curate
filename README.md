@@ -126,6 +126,32 @@ It is also possible to use S3-compatible buckets as input or output locations.
 Consult `OrganizeOptions` for further details. Please note that this feature is only
 available if you have the `@aws-sdk/client-s3` package installed.
 
+### S3 credentials
+
+`credentials` on `inputS3Bucket` or `outputEndpoint` takes a static object or a provider. Without it, the AWS SDK default chain applies.
+
+```ts
+import { fromContainerMetadata } from '@aws-sdk/credential-providers'
+
+const options: OrganizeOptions = {
+  // other options are skipped
+  inputType: 's3',
+  inputS3Bucket: {
+    bucketName: 'my-bucket',
+    region: 'us-east-1',
+    // Or a static { accessKeyId, secretAccessKey, sessionToken?, expiration? }
+    credentials: fromContainerMetadata(),
+  },
+}
+```
+
+Credentials are resolved on the main thread for every read, upload and listing page, so a run can outlast temporary credentials:
+
+- A static object is read each time, so changing it in place takes effect at the next request.
+- A provider's result is reused until 5 minutes before its `expiration`. A result without `expiration` is never reused: the provider is called for every file, so it should cache, especially if each call makes a network request.
+- Credentials are resolved when a file is dispatched and used for both its read and its upload, so they must stay valid for that long.
+- A provider that rejects fails that file as a dispatch failure; a sustained run of them rejects `curateMany`. A rejection while listing fails the run.
+
 ### Custom uploader
 
 For use cases that require resumable, chunked, or otherwise non-standard uploads, you can supply your own uploader via `outputUploader`. This is mutually exclusive with `outputEndpoint`.
