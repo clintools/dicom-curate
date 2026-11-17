@@ -498,7 +498,7 @@ export async function scanS3Bucket(
   // chain applies.
   requestCredentials: () => Promise<TS3Credentials | undefined>,
 ): Promise<void> {
-  const { filters, previousIndex, emit } = ctx
+  const { filters, controller, previousIndex, emit } = ctx
   let totalDiscovered = 0
   try {
     const s3 = await loadS3Client()
@@ -543,6 +543,9 @@ export async function scanS3Bucket(
             totalDiscovered++
             const prev = previousIndex ? previousIndex[item.Key] : undefined
 
+            // Without a counter pass the reported total trails the listing
+            // while paused; the bounded queue is worth that.
+            await controller.waitIfPaused()
             emit({
               response: 'file',
               fileInfo: {

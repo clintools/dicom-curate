@@ -810,6 +810,26 @@ describe('scanS3Bucket', () => {
     ).toBe(true)
   })
 
+  it('holds files back while paused and emits them on resume', async () => {
+    twoPages()
+    const { msgs, emit } = collector()
+    const controller = new ScanController()
+    controller.pause()
+
+    const scan = scanS3Bucket(
+      bucketOptions,
+      { filters: defaultFilters(), controller, emit },
+      async () => undefined,
+    )
+    await vi.waitFor(() => expect(s3Send).toHaveBeenCalledTimes(1))
+    expect(fileNames(msgs)).toEqual([])
+
+    controller.resume()
+    await scan
+
+    expect(fileNames(msgs)).toEqual(['study/a.dcm', 'study/b.dcm'])
+  })
+
   it('queues files without a copy of the bucket options', async () => {
     twoPages()
 
