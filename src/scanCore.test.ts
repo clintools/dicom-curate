@@ -8,15 +8,21 @@ import {
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { FileScanMsg, ScanFilters } from './scanCore'
-import type { TS3BucketOptions } from './types'
+import type { TS3BucketOptions, TS3Credentials } from './types'
 
 // The S3 traversal loads the AWS SDK lazily via ./s3Client; mock it so the
 // listing loop can be driven in-process without a live bucket.
 const s3Send = vi.fn()
+const s3ClientConfigs: { credentials?: unknown }[] = []
+const s3Destroy = vi.fn()
 vi.mock('./s3Client', () => ({
   loadS3Client: async () => ({
     S3Client: class {
       send = s3Send
+      destroy = s3Destroy
+      constructor(config: { credentials?: unknown }) {
+        s3ClientConfigs.push(config)
+      }
     },
     ListObjectsV2Command: class {
       constructor(public input: unknown) {}
@@ -52,6 +58,12 @@ const {
   scanS3Bucket,
   shouldProcessFileItem,
 } = await import('./scanCore')
+
+beforeEach(() => {
+  s3Send.mockReset()
+  s3Destroy.mockReset()
+  s3ClientConfigs.length = 0
+})
 
 function defaultFilters(overrides: Partial<ScanFilters> = {}): ScanFilters {
   return {
@@ -721,24 +733,94 @@ describe('shouldProcessFileItem (S3 object predicate)', () => {
 })
 
 describe('scanS3Bucket', () => {
-  beforeEach(() => {
-    s3Send.mockReset()
-  })
-
   const bucketOptions = {
     bucketName: 'bucket',
     region: 'us-east-1',
   } as unknown as TS3BucketOptions
 
-  async function run(filters = defaultFilters()) {
+  async function run(
+    filters = defaultFilters(),
+    requestCredentials: () => Promise<TS3Credentials | undefined> = async () =>
+      undefined,
+  ) {
     const { msgs, emit } = collector()
-    await scanS3Bucket(bucketOptions, {
-      filters,
-      controller: new ScanController(),
-      emit,
-    })
+    await scanS3Bucket(
+      bucketOptions,
+      {
+        filters,
+        controller: new ScanController(),
+        emit,
+      },
+      requestCredentials,
+    )
     return msgs
   }
+
+  function twoPages() {
+    s3Send
+      .mockResolvedValueOnce({
+        Contents: [{ Key: 'study/a.dcm', Size: 5000 }],
+        NextContinuationToken: 'page2',
+      })
+      .mockResolvedValueOnce({
+        Contents: [{ Key: 'study/b.dcm', Size: 5000 }],
+      })
+  }
+
+  it('signs each page with credentials requested for it', async () => {
+    twoPages()
+    let n = 0
+    const requestCredentials = vi.fn(async () => ({
+      accessKeyId: `KEY${++n}`,
+      secretAccessKey: 'secret',
+    }))
+
+    const msgs = await run(defaultFilters(), requestCredentials)
+
+    expect(fileNames(msgs)).toEqual(['study/a.dcm', 'study/b.dcm'])
+    expect(requestCredentials).toHaveBeenCalledTimes(2)
+    expect(s3Destroy).toHaveBeenCalledTimes(2)
+    expect(s3ClientConfigs.map((c) => c.credentials)).toEqual([
+      { accessKeyId: 'KEY1', secretAccessKey: 'secret' },
+      { accessKeyId: 'KEY2', secretAccessKey: 'secret' },
+    ])
+  })
+
+  it('leaves each page to the SDK default chain when the run has no credentials', async () => {
+    twoPages()
+
+    await run()
+
+    expect(s3ClientConfigs).toHaveLength(2)
+    expect(s3ClientConfigs.every((c) => c.credentials === undefined)).toBe(true)
+  })
+
+  it('emits a scan error when the credentials request is refused', async () => {
+    const msgs = await run(defaultFilters(), async () => {
+      throw new Error('credential source unavailable')
+    })
+
+    expect(s3Send).not.toHaveBeenCalled()
+    expect(
+      msgs.some(
+        (m) =>
+          m.response === 'error' &&
+          m.error.includes('credential source unavailable'),
+      ),
+    ).toBe(true)
+  })
+
+  it('queues files without a copy of the bucket options', async () => {
+    twoPages()
+
+    const msgs = await run()
+
+    const s3Files = msgs.flatMap((m) =>
+      m.response === 'file' && m.fileInfo.kind === 's3' ? [m.fileInfo] : [],
+    )
+    expect(s3Files).toHaveLength(2)
+    expect(s3Files.every((f) => f.bucketOptions === undefined)).toBe(true)
+  })
 
   it('pages through the listing, emitting files, anomalies and counts', async () => {
     s3Send
@@ -765,6 +847,7 @@ describe('scanS3Bucket', () => {
   it('emits a scan error when the S3 client throws', async () => {
     s3Send.mockRejectedValueOnce(new Error('access denied'))
     const msgs = await run()
+    expect(s3Destroy).toHaveBeenCalledTimes(1)
     expect(
       msgs.some(
         (m) =>
@@ -840,6 +923,53 @@ describe('createScanHandler', () => {
 
     await vi.waitFor(() => expect(close).toHaveBeenCalled())
     expect(fileNames(msgs)).toEqual(['valid.dcm'])
+  })
+
+  async function startS3Scan(handler: ReturnType<typeof makeHandler>) {
+    handler.send({ request: 'scan', bucketOptions: { bucketName: 'bucket' } })
+    await vi.waitFor(() =>
+      expect(
+        handler.msgs.some((m) => m.response === 's3CredentialsRequest'),
+      ).toBe(true),
+    )
+  }
+
+  it('answers listing credentials through the main thread', async () => {
+    s3Send.mockResolvedValueOnce({
+      Contents: [{ Key: 'study/a.dcm', Size: 5000 }],
+    })
+    const handler = makeHandler()
+    const { msgs, close, send } = handler
+
+    await startS3Scan(handler)
+    send({
+      request: 's3Credentials',
+      credentials: { accessKeyId: 'KEY', secretAccessKey: 'secret' },
+    })
+
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+    expect(fileNames(msgs)).toEqual(['study/a.dcm'])
+    expect(s3ClientConfigs[0].credentials).toEqual({
+      accessKeyId: 'KEY',
+      secretAccessKey: 'secret',
+    })
+  })
+
+  it('fails the listing when the main thread reports a credentials error', async () => {
+    const handler = makeHandler()
+    const { msgs, close, send } = handler
+
+    await startS3Scan(handler)
+    send({ request: 's3Credentials', error: 'credential source unavailable' })
+
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+    expect(
+      msgs.some(
+        (m) =>
+          m.response === 'error' &&
+          m.error.includes('credential source unavailable'),
+      ),
+    ).toBe(true)
   })
 
   it('reports missing directory information and leaves the port open', () => {

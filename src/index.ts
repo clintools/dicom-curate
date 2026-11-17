@@ -21,6 +21,7 @@ import {
   setAbortSignal,
   setCustomUploader,
   setDirectoryScanFinished,
+  setInputS3Source,
   setMappingWorkerOptions,
   setScanResumeCallback,
   setTotalDiscoveredFiles,
@@ -29,6 +30,10 @@ import {
   terminateAllWorkers,
 } from './mappingWorkerPool'
 import { iso8601 } from './offsetDateTime'
+import {
+  createS3CredentialResolver,
+  type TS3CredentialResolver,
+} from './s3Credentials'
 
 import type { FileScanMsg, FileScanRequest } from './scanDirectoryWorker'
 import type {
@@ -84,6 +89,7 @@ async function initializeFileListWorker(
   // that still owns a mapping worker pool, and only failRun tears it down.
   failRun: (reason: Error) => void,
   isRunOver: () => boolean,
+  resolveS3Credentials?: TS3CredentialResolver,
 ) {
   const fileListWorker = await createWorker(
     new URL('./scanDirectoryWorker.js', import.meta.url),
@@ -171,6 +177,24 @@ async function initializeFileListWorker(
         case 'done': {
           console.log('directoryScanFinished')
           setDirectoryScanFinished(true)
+          break
+        }
+        case 's3CredentialsRequest': {
+          void (async () => {
+            let reply: FileScanRequest
+            try {
+              reply = {
+                request: 's3Credentials',
+                credentials: await resolveS3Credentials?.(),
+              }
+            } catch (error) {
+              reply = {
+                request: 's3Credentials',
+                error: error instanceof Error ? error.message : String(error),
+              }
+            }
+            if (!isRunOver()) fileListWorker.postMessage(reply)
+          })()
           break
         }
         case 'error': {
@@ -567,6 +591,16 @@ async function curateMany(
           )) as TMappingWorkerOptions,
         )
         setCustomUploader(organizeOptions.outputUploader)
+        const inputS3Source =
+          organizeOptions.inputType === 's3'
+            ? {
+                bucket: organizeOptions.inputS3Bucket,
+                resolve: createS3CredentialResolver(
+                  organizeOptions.inputS3Bucket,
+                ),
+              }
+            : undefined
+        setInputS3Source(inputS3Source)
         setAbortSignal(organizeOptions.signal)
 
         //
@@ -588,6 +622,7 @@ async function curateMany(
           fileListWorker = await initializeFileListWorker(
             failRun,
             () => settled,
+            inputS3Source?.resolve,
           )
           if (settled) {
             try {
@@ -633,9 +668,11 @@ async function curateMany(
               fileInfoIndex: organizeOptions.fileInfoIndex,
             } satisfies FileScanRequest)
           } else if (organizeOptions.inputType === 's3') {
+            const { credentials: _, ...bucketOptions } =
+              organizeOptions.inputS3Bucket
             fileListWorker.postMessage({
               request: 'scan',
-              bucketOptions: organizeOptions.inputS3Bucket,
+              bucketOptions,
               excludedFiletypes: specExcludedFiletypes,
               excludedPathRegexes,
               fileInfoIndex: organizeOptions.fileInfoIndex,

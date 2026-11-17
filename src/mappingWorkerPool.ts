@@ -16,6 +16,13 @@ import { delay } from './delay'
 import { describeWorkerError } from './describeWorkerError'
 import { phiSafeToken } from './hash'
 import { getHttpInputHeaders, getHttpOutputHeaders } from './httpHeaders'
+import {
+  createS3CredentialResolver,
+  resolveS3InputFileInfo,
+  resolveS3OutputTarget,
+  type TS3CredentialResolver,
+  type TS3InputSource,
+} from './s3Credentials'
 import { serializeMappingOptions } from './serializeMappingOptions'
 import type {
   TCustomUploader,
@@ -164,6 +171,9 @@ let currentFileInfoIndex: TFileInfoIndex | undefined
 // User-supplied custom uploader, set via setCustomUploader().
 let currentUploader: TCustomUploader | undefined
 
+let inputS3Source: TS3InputSource | undefined
+let outputS3Credentials: TS3CredentialResolver | undefined
+
 // AbortSignal from curateMany, forwarded to currentUploader.upload() calls.
 let currentSignal: AbortSignal | undefined
 
@@ -214,6 +224,14 @@ const LOW_WATER_MARK = 50
 
 export function setMappingWorkerOptions(opts: TMappingWorkerOptions): void {
   mappingWorkerOptions = opts
+  outputS3Credentials = opts.outputTarget?.s3
+    ? createS3CredentialResolver(opts.outputTarget.s3)
+    : undefined
+}
+
+// Shared with the scan worker's listing, so both draw on one credential cache.
+export function setInputS3Source(source: TS3InputSource | undefined): void {
+  inputS3Source = source
 }
 
 export function setCustomUploader(uploader: TCustomUploader | undefined): void {
@@ -461,8 +479,12 @@ export async function dispatchMappingJobs(): Promise<void> {
         // Independent providers, and both are per-file round trips on the
         // dispatch hot path, so they are resolved together rather than in turn.
         const [inputFileInfo, resolvedOutputTarget] = await Promise.all([
-          getHttpInputHeaders(fileInfo),
-          getHttpOutputHeaders(outputTarget),
+          fileInfo.kind === 's3'
+            ? resolveS3InputFileInfo(fileInfo, inputS3Source)
+            : getHttpInputHeaders(fileInfo),
+          outputTarget?.s3
+            ? resolveS3OutputTarget(outputTarget, outputS3Credentials)
+            : getHttpOutputHeaders(outputTarget),
         ])
 
         // Same double-recovery guard as the failure branch below, and for the
@@ -1120,9 +1142,11 @@ async function createMappingWorker(): Promise<Worker> {
         // Same guard as 'finished': the file may already have been accounted
         // by a recovery that ran while this reply was in flight.
         if (!workerCurrentFile.has(mappingWorker)) break
+        // The queued fileInfo, not the echoed one: what was dispatched carries
+        // resolved credentials and headers, and this result reaches the caller.
         failFileAndReturnWorker(
           mappingWorker,
-          event.data.fileInfo,
+          workerCurrentFile.get(mappingWorker),
           event.data.error.toString(),
         )
         dispatchMappingJobs()
