@@ -87,6 +87,7 @@ describe('curateMany', () => {
       setDirectoryScanFinished: vi.fn(),
       setAbortSignal: vi.fn(),
       setCustomUploader: vi.fn(),
+      setInputS3Source: vi.fn(),
       setMappingWorkerOptions: vi.fn(),
       setScanResumeCallback: vi.fn(),
       setTotalDiscoveredFiles: vi.fn(),
