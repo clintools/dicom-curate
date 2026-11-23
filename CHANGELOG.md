@@ -1,3 +1,16 @@
+# [0.44.0](https://github.com/clintools/dicom-curate/compare/v0.43.0...v0.44.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* correct the S3 pause comment and note separate credential caches ([b378f51](https://github.com/clintools/dicom-curate/commit/b378f51889aeb9c70ec856367cd920f736e0c1a1))
+* pause the S3 listing under scan backpressure ([e76515f](https://github.com/clintools/dicom-curate/commit/e76515fc3c0bede188693682ed1fe564429f0b97))
+
+
+### Features
+
+* accept S3 credential providers and resolve credentials per request ([d488f2d](https://github.com/clintools/dicom-curate/commit/d488f2d2af688eaca8f8b9629b58d8036adc828b))
+
 # [0.43.0](https://github.com/clintools/dicom-curate/compare/v0.42.4...v0.43.0) (2026-11-10)
 
 
