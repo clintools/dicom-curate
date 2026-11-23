@@ -4,8 +4,10 @@ import { loadS3Client } from './s3Client'
 import type {
   TFileInfo,
   TFileInfoIndex,
+  TInputPath,
   TS3BucketOptions,
   TS3Credentials,
+  TUnlocatedFileInfo,
 } from './types'
 
 /**
@@ -117,6 +119,42 @@ async function* listEntriesWithRetry(
   }
 }
 
+/**
+ * Retries a child lookup as a listing does, but a missing, wrong-kind or
+ * invalidly named child (a TypeError) fails at once so a stale list does not
+ * wait out the backoff for each.
+ */
+async function lookUpWithRetry<T extends FileSystemHandle>(
+  lookUp: () => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await lookUp()
+    } catch (error) {
+      const definitive =
+        error instanceof TypeError ||
+        (error instanceof DOMException &&
+          (error.name === 'NotFoundError' ||
+            error.name === 'TypeMismatchError'))
+      if (definitive) throw error
+      await backOffOrThrow(attempt, error)
+    }
+  }
+}
+
+async function readdirWithRetry(
+  fs: typeof import('fs/promises'),
+  dirPath: string,
+): Promise<Dirent[]> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fs.readdir(dirPath, { withFileTypes: true })
+    } catch (error) {
+      await backOffOrThrow(attempt, error)
+    }
+  }
+}
+
 export type FileScanMsg =
   | {
       response: 'file'
@@ -129,7 +167,7 @@ export type FileScanMsg =
     }
   | {
       response: 'scanAnomalies'
-      fileInfo: TFileInfo
+      fileInfo: TFileInfo | TUnlocatedFileInfo
       anomalies: string[]
       /**
        * Hard errors discovered during scanning (e.g. a file that cannot be
@@ -171,6 +209,7 @@ type CommonFileScanRequestFields = {
   excludedFiletypes?: string[]
   excludedPathRegexes?: string[]
   fileInfoIndex?: TFileInfoIndex
+  inputPaths?: TInputPath[]
 
   noDefaultExclusions?: boolean
   noDicomSignatureCheck?: boolean
@@ -488,6 +527,507 @@ export function cheapFilterNameOnly(
 }
 
 // --------------------------------------------------------------------------
+// Per-file feeding, shared by the walks and listed scans so both filter and
+// report a file alike. Each returns whether it fed the file; `onRejected`
+// runs before any anomaly so the count correction arrives first.
+// --------------------------------------------------------------------------
+
+async function feedHandleFile(
+  fileHandle: FileSystemFileHandle,
+  prefix: string,
+  ctx: ScanContext,
+  onRejected: () => void,
+): Promise<boolean> {
+  const { filters, previousIndex, emit } = ctx
+  const name = fileHandle.name
+  const key = `${prefix}/${name}`
+  const prev = previousIndex ? previousIndex[key] : undefined
+
+  let file: File
+  try {
+    file = await fileHandle.getFile()
+  } catch (readError) {
+    // An unreadable file must NOT abort the scan. The error omits the name;
+    // fileInfo carries it to the private log only.
+    onRejected()
+    emit({
+      response: 'scanAnomalies',
+      fileInfo: { path: prefix, name, size: 0, kind: 'handle', fileHandle },
+      anomalies: [],
+      errors: [safeReadErrorMessage(readError)],
+      previousFileInfo: prev,
+    } satisfies FileScanMsg)
+    return false
+  }
+
+  const fileAnomalies: string[] = []
+  const fileInfo: TFileInfo = {
+    path: prefix,
+    name,
+    size: file.size,
+    kind: 'handle',
+    fileHandle,
+  }
+  if (await shouldProcessFile(file, fileAnomalies, key, filters)) {
+    emit({
+      response: 'file',
+      fileInfo,
+      previousFileInfo: prev,
+    } satisfies FileScanMsg)
+    return true
+  }
+  onRejected()
+  if (fileAnomalies.length > 0) {
+    emit({
+      response: 'scanAnomalies',
+      fileInfo,
+      anomalies: fileAnomalies,
+      previousFileInfo: prev,
+    } satisfies FileScanMsg)
+  }
+  return false
+}
+
+async function feedNodeFile(
+  fs: typeof import('fs/promises'),
+  fullPath: string,
+  name: string,
+  prefix: string,
+  ctx: ScanContext,
+  onRejected: () => void,
+): Promise<boolean> {
+  const { filters, previousIndex, emit } = ctx
+  const key = `${prefix}/${name}`
+  const prev = previousIndex ? previousIndex[key] : undefined
+
+  let stats: Awaited<ReturnType<typeof fs.stat>>
+  try {
+    stats = await fs.stat(fullPath)
+  } catch (readError) {
+    // A file that cannot be stat'd must NOT abort the scan. The error omits
+    // the path; fileInfo carries it to the private log only.
+    onRejected()
+    emit({
+      response: 'scanAnomalies',
+      fileInfo: { path: prefix, name, size: 0, kind: 'path', fullPath },
+      anomalies: [],
+      errors: [safeReadErrorMessage(readError)],
+      previousFileInfo: prev,
+    } satisfies FileScanMsg)
+    return false
+  }
+
+  const fileInfo: TFileInfo = {
+    path: prefix,
+    name,
+    size: stats.size,
+    kind: 'path',
+    fullPath,
+  }
+  // A listed path can name a directory or FIFO, which the signature read
+  // would pass or block on.
+  if (!stats.isFile()) {
+    onRejected()
+    emit({
+      response: 'scanAnomalies',
+      fileInfo,
+      anomalies: [],
+      errors: [NOT_A_FILE_ERROR],
+      previousFileInfo: prev,
+    } satisfies FileScanMsg)
+    return false
+  }
+
+  const fileAnomalies: string[] = []
+  if (
+    await shouldProcessFileNode(
+      fullPath,
+      name,
+      stats.size,
+      fileAnomalies,
+      key,
+      filters,
+    )
+  ) {
+    emit({
+      response: 'file',
+      fileInfo,
+      previousFileInfo: prev,
+    } satisfies FileScanMsg)
+    return true
+  }
+  onRejected()
+  if (fileAnomalies.length > 0) {
+    emit({
+      response: 'scanAnomalies',
+      fileInfo,
+      anomalies: fileAnomalies,
+      previousFileInfo: prev,
+    } satisfies FileScanMsg)
+  }
+  return false
+}
+
+async function feedS3Item(
+  item: { Key?: string; Size?: number },
+  ctx: ScanContext,
+  onRejected: () => void,
+): Promise<boolean> {
+  const { filters, controller, previousIndex, emit } = ctx
+  const { Key: key, Size: size } = item
+  if (!key || size === undefined) {
+    onRejected()
+    return false
+  }
+  const fileAnomalies: string[] = []
+  const fileInfo: TFileInfo = {
+    size,
+    name: key,
+    path: key,
+    objectKey: key,
+    kind: 's3',
+  }
+  const previousFileInfo = previousIndex ? previousIndex[key] : undefined
+  if (await shouldProcessFileItem(item, fileAnomalies, filters)) {
+    // Before the emit, so a paused scan holds the file back. A full listing
+    // never yields mid-page, so there 'stop' takes effect from the next page.
+    await controller.waitIfPaused()
+    emit({ response: 'file', fileInfo, previousFileInfo } satisfies FileScanMsg)
+    return true
+  }
+  onRejected()
+  if (fileAnomalies.length > 0) {
+    emit({
+      response: 'scanAnomalies',
+      fileInfo,
+      anomalies: fileAnomalies,
+      previousFileInfo,
+    } satisfies FileScanMsg)
+  }
+  return false
+}
+
+function createS3Client(
+  s3: Awaited<ReturnType<typeof loadS3Client>>,
+  bucketOptions: Omit<TS3BucketOptions, 'credentials'>,
+  credentials: TS3Credentials | undefined,
+) {
+  return new s3.S3Client({
+    region: bucketOptions.region,
+    credentials,
+    endpoint: bucketOptions.endpoint,
+    forcePathStyle: bucketOptions.forcePathStyle,
+  })
+}
+
+// --------------------------------------------------------------------------
+// Listed scans: only the files named in `inputPaths`, with no traversal
+// --------------------------------------------------------------------------
+
+/** Error reported for a listed entry that names no file under the scan root. */
+export const UNLOCATED_INPUT_ERROR =
+  'Unable to read file: the listed path is not under the scan root'
+
+/** Error reported for a listed key the bucket does not hold. */
+export const MISSING_KEY_ERROR =
+  'Unable to read file: the listed key is not in the bucket'
+
+/** Error reported for a path that names something other than a file. */
+export const NOT_A_FILE_ERROR =
+  'Unable to read file: the path is not a regular file'
+
+type FeedOne = (entry: TInputPath, onRejected: () => void) => Promise<void>
+
+/**
+ * `makeFeed` runs inside the try so a setup failure reaches the main thread as
+ * an error.
+ */
+async function scanListed(
+  inputPaths: readonly TInputPath[],
+  ctx: ScanContext,
+  label: string,
+  makeFeed: () => FeedOne | Promise<FeedOne>,
+): Promise<void> {
+  const { controller, emit } = ctx
+  let totalDiscovered = 0
+  const emitCount = () =>
+    emit({ response: 'count', totalDiscovered } satisfies FileScanMsg)
+  try {
+    // Inside the try so a malformed list still fails the run. Keyed on both
+    // fields so no file is mapped twice and {a, b/c} cannot displace {a/b, c}.
+    const entries = [
+      ...new Map(
+        inputPaths.map((e) => [JSON.stringify([e.path, e.name]), e]),
+      ).values(),
+    ]
+    totalDiscovered = entries.length
+    // An empty list would map nothing and report success.
+    if (entries.length === 0) throw new Error('inputPaths is empty')
+    // Before makeFeed, whose root check can list a large directory.
+    emitCount()
+    const feedOne = await makeFeed()
+    for (const entry of entries) {
+      await feedOne(entry, () => {
+        totalDiscovered--
+        emitCount()
+      })
+      await controller.waitIfPaused()
+    }
+    emit({ response: 'done' } satisfies FileScanMsg)
+  } catch (error) {
+    emit({
+      response: 'error',
+      error: `${label} failed: ${error instanceof Error ? error.message : String(error)}`,
+    } satisfies FileScanMsg)
+  }
+}
+
+/** The count goes first so the main thread's total never trails the error. */
+function emitUnlocated(
+  entry: TInputPath,
+  ctx: ScanContext,
+  onRejected: () => void,
+  error = UNLOCATED_INPUT_ERROR,
+): void {
+  onRejected()
+  ctx.emit({
+    response: 'scanAnomalies',
+    fileInfo: {
+      path: entry.path,
+      name: entry.name,
+      size: 0,
+      kind: 'unlocated',
+    },
+    anomalies: [],
+    errors: [error],
+  } satisfies FileScanMsg)
+}
+
+/**
+ * Undefined when the path does not start at the root's name, as every walked
+ * path does, or would climb out of it.
+ */
+function segmentsBelowRoot(
+  entry: TInputPath,
+  rootName: string,
+): string[] | undefined {
+  const [root, ...rest] = entry.path.split('/')
+  const unsafe = (segment: string) =>
+    segment === '' || segment === '.' || segment === '..'
+  if (root !== rootName || rest.some(unsafe)) return undefined
+  if (unsafe(entry.name) || entry.name.includes('/')) return undefined
+  return rest
+}
+
+/**
+ * A case-insensitive volume resolves a miscased entry, so each component must
+ * match a name its directory's listing reports. Listings are cached by path,
+ * a rejection included: every file under a failed directory fails alike.
+ */
+function spellingCheck(list: (segments: string[]) => Promise<string[]>) {
+  const names = new Map<string, Promise<Set<string>>>()
+  const namesIn = (segments: string[]): Promise<Set<string>> => {
+    const key = segments.join('/')
+    let found = names.get(key)
+    if (!found) {
+      found = list(segments).then((listed) => new Set(listed))
+      names.set(key, found)
+    }
+    return found
+  }
+  const spelledAsWalked = async (segments: string[], name: string) => {
+    const components = [...segments, name]
+    for (const [i, component] of components.entries()) {
+      if (!(await namesIn(segments.slice(0, i))).has(component)) return false
+    }
+    return true
+  }
+  return { namesIn, spelledAsWalked }
+}
+
+/** A listing failure is reported as one; anything else as a read failure. */
+function lookupErrorMessage(error: unknown): string {
+  return error instanceof DirectoryListingError
+    ? safeReadErrorMessage(error.listError, 'directory')
+    : safeReadErrorMessage(error)
+}
+
+export async function scanListedHandles(
+  dir: FileSystemDirectoryHandle,
+  inputPaths: readonly TInputPath[],
+  ctx: ScanContext,
+): Promise<void> {
+  // A rejection is cached too: every file under a failed directory fails
+  // alike, as in a walk.
+  const dirs = new Map<string, Promise<FileSystemDirectoryHandle>>()
+  const dirAt = (segments: string[]): Promise<FileSystemDirectoryHandle> => {
+    if (segments.length === 0) return Promise.resolve(dir)
+    const key = segments.join('/')
+    let found = dirs.get(key)
+    if (!found) {
+      found = dirAt(segments.slice(0, -1)).then((parent) =>
+        lookUpWithRetry(() =>
+          parent.getDirectoryHandle(segments[segments.length - 1]),
+        ),
+      )
+      dirs.set(key, found)
+    }
+    return found
+  }
+  const { namesIn, spelledAsWalked } = spellingCheck(async (segments) => {
+    const listed: string[] = []
+    for await (const child of listEntriesWithRetry(await dirAt(segments))) {
+      listed.push(child.name)
+    }
+    return listed
+  })
+
+  await scanListed(inputPaths, ctx, 'Directory scan', async () => {
+    // A root that cannot be listed fails the run, as in a walk.
+    await namesIn([])
+    return async (entry, onRejected) => {
+      const segments = segmentsBelowRoot(entry, dir.name)
+      if (!segments) return emitUnlocated(entry, ctx, onRejected)
+      let fileHandle: FileSystemFileHandle
+      let spelled: boolean
+      try {
+        const parent = await dirAt(segments)
+        // Unwrapped so a file lookup that exhausts its retries is not
+        // reported as a directory listing failure.
+        fileHandle = await lookUpWithRetry(() =>
+          parent.getFileHandle(entry.name),
+        ).catch((error) => {
+          throw error instanceof DirectoryListingError ? error.listError : error
+        })
+        spelled = await spelledAsWalked(segments, entry.name)
+      } catch (error) {
+        return emitUnlocated(entry, ctx, onRejected, lookupErrorMessage(error))
+      }
+      if (!spelled) return emitUnlocated(entry, ctx, onRejected)
+      await feedHandleFile(fileHandle, entry.path, ctx, onRejected)
+    }
+  })
+}
+
+/**
+ * Undefined when a component is not a plain name for `path` (a backslash or
+ * drive prefix on Windows), which a walk never reports.
+ */
+export function relativeNodePath(
+  segments: readonly string[],
+  name: string,
+  path: typeof import('path'),
+): string | undefined {
+  const components = [...segments, name]
+  if (components.some((c) => path.basename(c) !== c)) return undefined
+  return path.join(...components)
+}
+
+export async function scanListedNodePaths(
+  dirPath: string,
+  inputPaths: readonly TInputPath[],
+  ctx: ScanContext,
+): Promise<void> {
+  await scanListed(inputPaths, ctx, 'Directory scan', async () => {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const rootName = path.basename(dirPath)
+    const realRoot = await fs.realpath(dirPath)
+    const { namesIn, spelledAsWalked } = spellingCheck(async (segments) =>
+      (await readdirWithRetry(fs, path.join(dirPath, ...segments))).map(
+        (d) => d.name,
+      ),
+    )
+    // A root that cannot be listed fails the run, as in a walk.
+    await namesIn([])
+    return async (entry, onRejected) => {
+      const segments = segmentsBelowRoot(entry, rootName)
+      const relative = segments && relativeNodePath(segments, entry.name, path)
+      if (!segments || !relative) return emitUnlocated(entry, ctx, onRejected)
+      const fullPath = path.join(dirPath, relative)
+      // A walk does not follow symlinks.
+      const resolved = await fs.realpath(fullPath).then(
+        (real) => real === path.join(realRoot, relative),
+        // Left to feedNodeFile, which reports why it cannot be read.
+        () => undefined,
+      )
+      if (resolved === false) return emitUnlocated(entry, ctx, onRejected)
+      if (resolved) {
+        // realpath keeps the listed case on Linux, even on a case-insensitive
+        // mount.
+        let spelled: boolean
+        try {
+          spelled = await spelledAsWalked(segments, entry.name)
+        } catch (error) {
+          return emitUnlocated(
+            entry,
+            ctx,
+            onRejected,
+            lookupErrorMessage(error),
+          )
+        }
+        if (!spelled) return emitUnlocated(entry, ctx, onRejected)
+      }
+      await feedNodeFile(fs, fullPath, entry.name, entry.path, ctx, onRejected)
+    }
+  })
+}
+
+export async function scanListedS3Keys(
+  bucketOptions: Omit<TS3BucketOptions, 'credentials'>,
+  inputPaths: readonly TInputPath[],
+  ctx: ScanContext,
+  requestCredentials: () => Promise<TS3Credentials | undefined>,
+): Promise<void> {
+  await scanListed(inputPaths, ctx, 'S3 bucket scan', async () => {
+    const s3 = await loadS3Client()
+    // ListObjectsV2, as the full scan sends, rather than HeadObject, which a
+    // bucket's CORS rule may not allow. A client per request, as there.
+    const firstUnder = async (prefix: string | undefined) => {
+      const client = createS3Client(
+        s3,
+        bucketOptions,
+        await requestCredentials(),
+      )
+      return client
+        .send(
+          new s3.ListObjectsV2Command({
+            Bucket: bucketOptions.bucketName,
+            Prefix: prefix,
+            MaxKeys: 1,
+          }),
+        )
+        .finally(() => client.destroy())
+    }
+    // A bucket that cannot be listed fails the run, as in a full scan.
+    await firstUnder(bucketOptions.prefix)
+    return async (entry, onRejected) => {
+      // A listing reports the key as both path and name, under the prefix.
+      const key = entry.name
+      if (entry.path !== key || !key.startsWith(bucketOptions.prefix ?? '')) {
+        return emitUnlocated(entry, ctx, onRejected)
+      }
+      let item: { Key?: string; Size?: number } | undefined
+      try {
+        // A key sorts first among the keys it prefixes.
+        item = (await firstUnder(key)).Contents?.[0]
+      } catch (error) {
+        return emitUnlocated(
+          entry,
+          ctx,
+          onRejected,
+          safeReadErrorMessage(error),
+        )
+      }
+      if (item?.Key !== key || item.Size === undefined) {
+        return emitUnlocated(entry, ctx, onRejected, MISSING_KEY_ERROR)
+      }
+      await feedS3Item(item, ctx, onRejected)
+    }
+  })
+}
+
+// --------------------------------------------------------------------------
 // S3 path: bucket listing
 // --------------------------------------------------------------------------
 
@@ -498,16 +1038,10 @@ export async function scanS3Bucket(
   // chain applies.
   requestCredentials: () => Promise<TS3Credentials | undefined>,
 ): Promise<void> {
-  const { filters, controller, previousIndex, emit } = ctx
+  const { emit } = ctx
   let totalDiscovered = 0
   try {
     const s3 = await loadS3Client()
-
-    const clientConfig = {
-      region: bucketOptions.region,
-      endpoint: bucketOptions.endpoint,
-      forcePathStyle: bucketOptions.forcePathStyle,
-    }
 
     // Page through the S3 bucket listing using ContinuationToken
     let continuationToken: string | undefined
@@ -515,10 +1049,11 @@ export async function scanS3Bucket(
     do {
       // A client per page, with credentials fetched for it: the SDK keeps
       // credentials that carry no expiration for the client's whole life.
-      const client = new s3.S3Client({
-        ...clientConfig,
-        credentials: await requestCredentials(),
-      })
+      const client = createS3Client(
+        s3,
+        bucketOptions,
+        await requestCredentials(),
+      )
 
       const listCommand = new s3.ListObjectsV2Command({
         Bucket: bucketOptions.bucketName,
@@ -533,44 +1068,9 @@ export async function scanS3Bucket(
 
       if (data.Contents) {
         for (const item of data.Contents) {
-          const fileAnomalies: string[] = []
-
-          if (
-            item.Key &&
-            item.Size !== undefined &&
-            (await shouldProcessFileItem(item, fileAnomalies, filters))
-          ) {
+          // The count only ever rises here, so a rejection needs no correction.
+          if (await feedS3Item(item, ctx, () => {})) {
             totalDiscovered++
-            const prev = previousIndex ? previousIndex[item.Key] : undefined
-
-            // Takes effect only from the next page: the loop never yields
-            // mid-page, so 'stop' lands after the page is emitted.
-            await controller.waitIfPaused()
-            emit({
-              response: 'file',
-              fileInfo: {
-                size: item.Size,
-                name: item.Key,
-                path: item.Key,
-                objectKey: item.Key,
-                kind: 's3',
-              },
-              previousFileInfo: prev,
-            } satisfies FileScanMsg)
-          } else if (fileAnomalies.length > 0) {
-            const prev = previousIndex ? previousIndex[item.Key!] : undefined
-            emit({
-              response: 'scanAnomalies',
-              fileInfo: {
-                size: item.Size!,
-                name: item.Key!,
-                path: item.Key!,
-                objectKey: item.Key!,
-                kind: 's3',
-              },
-              anomalies: fileAnomalies,
-              previousFileInfo: prev,
-            } satisfies FileScanMsg)
           }
         }
       }
@@ -608,7 +1108,7 @@ export async function scanDirectory(
   dir: FileSystemDirectoryHandle,
   ctx: ScanContext,
 ): Promise<void> {
-  const { filters, controller, previousIndex, emit } = ctx
+  const { filters, controller, emit } = ctx
   // Shared by the counter and feeder below, which run interleaved via
   // Promise.all. Access is safe because both run in the same worker and JS is
   // single-threaded; the counter increments, the feeder decrements on files
@@ -675,75 +1175,28 @@ export async function scanDirectory(
   ): Promise<void> {
     for await (const entry of listEntriesWithRetry(dirHandle)) {
       if (entry.kind === 'file') {
-        const key = `${prefix}/${entry.name}`
-        const prev = previousIndex ? previousIndex[key] : undefined
-
-        let file: File
-        try {
-          file = await (entry as FileSystemFileHandle).getFile()
-        } catch (readError) {
-          // A single file we cannot read (corrupted, locked, permission
-          // revoked via the Chromium FileSystem API) must NOT abort the whole
-          // scan. Report it as a hard error and continue. The error string is
-          // PHI-safe (no filename); the raw path/name lives only in fileInfo,
-          // which keeps it in the private (input) log.
-          if (cheapFilterNameOnly(entry.name, key, filters)) {
-            totalDiscovered--
-            emitCount()
-          }
-          emit({
-            response: 'scanAnomalies',
-            fileInfo: {
-              path: prefix,
-              name: entry.name,
-              size: 0,
-              kind: 'handle',
-              fileHandle: entry as FileSystemFileHandle,
-            },
-            anomalies: [],
-            errors: [safeReadErrorMessage(readError)],
-            previousFileInfo: prev,
-          } satisfies FileScanMsg)
-          await controller.waitIfPaused()
-          continue
-        }
-
-        const fileAnomalies: string[] = []
-        if (await shouldProcessFile(file, fileAnomalies, key, filters)) {
+        const fed = await feedHandleFile(
+          entry as FileSystemFileHandle,
+          prefix,
+          ctx,
+          () => {
+            // If it would have passed the counter's name-only filter, the
+            // counter already counted it — correct.
+            if (
+              cheapFilterNameOnly(
+                entry.name,
+                `${prefix}/${entry.name}`,
+                filters,
+              )
+            ) {
+              totalDiscovered--
+              emitCount()
+            }
+          },
+        )
+        if (fed) {
           filesFed++
-          emit({
-            response: 'file',
-            fileInfo: {
-              path: prefix,
-              name: entry.name,
-              size: file.size,
-              kind: 'handle',
-              fileHandle: entry as FileSystemFileHandle,
-            },
-            previousFileInfo: prev,
-          } satisfies FileScanMsg)
           if (countIncomplete) emitCount()
-        } else {
-          // File failed full filter. If it would have passed the counter's
-          // name-only filter, the counter already counted it — correct.
-          if (cheapFilterNameOnly(entry.name, key, filters)) {
-            totalDiscovered--
-            emitCount()
-          }
-          if (fileAnomalies.length > 0) {
-            emit({
-              response: 'scanAnomalies',
-              fileInfo: {
-                path: prefix,
-                name: entry.name,
-                size: file.size,
-                kind: 'handle',
-                fileHandle: entry as FileSystemFileHandle,
-              },
-              anomalies: fileAnomalies,
-              previousFileInfo: prev,
-            } satisfies FileScanMsg)
-          }
         }
 
         // Backpressure: may pause the feeder for memory control
@@ -813,7 +1266,7 @@ export async function scanDirectoryNode(
   dirPath: string,
   ctx: ScanContext,
 ): Promise<void> {
-  const { filters, controller, previousIndex, emit } = ctx
+  const { filters, controller, emit } = ctx
   // Shared by the counter and feeder below, which run interleaved via
   // Promise.all. Access is safe because both run in the same worker and JS is
   // single-threaded; the counter increments, the feeder decrements on files
@@ -835,23 +1288,13 @@ export async function scanDirectoryNode(
     const fs = await import('fs/promises')
     const path = await import('path')
 
-    async function readdirWithRetry(currentPath: string): Promise<Dirent[]> {
-      for (let attempt = 0; ; attempt++) {
-        try {
-          return await fs.readdir(currentPath, { withFileTypes: true })
-        } catch (error) {
-          await backOffOrThrow(attempt, error)
-        }
-      }
-    }
-
     /**
      * Counter: traverses using readdir + name filter only.
      * No stat() calls — just checks file name against exclusion lists.
      * Emits 'count' at max speed.
      */
     async function counter(currentPath: string, prefix: string): Promise<void> {
-      const entries = await readdirWithRetry(currentPath)
+      const entries = await readdirWithRetry(fs, currentPath)
       entries.sort((a, b) => a.name.localeCompare(b.name))
 
       for (const entry of entries) {
@@ -884,88 +1327,34 @@ export async function scanDirectoryNode(
      * counter's estimate when files fail the full filter.
      */
     async function feeder(currentPath: string, prefix: string): Promise<void> {
-      const entries = await readdirWithRetry(currentPath)
+      const entries = await readdirWithRetry(fs, currentPath)
       entries.sort((a, b) => a.name.localeCompare(b.name))
 
       for (const entry of entries) {
         if (entry.isFile()) {
-          const filePath = path.join(currentPath, entry.name)
-          const key = `${prefix}/${entry.name}`
-          const prev = previousIndex ? previousIndex[key] : undefined
-
-          let stats: Awaited<ReturnType<typeof fs.stat>>
-          try {
-            stats = await fs.stat(filePath)
-          } catch (readError) {
-            // A single file we cannot stat (vanished, permission denied) must
-            // NOT abort the whole scan. Report it as a hard error and continue.
-            // The error string is PHI-safe (no path); the raw path lives only
-            // in fileInfo, keeping it in the private (input) log.
-            if (cheapFilterNameOnly(entry.name, key, filters)) {
-              totalDiscovered--
-              emitCount()
-            }
-            emit({
-              response: 'scanAnomalies',
-              fileInfo: {
-                path: prefix,
-                name: entry.name,
-                size: 0,
-                kind: 'path',
-                fullPath: filePath,
-              },
-              anomalies: [],
-              errors: [safeReadErrorMessage(readError)],
-              previousFileInfo: prev,
-            } satisfies FileScanMsg)
-            await controller.waitIfPaused()
-            continue
-          }
-
-          const fileAnomalies: string[] = []
-          if (
-            await shouldProcessFileNode(
-              filePath,
-              entry.name,
-              stats.size,
-              fileAnomalies,
-              key,
-              filters,
-            )
-          ) {
+          const fed = await feedNodeFile(
+            fs,
+            path.join(currentPath, entry.name),
+            entry.name,
+            prefix,
+            ctx,
+            () => {
+              // Correct the counter's estimate if needed
+              if (
+                cheapFilterNameOnly(
+                  entry.name,
+                  `${prefix}/${entry.name}`,
+                  filters,
+                )
+              ) {
+                totalDiscovered--
+                emitCount()
+              }
+            },
+          )
+          if (fed) {
             filesFed++
-            emit({
-              response: 'file',
-              fileInfo: {
-                path: prefix,
-                name: entry.name,
-                size: stats.size,
-                kind: 'path',
-                fullPath: filePath,
-              },
-              previousFileInfo: prev,
-            } satisfies FileScanMsg)
             if (countIncomplete) emitCount()
-          } else {
-            // Correct the counter's estimate if needed
-            if (cheapFilterNameOnly(entry.name, key, filters)) {
-              totalDiscovered--
-              emitCount()
-            }
-            if (fileAnomalies.length > 0) {
-              emit({
-                response: 'scanAnomalies',
-                fileInfo: {
-                  path: prefix,
-                  name: entry.name,
-                  size: stats.size,
-                  kind: 'path',
-                  fullPath: filePath,
-                },
-                anomalies: fileAnomalies,
-                previousFileInfo: prev,
-              } satisfies FileScanMsg)
-            }
           }
 
           // Backpressure: may pause the feeder for memory control
@@ -1080,17 +1469,25 @@ export function createScanHandler({ emit, close }: ScanHandlerBindings) {
         currentController = controller
         const ctx = { filters, controller, previousIndex, emit }
 
+        const { inputPaths } = eventData
         let scan: Promise<void>
         if ('path' in eventData) {
-          scan = scanDirectoryNode(eventData.path, ctx)
+          scan = inputPaths
+            ? scanListedNodePaths(eventData.path, inputPaths, ctx)
+            : scanDirectoryNode(eventData.path, ctx)
         } else if ('directoryHandle' in eventData) {
-          scan = scanDirectory(eventData.directoryHandle, ctx)
+          scan = inputPaths
+            ? scanListedHandles(eventData.directoryHandle, inputPaths, ctx)
+            : scanDirectory(eventData.directoryHandle, ctx)
         } else if ('bucketOptions' in eventData) {
-          scan = scanS3Bucket(
-            eventData.bucketOptions,
-            ctx,
-            requestS3Credentials,
-          )
+          scan = inputPaths
+            ? scanListedS3Keys(
+                eventData.bucketOptions,
+                inputPaths,
+                ctx,
+                requestS3Credentials,
+              )
+            : scanS3Bucket(eventData.bucketOptions, ctx, requestS3Credentials)
         } else {
           console.error('No valid directory information provided for scanning.')
           break

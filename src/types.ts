@@ -79,16 +79,32 @@ export type OrganizeOptions = {
   // re-processed on the next run via the hash-based fileInfoIndex check.
   signal?: AbortSignal
 } & (
-  | { inputType: 'directory'; inputDirectory: FileSystemDirectoryHandle }
+  | {
+      inputType: 'directory'
+      inputDirectory: FileSystemDirectoryHandle
+      inputPaths?: TInputPath[]
+    }
   | { inputType: 'files'; inputFiles: File[] }
-  | { inputType: 'path'; inputDirectory: string }
+  | { inputType: 'path'; inputDirectory: string; inputPaths?: TInputPath[] }
   | {
       inputType: 'http'
       inputUrls: string[]
       headers?: Record<string, string> | THTTPHeaderProvider
     }
-  | { inputType: 's3'; inputS3Bucket: TS3BucketOptions }
+  | {
+      inputType: 's3'
+      inputS3Bucket: TS3BucketOptions
+      inputPaths?: TInputPath[]
+    }
 )
+
+/**
+ * A file named by the `fileInfo.path` and `name` a full scan reports for it.
+ * As `inputPaths`, only these are scanned, filtered and indexed as in a full
+ * scan. An unreadable entry is a scan error; an empty list or an unlistable
+ * root fails the run.
+ */
+export type TInputPath = { path: string; name: string }
 
 export type THashMethod =
   | 'crc64'
@@ -233,6 +249,17 @@ export type TFileInfo = {
       objectKey: string
     }
 )
+
+/**
+ * A listed input (`TInputPath`) that could not be resolved to a file, so has
+ * no handle, path or key to carry. Only ever reported as a scan error.
+ */
+export type TUnlocatedFileInfo = {
+  path: string
+  name: string
+  size: number
+  kind: 'unlocated'
+}
 
 // Includes deep sequences
 type TAttr = { [name: string]: string | TAttr[] }

@@ -260,6 +260,26 @@ const options: OrganizeOptions = {
 }
 ```
 
+To process only some files of a `directory`, `path` or `s3` input, list them in `inputPaths`.
+Each entry is the `fileInfo.path` and `fileInfo.name` a full scan reports for the file, such as
+an entry of an earlier run's `mapResultsList`. The scan skips its traversal but applies the same
+filters and `fileInfoIndex` lookup, so each file gets the same output path as in a full pass:
+
+```ts
+const options: OrganizeOptions = {
+  // other options are skipped
+  inputType: 'path',
+  inputDirectory: '/data/input',
+  inputPaths: [
+    // A scan prefixes every path with the input directory's own name
+    { path: 'input/study/S01', name: 'b.dcm' },
+  ],
+}
+```
+
+For `s3`, `path` and `name` are both the object key. An entry that names no readable file is
+reported as a scan error. An empty list, or an input root that cannot be listed, fails the run.
+
 You can also call `curateOne` directly and receive a promise with the mapped blob:
 
 ```ts
