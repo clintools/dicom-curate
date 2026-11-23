@@ -15,6 +15,7 @@ import {
   useWorkspaces,
 } from '../testutils/integrationHarness'
 import { VALID_CT_IMAGE, writeSynthFile } from '../testutils/synthFixtures'
+import type { OrganizeOptions, TMapResults } from './types'
 
 describe('curateMany driven through real workers', () => {
   const workspace = useWorkspaces()
@@ -130,5 +131,61 @@ describe('curateMany driven through real workers', () => {
     expect(result.mapResultsList?.[0]?.outputFilePath).toBe(
       mapped?.outputFilePath,
     )
+  })
+
+  it('gives a listed subset the output paths and hashes of a full pass', async () => {
+    const { inputDir, outputDir } = workspace()
+    // Two subjects, so a lost fileInfo.path changes the output path.
+    const files = [
+      ['S01', 'a.dcm'],
+      ['S01', 'b.dcm'],
+      ['S02', 'c.dcm'],
+      ['S02', 'd.dcm'],
+    ]
+    for (const [i, [subject, name]] of files.entries()) {
+      await writeSynthFile(
+        join(inputDir, 'study', subject, name),
+        VALID_CT_IMAGE,
+        { index: i },
+      )
+    }
+    const options = integrationOptions(inputDir, outputDir, integrationSpec(), {
+      hashMethod: 'md5',
+    })
+    const outputs = (results: TMapResults[]) =>
+      new Map(
+        results.map((r) => [
+          `${r.fileInfo?.path}/${r.fileInfo?.name}`,
+          {
+            outputFilePath: r.outputFilePath,
+            postMappedHash: r.fileInfo?.postMappedHash,
+          },
+        ]),
+      )
+
+    const full = outputs(
+      (await runCapturingProgress(options)).result.mapResultsList,
+    )
+    const listed = await runCapturingProgress({
+      ...options,
+      inputType: 'path',
+      inputDirectory: inputDir,
+      inputPaths: [
+        { path: 'input/study/S01', name: 'b.dcm' },
+        { path: 'input/study/S02', name: 'c.dcm' },
+      ],
+    } satisfies OrganizeOptions)
+
+    expect(listed.result.processedFiles).toBe(2)
+    const subset = outputs(listed.result.mapResultsList)
+    expect([...subset.keys()].sort()).toEqual([
+      'input/study/S01/b.dcm',
+      'input/study/S02/c.dcm',
+    ])
+    for (const [input, output] of subset) {
+      expect(output.outputFilePath).toMatch(/^curated\/S0[12]\//)
+      expect(output.postMappedHash).toBeTruthy()
+      expect(output).toEqual(full.get(input))
+    }
   })
 })
