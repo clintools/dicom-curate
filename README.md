@@ -149,6 +149,7 @@ Credentials are resolved on the main thread for every read, upload and listing p
 
 - A static object is read each time, so changing it in place takes effect at the next request.
 - A provider's result is reused until 5 minutes before its `expiration`. A result without `expiration` is never reused: the provider is called for every file, so it should cache, especially if each call makes a network request.
+- Input and output keep separate caches, so a provider shared by both is called by each.
 - Credentials are resolved when a file is dispatched and used for both its read and its upload, so they must stay valid for that long.
 - A provider that rejects fails that file as a dispatch failure; a sustained run of them rejects `curateMany`. A rejection while listing fails the run.
 
