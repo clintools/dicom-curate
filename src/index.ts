@@ -666,6 +666,7 @@ async function curateMany(
               noDicomSignatureCheck,
               noDefaultExclusions,
               fileInfoIndex: organizeOptions.fileInfoIndex,
+              inputPaths: organizeOptions.inputPaths,
             } satisfies FileScanRequest)
           } else if (organizeOptions.inputType === 's3') {
             const { credentials: _, ...bucketOptions } =
@@ -676,6 +677,7 @@ async function curateMany(
               excludedFiletypes: specExcludedFiletypes,
               excludedPathRegexes,
               fileInfoIndex: organizeOptions.fileInfoIndex,
+              inputPaths: organizeOptions.inputPaths,
               noDicomSignatureCheck,
               noDefaultExclusions,
             } satisfies FileScanRequest)
@@ -686,6 +688,7 @@ async function curateMany(
               excludedFiletypes: specExcludedFiletypes,
               excludedPathRegexes,
               fileInfoIndex: organizeOptions.fileInfoIndex,
+              inputPaths: organizeOptions.inputPaths,
               noDicomSignatureCheck,
               noDefaultExclusions,
             } satisfies FileScanRequest)

@@ -3,48 +3,53 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, posix, win32 } from 'node:path'
+import type { FileScanFileMsg } from '../testutils/workerTestHelpers'
 import type { FileScanMsg, ScanFilters } from './scanCore'
-import type { TS3BucketOptions, TS3Credentials } from './types'
+import type { TInputPath, TS3BucketOptions, TS3Credentials } from './types'
 
 // The S3 traversal loads the AWS SDK lazily via ./s3Client; mock it so the
 // listing loop can be driven in-process without a live bucket.
 const s3Send = vi.fn()
 const s3ClientConfigs: { credentials?: unknown }[] = []
 const s3Destroy = vi.fn()
-vi.mock('./s3Client', () => ({
-  loadS3Client: async () => ({
-    S3Client: class {
-      send = s3Send
-      destroy = s3Destroy
-      constructor(config: { credentials?: unknown }) {
-        s3ClientConfigs.push(config)
-      }
-    },
-    ListObjectsV2Command: class {
-      constructor(public input: unknown) {}
-    },
-  }),
+const loadS3Client = vi.fn(async () => ({
+  S3Client: class {
+    send = s3Send
+    destroy = s3Destroy
+    constructor(config: { credentials?: unknown }) {
+      s3ClientConfigs.push(config)
+    }
+  },
+  ListObjectsV2Command: class {
+    constructor(public input: unknown) {}
+  },
 }))
+vi.mock('./s3Client', () => ({ loadS3Client }))
 
 // Backoff resolves at once; tests assert the requested waits instead.
 vi.mock('./delay', () => ({ delay: vi.fn(async () => {}) }))
 
-// Passthrough, so a test can fail chosen directory listings.
+// Passthrough, so a test can fail chosen listings or change realpath.
 vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs/promises')>()
-  return { ...actual, readdir: vi.fn(actual.readdir) }
+  return {
+    ...actual,
+    readdir: vi.fn(actual.readdir),
+    realpath: vi.fn(actual.realpath),
+  }
 })
 
 const { delay } = await import('./delay')
 const fsPromises = await import('fs/promises')
-const realReaddir = (
+const { readdir: realReaddir, realpath: realRealpath } =
   await vi.importActual<typeof import('fs/promises')>('fs/promises')
-).readdir
 const readdirMock = vi.mocked(fsPromises.readdir)
+const realpathMock = vi.mocked(fsPromises.realpath)
 
 const {
   cheapFilterNameOnly,
@@ -55,8 +60,15 @@ const {
   ScanController,
   scanDirectory,
   scanDirectoryNode,
+  scanListedHandles,
+  scanListedNodePaths,
+  scanListedS3Keys,
+  relativeNodePath,
   scanS3Bucket,
   shouldProcessFileItem,
+  MISSING_KEY_ERROR,
+  NOT_A_FILE_ERROR,
+  UNLOCATED_INPUT_ERROR,
 } = await import('./scanCore')
 
 beforeEach(() => {
@@ -431,37 +443,70 @@ describe('scanDirectoryNode', () => {
   })
 })
 
+class FakeFileHandle {
+  kind = 'file' as const
+  constructor(
+    public name: string,
+    private file: File,
+    private failRead = false,
+  ) {}
+  async getFile(): Promise<File> {
+    if (this.failRead) throw new Error('handle read failed')
+    return this.file
+  }
+}
+
+/** Failures and case-folding are off by default. */
+class FakeDirHandle {
+  kind = 'directory' as const
+  dirLookups = 0
+  matchCase = true
+  failLookups = 0
+  failFileLookups = 0
+  failListings = 0
+  constructor(
+    public name: string,
+    private entries: Array<{ name: string; kind: 'file' | 'directory' }>,
+  ) {}
+  async *values() {
+    if (this.failListings-- > 0) {
+      throw new DOMException('busy', 'NotReadableError')
+    }
+    for (const entry of this.entries) yield entry
+  }
+  private find(name: string, kind: 'file' | 'directory') {
+    const found = this.entries.find(
+      (e) =>
+        e.kind === kind &&
+        (this.matchCase
+          ? e.name === name
+          : e.name.toLowerCase() === name.toLowerCase()),
+    )
+    if (!found) throw new DOMException('not found', 'NotFoundError')
+    return found
+  }
+  async getDirectoryHandle(name: string) {
+    this.dirLookups++
+    if (this.failLookups-- > 0) {
+      throw new DOMException('busy', 'NotReadableError')
+    }
+    return this.find(name, 'directory')
+  }
+  async getFileHandle(name: string) {
+    if (this.failFileLookups-- > 0) {
+      throw new DOMException('busy', 'NotReadableError')
+    }
+    return this.find(name, 'file')
+  }
+}
+
+function dicomFile(name: string, size = 200): File {
+  const buf = Buffer.alloc(size)
+  buf.write('DICM', DICM_SIGNATURE_OFFSET, 'ascii')
+  return new File([buf], name)
+}
+
 describe('scanDirectory (browser FileSystem handles)', () => {
-  class FakeFileHandle {
-    kind = 'file' as const
-    constructor(
-      public name: string,
-      private file: File,
-      private failRead = false,
-    ) {}
-    async getFile(): Promise<File> {
-      if (this.failRead) throw new Error('handle read failed')
-      return this.file
-    }
-  }
-
-  class FakeDirHandle {
-    kind = 'directory' as const
-    constructor(
-      public name: string,
-      private entries: Array<FakeFileHandle | FakeDirHandle | FlakyDirHandle>,
-    ) {}
-    async *values() {
-      for (const entry of this.entries) yield entry
-    }
-  }
-
-  function dicomFile(name: string, size = 200): File {
-    const buf = Buffer.alloc(size)
-    buf.write('DICM', DICM_SIGNATURE_OFFSET, 'ascii')
-    return new File([buf], name)
-  }
-
   async function run(root: FakeDirHandle, filters = defaultFilters()) {
     const { msgs, emit } = collector()
     await scanDirectory(root as unknown as FileSystemDirectoryHandle, {
@@ -1057,5 +1102,576 @@ describe('isS3KeyExcludedByName (re-exported from scanDirectoryWorker too)', () 
       true,
     )
     expect(isS3KeyExcludedByName('a/scan.dcm', [], true)).toBe(false)
+  })
+})
+
+describe('listed scans (inputPaths)', () => {
+  const trees: string[] = []
+
+  afterEach(() => {
+    for (const t of trees.splice(0)) {
+      rmSync(t, { recursive: true, force: true })
+    }
+    readdirMock.mockImplementation(realReaddir)
+    realpathMock.mockImplementation(realRealpath)
+    vi.mocked(delay).mockClear()
+  })
+
+  function ctx(emit: (m: FileScanMsg) => void, filters = defaultFilters()) {
+    return { filters, controller: new ScanController(), emit }
+  }
+
+  function fileMsgs(msgs: FileScanMsg[]) {
+    return msgs.filter((m): m is FileScanFileMsg => m.response === 'file')
+  }
+
+  describe('node paths', () => {
+    function makeTree(): string {
+      const root = mkdtempSync(join(tmpdir(), 'scancore-listed-'))
+      trees.push(root)
+      mkdirSync(join(root, 'level1', 'nested'), { recursive: true })
+      writeDicom(join(root, 'level1', 'root_valid.dcm'))
+      writeDicom(join(root, 'level1', 'nested', 'nested_valid.dcm'), 300)
+      writeNonDicom(join(root, 'readme.txt'))
+      return root
+    }
+
+    async function runListed(
+      root: string,
+      inputPaths: TInputPath[],
+      filters = defaultFilters(),
+    ) {
+      const { msgs, emit } = collector()
+      await scanListedNodePaths(root, inputPaths, ctx(emit, filters))
+      return msgs
+    }
+
+    it('reports a listed file with the fileInfo and previousFileInfo a walk reports', async () => {
+      const root = makeTree()
+      const dirPath = `${basename(root)}/level1/nested`
+      const previousIndex = {
+        [`${dirPath}/nested_valid.dcm`]: { size: 300, mtime: 'earlier' },
+      }
+      const walked = collector()
+      await scanDirectoryNode(root, {
+        ...ctx(walked.emit),
+        previousIndex,
+      })
+      const listed = collector()
+      await scanListedNodePaths(
+        root,
+        [{ path: dirPath, name: 'nested_valid.dcm' }],
+        { ...ctx(listed.emit), previousIndex },
+      )
+
+      const fromWalk = fileMsgs(walked.msgs).filter(
+        (m) => m.fileInfo.name === 'nested_valid.dcm',
+      )
+      expect(fromWalk).toHaveLength(1)
+      expect(fileMsgs(listed.msgs)).toEqual(fromWalk)
+      expect(listed.msgs.at(-1)).toEqual({ response: 'done' })
+    })
+
+    it('applies the full filter and counts a rejected entry out of the total', async () => {
+      const root = makeTree()
+      const msgs = await runListed(root, [
+        { path: basename(root), name: 'readme.txt' },
+        { path: `${basename(root)}/level1`, name: 'root_valid.dcm' },
+      ])
+      expect(fileNames(msgs)).toEqual(['root_valid.dcm'])
+      expect(
+        anomalyTexts(msgs).some((t) => t.includes('DICOM signature')),
+      ).toBe(true)
+      expect(countValues(msgs)).toEqual([2, 1])
+    })
+
+    it('skips a listed file matching an excluded path regex', async () => {
+      const root = makeTree()
+      const msgs = await runListed(
+        root,
+        [{ path: `${basename(root)}/level1`, name: 'root_valid.dcm' }],
+        defaultFilters({ excludedPathRegexes: [/root_valid/] }),
+      )
+      expect(fileNames(msgs)).toEqual([])
+      expect(errorMessages(msgs)).toEqual([])
+    })
+
+    it('reports a listed file that no longer exists as a scan error', async () => {
+      const root = makeTree()
+      const msgs = await runListed(root, [
+        { path: `${basename(root)}/level1`, name: 'gone.dcm' },
+      ])
+      const errors = errorMessages(msgs)
+      expect(errors).toHaveLength(1)
+      expect(errors[0].errors?.[0]).toBe(
+        'Unable to read file (filesystem error): ENOENT',
+      )
+      expect(errors[0].fileInfo).toMatchObject({
+        path: `${basename(root)}/level1`,
+        name: 'gone.dcm',
+      })
+      expect(msgs.at(-1)).toEqual({ response: 'done' })
+    })
+
+    it('rejects a listed entry that names a directory rather than feeding it', async () => {
+      const root = makeTree()
+      const msgs = await runListed(
+        root,
+        [{ path: basename(root), name: 'level1' }],
+        defaultFilters({ noDicomSignatureCheck: true }),
+      )
+      expect(fileNames(msgs)).toEqual([])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        [NOT_A_FILE_ERROR],
+      ])
+      expect(countValues(msgs)).toEqual([1, 0])
+    })
+
+    it('fails the scan when the list is empty', async () => {
+      const msgs = await runListed(makeTree(), [])
+      expect(msgs).toEqual([
+        {
+          response: 'error',
+          error: 'Directory scan failed: inputPaths is empty',
+        },
+      ])
+    })
+
+    it('fails the scan rather than hanging on a malformed list', async () => {
+      const msgs = await runListed(makeTree(), [null as unknown as TInputPath])
+      expect(msgs).toHaveLength(1)
+      expect(msgs[0]).toMatchObject({ response: 'error' })
+    })
+
+    it('feeds a file listed twice once', async () => {
+      const root = makeTree()
+      const entry = {
+        path: `${basename(root)}/level1`,
+        name: 'root_valid.dcm',
+      }
+      const msgs = await runListed(root, [entry, { ...entry }])
+      expect(fileNames(msgs)).toEqual(['root_valid.dcm'])
+      expect(countValues(msgs)).toEqual([1])
+    })
+
+    it('keeps a valid entry whose joined path matches an invalid one', async () => {
+      const root = makeTree()
+      const msgs = await runListed(root, [
+        { path: `${basename(root)}/level1`, name: 'root_valid.dcm' },
+        { path: basename(root), name: 'level1/root_valid.dcm' },
+      ])
+      expect(fileNames(msgs)).toEqual(['root_valid.dcm'])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        [UNLOCATED_INPUT_ERROR],
+      ])
+    })
+
+    it('rejects a Windows separator or drive prefix inside a component', () => {
+      for (const [segments, name] of [
+        [['a\\b'], 'x.dcm'],
+        [[], 'b\\x.dcm'],
+        [[], 'c:x.dcm'],
+        [['c:'], 'x.dcm'],
+      ] as const) {
+        expect(relativeNodePath(segments, name, win32)).toBeUndefined()
+      }
+      expect(relativeNodePath(['a', 'b'], 'x.dcm', win32)).toBe('a\\b\\x.dcm')
+      expect(relativeNodePath(['a\\b'], 'x.dcm', posix)).toBe('a\\b/x.dcm')
+    })
+
+    it('rejects an entry outside the scan root rather than resolving it', async () => {
+      const root = makeTree()
+      const msgs = await runListed(root, [
+        { path: 'other-root/level1', name: 'root_valid.dcm' },
+        { path: `${basename(root)}/../..`, name: 'root_valid.dcm' },
+        { path: basename(root), name: '..' },
+      ])
+      expect(fileNames(msgs)).toEqual([])
+      const errors = errorMessages(msgs)
+      expect(errors).toHaveLength(3)
+      for (const e of errors) {
+        expect(e.errors).toEqual([UNLOCATED_INPUT_ERROR])
+        expect(e.fileInfo.kind).toBe('unlocated')
+      }
+    })
+    it('rejects a miscased entry where realpath keeps the listed case, as on Linux', async () => {
+      const root = makeTree()
+      const realRoot = await realRealpath(root)
+      // Linux realpath(3) on a case-insensitive mount returns the path as given.
+      realpathMock.mockImplementation((async (target: string) => {
+        await fsPromises.stat(target)
+        return target.startsWith(root)
+          ? realRoot + target.slice(root.length)
+          : realRealpath(target)
+      }) as typeof realRealpath)
+      const msgs = await runListed(root, [
+        { path: `${basename(root)}/level1`, name: 'ROOT_VALID.dcm' },
+        { path: `${basename(root)}/LEVEL1`, name: 'root_valid.dcm' },
+        { path: `${basename(root)}/level1`, name: 'root_valid.dcm' },
+      ])
+      expect(fileNames(msgs)).toEqual(['root_valid.dcm'])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        [UNLOCATED_INPUT_ERROR],
+        [UNLOCATED_INPUT_ERROR],
+      ])
+    })
+
+    it('fails the run when the root cannot be listed, as a walk does', async () => {
+      const root = makeTree()
+      readdirMock.mockImplementation(((target: string, options: unknown) =>
+        target === root
+          ? Promise.reject(
+              Object.assign(new Error('EACCES'), { code: 'EACCES' }),
+            )
+          : realReaddir(target, options as never)) as typeof realReaddir)
+      const msgs = await runListed(root, [
+        { path: `${basename(root)}/level1`, name: 'root_valid.dcm' },
+      ])
+      expect(fileNames(msgs)).toEqual([])
+      expect(msgs.at(-1)).toMatchObject({ response: 'error' })
+      expect(msgs.filter((m) => m.response === 'error')).toHaveLength(1)
+    })
+
+    it('rejects a listed entry reached through a symlink, which a walk skips', async () => {
+      const root = makeTree()
+      const outside = mkdtempSync(join(tmpdir(), 'scancore-outside-'))
+      trees.push(outside)
+      writeDicom(join(outside, 'secret.dcm'))
+      symlinkSync(join(outside, 'secret.dcm'), join(root, 'level1', 'link.dcm'))
+      symlinkSync(outside, join(root, 'linked'))
+      const msgs = await runListed(root, [
+        { path: `${basename(root)}/level1`, name: 'link.dcm' },
+        { path: `${basename(root)}/linked`, name: 'secret.dcm' },
+      ])
+      expect(fileNames(msgs)).toEqual([])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        [UNLOCATED_INPUT_ERROR],
+        [UNLOCATED_INPUT_ERROR],
+      ])
+      expect(countValues(msgs)).toEqual([2, 1, 0])
+    })
+  })
+
+  describe('directory handles', () => {
+    function makeTree() {
+      const series = new FakeDirHandle('series', [
+        new FakeFileHandle('a.dcm', dicomFile('a.dcm')),
+        new FakeFileHandle('b.dcm', dicomFile('b.dcm')),
+      ])
+      const root = new FakeDirHandle('root', [series])
+      return { root, series }
+    }
+
+    async function runListed(root: FakeDirHandle, inputPaths: TInputPath[]) {
+      const { msgs, emit } = collector()
+      await scanListedHandles(
+        root as unknown as FileSystemDirectoryHandle,
+        inputPaths,
+        ctx(emit),
+      )
+      return msgs
+    }
+
+    it('reports a listed file with the fileInfo a walk reports', async () => {
+      const { root } = makeTree()
+      const walked = collector()
+      await scanDirectory(
+        root as unknown as FileSystemDirectoryHandle,
+        ctx(walked.emit),
+      )
+      const listed = await runListed(root, [
+        { path: 'root/series', name: 'b.dcm' },
+      ])
+      const fromWalk = fileMsgs(walked.msgs).filter(
+        (m) => m.fileInfo.name === 'b.dcm',
+      )
+      expect(fromWalk).toHaveLength(1)
+      expect(fileMsgs(listed)).toEqual(fromWalk)
+    })
+
+    it('resolves a directory shared by several listed files once', async () => {
+      const { root } = makeTree()
+      const msgs = await runListed(root, [
+        { path: 'root/series', name: 'a.dcm' },
+        { path: 'root/series', name: 'b.dcm' },
+      ])
+      expect(fileNames(msgs)).toEqual(['a.dcm', 'b.dcm'])
+      expect(root.dirLookups).toBe(1)
+    })
+
+    it('rejects an entry a case-insensitive volume resolves under another spelling', async () => {
+      const { root, series } = makeTree()
+      root.matchCase = false
+      series.matchCase = false
+      const msgs = await runListed(root, [
+        { path: 'root/SERIES', name: 'a.dcm' },
+        { path: 'root/series', name: 'A.dcm' },
+        { path: 'root/series', name: 'b.dcm' },
+      ])
+      expect(fileNames(msgs)).toEqual(['b.dcm'])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        [UNLOCATED_INPUT_ERROR],
+        [UNLOCATED_INPUT_ERROR],
+      ])
+      expect(countValues(msgs)).toEqual([3, 2, 1])
+    })
+
+    it('retries a directory lookup, file lookup and listing that fail once', async () => {
+      const { root, series } = makeTree()
+      root.failLookups = 1
+      series.failListings = 1
+      series.failFileLookups = 1
+      const msgs = await runListed(root, [
+        { path: 'root/series', name: 'a.dcm' },
+        { path: 'root/series', name: 'b.dcm' },
+      ])
+      expect(fileNames(msgs)).toEqual(['a.dcm', 'b.dcm'])
+      expect(errorMessages(msgs)).toEqual([])
+      expect(requestedDelays()).toEqual([
+        LIST_RETRY_DELAYS_MS[0],
+        LIST_RETRY_DELAYS_MS[0],
+        LIST_RETRY_DELAYS_MS[0],
+      ])
+    })
+
+    it('fails the run when the root cannot be listed, as a walk does', async () => {
+      const { root } = makeTree()
+      root.failListings = Infinity
+      const msgs = await runListed(root, [
+        { path: 'root/series', name: 'a.dcm' },
+      ])
+      expect(msgs).toEqual([
+        { response: 'count', totalDiscovered: 1 },
+        { response: 'error', error: 'Directory scan failed: busy' },
+      ])
+    })
+
+    it('fails every file under a directory that never lists, once', async () => {
+      const { root, series } = makeTree()
+      series.failListings = Infinity
+      const msgs = await runListed(root, [
+        { path: 'root/series', name: 'a.dcm' },
+        { path: 'root/series', name: 'b.dcm' },
+      ])
+      expect(fileNames(msgs)).toEqual([])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        ['Unable to list directory (filesystem error): NotReadableError'],
+        ['Unable to list directory (filesystem error): NotReadableError'],
+      ])
+      expect(requestedDelays()).toEqual(LIST_RETRY_DELAYS_MS)
+    })
+
+    it('reports a file lookup that never succeeds as a read error', async () => {
+      const { root, series } = makeTree()
+      series.failFileLookups = Infinity
+      const msgs = await runListed(root, [
+        { path: 'root/series', name: 'a.dcm' },
+      ])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        ['Unable to read file (filesystem error): NotReadableError'],
+      ])
+    })
+
+    it('reports a listed file under a missing directory as a scan error', async () => {
+      const { root } = makeTree()
+      const msgs = await runListed(root, [
+        { path: 'root/gone', name: 'a.dcm' },
+        { path: 'root/series', name: 'gone.dcm' },
+      ])
+      const errors = errorMessages(msgs)
+      expect(errors.map((e) => e.errors)).toEqual([
+        ['Unable to read file (filesystem error): NotFoundError'],
+        ['Unable to read file (filesystem error): NotFoundError'],
+      ])
+      expect(errors.map((e) => e.fileInfo.kind)).toEqual([
+        'unlocated',
+        'unlocated',
+      ])
+      expect(countValues(msgs)).toEqual([2, 1, 0])
+      expect(requestedDelays()).toEqual([])
+    })
+
+    it('fails a directory name the API rejects without retrying', async () => {
+      const { root } = makeTree()
+      root.getDirectoryHandle = async () => {
+        throw new TypeError('Name is not allowed.')
+      }
+      const msgs = await runListed(root, [{ path: 'root/a\\b', name: 'a.dcm' }])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        ['Unable to read file (filesystem error): TypeError'],
+      ])
+      expect(requestedDelays()).toEqual([])
+    })
+  })
+
+  describe('s3 keys', () => {
+    beforeEach(() => {
+      s3Send.mockReset()
+      s3Destroy.mockReset()
+      s3ClientConfigs.length = 0
+    })
+
+    const bucketOptions = {
+      bucketName: 'bucket',
+      region: 'us-east-1',
+      prefix: 'study/',
+    } as unknown as TS3BucketOptions
+    const listedKey = { path: 'study/a.dcm', name: 'study/a.dcm' }
+
+    async function runListed(
+      inputPaths: TInputPath[],
+      requestCredentials = async (): Promise<TS3Credentials | undefined> =>
+        undefined,
+    ) {
+      const { msgs, emit } = collector()
+      await scanListedS3Keys(
+        bucketOptions,
+        inputPaths,
+        ctx(emit),
+        requestCredentials,
+      )
+      return msgs
+    }
+
+    // The first send is the bucket probe; the rest look up one key each.
+    function listing(...pages: unknown[]) {
+      s3Send.mockResolvedValueOnce({})
+      for (const page of pages) s3Send.mockResolvedValueOnce(page)
+    }
+
+    it('takes the size from a listing and reports the key as a full scan does', async () => {
+      listing({ Contents: [{ Key: 'study/a.dcm', Size: 5000 }] })
+      const msgs = await runListed([listedKey])
+      expect(fileMsgs(msgs)).toEqual([
+        {
+          response: 'file',
+          fileInfo: {
+            size: 5000,
+            name: 'study/a.dcm',
+            path: 'study/a.dcm',
+            objectKey: 'study/a.dcm',
+            kind: 's3',
+          },
+          previousFileInfo: undefined,
+        },
+      ])
+      expect(s3Send.mock.calls.map(([command]) => command.input)).toEqual([
+        { Bucket: 'bucket', Prefix: 'study/', MaxKeys: 1 },
+        { Bucket: 'bucket', Prefix: 'study/a.dcm', MaxKeys: 1 },
+      ])
+    })
+
+    it('fetches credentials for each request and destroys its client', async () => {
+      listing({ Contents: [{ Key: 'study/a.dcm', Size: 5000 }] })
+      let issued = 0
+      await runListed([listedKey], async () => ({
+        accessKeyId: `key-${++issued}`,
+        secretAccessKey: 'secret',
+      }))
+      expect(
+        s3ClientConfigs.map(
+          (c) => (c.credentials as TS3Credentials).accessKeyId,
+        ),
+      ).toEqual(['key-1', 'key-2'])
+      expect(s3Destroy).toHaveBeenCalledTimes(2)
+    })
+
+    it('fails the run when credentials cannot be fetched', async () => {
+      const msgs = await runListed([listedKey], async () => {
+        throw new Error('provider failed')
+      })
+      expect(msgs.at(-1)).toEqual({
+        response: 'error',
+        error: 'S3 bucket scan failed: provider failed',
+      })
+      expect(s3Send).not.toHaveBeenCalled()
+    })
+
+    it('reports a key the listing does not return as a scan error', async () => {
+      listing(
+        { Contents: [{ Key: 'study/a.dcm.bak', Size: 10 }] },
+        { Contents: [] },
+        { Contents: [{ Key: 'study/c.dcm' }] },
+      )
+      const msgs = await runListed([
+        listedKey,
+        { path: 'study/b.dcm', name: 'study/b.dcm' },
+        { path: 'study/c.dcm', name: 'study/c.dcm' },
+      ])
+      expect(fileMsgs(msgs)).toEqual([])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        [MISSING_KEY_ERROR],
+        [MISSING_KEY_ERROR],
+        [MISSING_KEY_ERROR],
+      ])
+      expect(countValues(msgs)).toEqual([3, 2, 1, 0])
+    })
+
+    it('reports a key whose listing fails as a scan error', async () => {
+      listing()
+      s3Send.mockRejectedValueOnce(
+        Object.assign(new Error('denied'), { name: 'AccessDenied' }),
+      )
+      const errors = errorMessages(await runListed([listedKey]))
+      expect(errors.map((e) => e.errors)).toEqual([
+        ['Unable to read file (filesystem error): AccessDenied'],
+      ])
+    })
+
+    it('fails the run when the bucket cannot be listed, as a full scan does', async () => {
+      s3Send.mockRejectedValueOnce(new Error('expired credentials'))
+      const msgs = await runListed([listedKey])
+      expect(msgs).toEqual([
+        { response: 'count', totalDiscovered: 1 },
+        {
+          response: 'error',
+          error: 'S3 bucket scan failed: expired credentials',
+        },
+      ])
+    })
+
+    it('reports a failure to load the S3 client as a scan error', async () => {
+      loadS3Client.mockRejectedValueOnce(new Error('chunk failed to load'))
+      const msgs = await runListed([listedKey])
+      expect(msgs).toEqual([
+        { response: 'count', totalDiscovered: 1 },
+        {
+          response: 'error',
+          error: 'S3 bucket scan failed: chunk failed to load',
+        },
+      ])
+    })
+
+    it('rejects a key outside the prefix or not in listing form without a lookup', async () => {
+      listing()
+      const msgs = await runListed([
+        { path: 'other/a.dcm', name: 'other/a.dcm' },
+        { path: 'study', name: 'a.dcm' },
+      ])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        [UNLOCATED_INPUT_ERROR],
+        [UNLOCATED_INPUT_ERROR],
+      ])
+      expect(s3Send).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('is what the scan handler runs when a request carries inputPaths', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scancore-listed-handler-'))
+    trees.push(root)
+    writeDicom(join(root, 'a.dcm'))
+    writeDicom(join(root, 'b.dcm'))
+    const { msgs, emit } = collector()
+    const close = vi.fn()
+    const { handleMessage } = createScanHandler({ emit, close })
+    handleMessage({
+      data: {
+        request: 'scan',
+        path: root,
+        inputPaths: [{ path: basename(root), name: 'b.dcm' }],
+      },
+    } as MessageEvent)
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+    expect(fileNames(msgs)).toEqual(['b.dcm'])
   })
 })

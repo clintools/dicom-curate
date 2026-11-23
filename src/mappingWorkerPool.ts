@@ -33,6 +33,7 @@ import type {
   TMapResults,
   TOutputTarget,
   TProgressMessage,
+  TUnlocatedFileInfo,
 } from './types'
 import { OUTPUT_FILE_PREFIX } from './types'
 import { createWorker } from './worker'
@@ -193,7 +194,7 @@ export function setDirectoryScanFinished(value: boolean): void {
 
 // Track scan anomalies separately since they don't go through the processing pipeline
 export let scanAnomalies: {
-  fileInfo: TFileInfo
+  fileInfo: TFileInfo | TUnlocatedFileInfo
   anomalies: string[]
   errors?: string[]
   scanTarget?: 'directory'
