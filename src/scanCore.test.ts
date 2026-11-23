@@ -1297,13 +1297,12 @@ describe('listed scans (inputPaths)', () => {
     it('rejects a miscased entry where realpath keeps the listed case, as on Linux', async () => {
       const root = makeTree()
       const realRoot = await realRealpath(root)
-      // Linux realpath(3) on a case-insensitive mount returns the path as given.
-      realpathMock.mockImplementation((async (target: string) => {
-        await fsPromises.stat(target)
-        return target.startsWith(root)
+      // Linux realpath(3) on a case-insensitive mount resolves a miscased path
+      // as given. Never touches the disk, so the host's case rules don't matter.
+      realpathMock.mockImplementation((async (target: string) =>
+        target.startsWith(root)
           ? realRoot + target.slice(root.length)
-          : realRealpath(target)
-      }) as typeof realRealpath)
+          : realRealpath(target)) as typeof realRealpath)
       const msgs = await runListed(root, [
         { path: `${basename(root)}/level1`, name: 'ROOT_VALID.dcm' },
         { path: `${basename(root)}/LEVEL1`, name: 'root_valid.dcm' },
