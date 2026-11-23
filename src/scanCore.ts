@@ -543,8 +543,8 @@ export async function scanS3Bucket(
             totalDiscovered++
             const prev = previousIndex ? previousIndex[item.Key] : undefined
 
-            // Without a counter pass the reported total trails the listing
-            // while paused; the bounded queue is worth that.
+            // Takes effect only from the next page: the loop never yields
+            // mid-page, so 'stop' lands after the page is emitted.
             await controller.waitIfPaused()
             emit({
               response: 'file',
