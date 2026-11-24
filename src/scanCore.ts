@@ -1006,7 +1006,8 @@ export async function scanListedS3Keys(
       }
       let item: { Key?: string; Size?: number } | undefined
       try {
-        // A key sorts first among the keys it prefixes.
+        // A key sorts first among the keys it prefixes. Needs a general-purpose
+        // bucket: a directory bucket lists unsorted and takes only `/` prefixes.
         item = (await firstUnder(key)).Contents?.[0]
       } catch (error) {
         return emitUnlocated(
