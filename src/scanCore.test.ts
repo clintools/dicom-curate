@@ -1574,7 +1574,26 @@ describe('listed scans (inputPaths)', () => {
       ])
     })
 
-    it('fetches credentials for each request and destroys its client', async () => {
+    it('shares one client while the credentials hold and destroys it after the scan', async () => {
+      listing(
+        { Contents: [{ Key: 'study/a.dcm', Size: 5000 }] },
+        { Contents: [{ Key: 'study/b.dcm', Size: 5000 }] },
+      )
+      // A fresh copy per request, as the main thread sends.
+      const requestCredentials = vi.fn(async () => ({
+        accessKeyId: 'key',
+        secretAccessKey: 'secret',
+      }))
+      await runListed(
+        [listedKey, { path: 'study/b.dcm', name: 'study/b.dcm' }],
+        requestCredentials,
+      )
+      expect(requestCredentials).toHaveBeenCalledTimes(3)
+      expect(s3ClientConfigs).toHaveLength(1)
+      expect(s3Destroy).toHaveBeenCalledTimes(1)
+    })
+
+    it('replaces the client when the credentials change', async () => {
       listing({ Contents: [{ Key: 'study/a.dcm', Size: 5000 }] })
       let issued = 0
       await runListed([listedKey], async () => ({
@@ -1641,6 +1660,7 @@ describe('listed scans (inputPaths)', () => {
           error: 'S3 bucket scan failed: expired credentials',
         },
       ])
+      expect(s3Destroy).toHaveBeenCalledTimes(1)
     })
 
     it('reports a failure to load the S3 client as a scan error', async () => {

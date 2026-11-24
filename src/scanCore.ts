@@ -976,53 +976,71 @@ export async function scanListedS3Keys(
   ctx: ScanContext,
   requestCredentials: () => Promise<TS3Credentials | undefined>,
 ): Promise<void> {
-  await scanListed(inputPaths, ctx, 'S3 bucket scan', async () => {
-    const s3 = await loadS3Client()
-    // ListObjectsV2, as the full scan sends, rather than HeadObject, which a
-    // bucket's CORS rule may not allow. A client per request, as there.
-    const firstUnder = async (prefix: string | undefined) => {
-      const client = createS3Client(
-        s3,
-        bucketOptions,
-        await requestCredentials(),
-      )
-      return client
-        .send(
+  // One client while the credentials hold, so lookups share its connections.
+  // Compared by value: each request returns a fresh copy.
+  let current:
+    | { id: string; client: ReturnType<typeof createS3Client> }
+    | undefined
+  try {
+    await scanListed(inputPaths, ctx, 'S3 bucket scan', async () => {
+      const s3 = await loadS3Client()
+      const clientFor = (credentials: TS3Credentials | undefined) => {
+        const id = JSON.stringify([
+          credentials?.accessKeyId,
+          credentials?.secretAccessKey,
+          credentials?.sessionToken,
+        ])
+        if (current?.id !== id) {
+          current?.client.destroy()
+          current = {
+            id,
+            client: createS3Client(s3, bucketOptions, credentials),
+          }
+        }
+        return current.client
+      }
+      // ListObjectsV2, as the full scan sends, rather than HeadObject, which a
+      // bucket's CORS rule may not allow.
+      const firstUnder = async (prefix: string | undefined) =>
+        clientFor(await requestCredentials()).send(
           new s3.ListObjectsV2Command({
             Bucket: bucketOptions.bucketName,
             Prefix: prefix,
             MaxKeys: 1,
           }),
         )
-        .finally(() => client.destroy())
-    }
-    // A bucket that cannot be listed fails the run, as in a full scan.
-    await firstUnder(bucketOptions.prefix)
-    return async (entry, onRejected) => {
-      // A listing reports the key as both path and name, under the prefix.
-      const key = entry.name
-      if (entry.path !== key || !key.startsWith(bucketOptions.prefix ?? '')) {
-        return emitUnlocated(entry, ctx, onRejected)
+      // A bucket that cannot be listed fails the run, as in a full scan.
+      await firstUnder(bucketOptions.prefix)
+      return async (entry, onRejected) => {
+        // A listing reports the key as both path and name, under the prefix.
+        const key = entry.name
+        if (entry.path !== key || !key.startsWith(bucketOptions.prefix ?? '')) {
+          return emitUnlocated(entry, ctx, onRejected)
+        }
+        let item: { Key?: string; Size?: number } | undefined
+        try {
+          // A key sorts first among the keys it prefixes. Needs a
+          // general-purpose bucket: a directory bucket lists unsorted and
+          // takes only `/` prefixes.
+          item = (await firstUnder(key)).Contents?.[0]
+        } catch (error) {
+          return emitUnlocated(
+            entry,
+            ctx,
+            onRejected,
+            safeReadErrorMessage(error),
+          )
+        }
+        if (item?.Key !== key || item.Size === undefined) {
+          return emitUnlocated(entry, ctx, onRejected, MISSING_KEY_ERROR)
+        }
+        await feedS3Item(item, ctx, onRejected)
       }
-      let item: { Key?: string; Size?: number } | undefined
-      try {
-        // A key sorts first among the keys it prefixes. Needs a general-purpose
-        // bucket: a directory bucket lists unsorted and takes only `/` prefixes.
-        item = (await firstUnder(key)).Contents?.[0]
-      } catch (error) {
-        return emitUnlocated(
-          entry,
-          ctx,
-          onRejected,
-          safeReadErrorMessage(error),
-        )
-      }
-      if (item?.Key !== key || item.Size === undefined) {
-        return emitUnlocated(entry, ctx, onRejected, MISSING_KEY_ERROR)
-      }
-      await feedS3Item(item, ctx, onRejected)
-    }
-  })
+    })
+  } finally {
+    // Destroyed, or its keep-alive sockets outlive the scan.
+    current?.client.destroy()
+  }
 }
 
 // --------------------------------------------------------------------------
