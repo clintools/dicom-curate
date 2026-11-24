@@ -1,3 +1,20 @@
+# [0.45.0](https://github.com/clintools/dicom-curate/compare/v0.44.0...v0.45.0) (2026-11-24)
+
+
+### Bug Fixes
+
+* report a directory lookup that runs out of retries as a read failure ([c531df7](https://github.com/clintools/dicom-curate/commit/c531df7f2b191c741ad1dd2290b2bc793620f0da))
+
+
+### Features
+
+* process only the files listed in inputPaths ([31fde82](https://github.com/clintools/dicom-curate/commit/31fde820ab282e8dfc0bacc84def9159b2bf0181))
+
+
+### Performance Improvements
+
+* share one S3 client across listed keys while the credentials hold ([0393a5c](https://github.com/clintools/dicom-curate/commit/0393a5cd63c4c47e834aac45bee06c0de850e743))
+
 # [0.44.0](https://github.com/clintools/dicom-curate/compare/v0.43.0...v0.44.0) (2026-11-23)
 
 
