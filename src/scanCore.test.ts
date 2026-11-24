@@ -1445,6 +1445,20 @@ describe('listed scans (inputPaths)', () => {
       ])
     })
 
+    it('reports a directory lookup that never succeeds as a read error, once', async () => {
+      const { root } = makeTree()
+      root.failLookups = Infinity
+      const msgs = await runListed(root, [
+        { path: 'root/series', name: 'a.dcm' },
+        { path: 'root/series', name: 'b.dcm' },
+      ])
+      expect(errorMessages(msgs).map((e) => e.errors)).toEqual([
+        ['Unable to read file (filesystem error): NotReadableError'],
+        ['Unable to read file (filesystem error): NotReadableError'],
+      ])
+      expect(requestedDelays()).toEqual(LIST_RETRY_DELAYS_MS)
+    })
+
     it('fails every file under a directory that never lists, once', async () => {
       const { root, series } = makeTree()
       series.failListings = Infinity

@@ -122,7 +122,8 @@ async function* listEntriesWithRetry(
 /**
  * Retries a child lookup as a listing does, but a missing, wrong-kind or
  * invalidly named child (a TypeError) fails at once so a stale list does not
- * wait out the backoff for each.
+ * wait out the backoff for each. Throws the lookup's own error: nothing was
+ * listed, so it is reported as a read failure.
  */
 async function lookUpWithRetry<T extends FileSystemHandle>(
   lookUp: () => Promise<T>,
@@ -136,8 +137,8 @@ async function lookUpWithRetry<T extends FileSystemHandle>(
         (error instanceof DOMException &&
           (error.name === 'NotFoundError' ||
             error.name === 'TypeMismatchError'))
-      if (definitive) throw error
-      await backOffOrThrow(attempt, error)
+      if (definitive || attempt >= LIST_RETRY_DELAYS_MS.length) throw error
+      await delay(LIST_RETRY_DELAYS_MS[attempt])
     }
   }
 }
@@ -892,13 +893,9 @@ export async function scanListedHandles(
       let spelled: boolean
       try {
         const parent = await dirAt(segments)
-        // Unwrapped so a file lookup that exhausts its retries is not
-        // reported as a directory listing failure.
         fileHandle = await lookUpWithRetry(() =>
           parent.getFileHandle(entry.name),
-        ).catch((error) => {
-          throw error instanceof DirectoryListingError ? error.listError : error
-        })
+        )
         spelled = await spelledAsWalked(segments, entry.name)
       } catch (error) {
         return emitUnlocated(entry, ctx, onRejected, lookupErrorMessage(error))
